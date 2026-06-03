@@ -1,0 +1,19 @@
+.DS_Store
+.AppleDouble
+*.swp
+*.swo
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+node_modules/
+.env
+.env.local
+*.log
+.idea/
+.vscode/
+# Local orchestrator data lives in ~/.orchestrator, but if anything leaks here:
+data/
+*.db
+*.db-journal

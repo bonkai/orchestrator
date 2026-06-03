@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+  <main style="grid-column: 1 / -1;">
+    <div class="page-head">
+      <a href="/?active={{ d.project_id }}">← back to {{ d.project_slug }}</a>
+      <h2>dispatch #{{ d.id }}</h2>
+      <span class="badge badge-{{ d.status }}">{{ d.status }}</span>
+      {% if d.outcome_reason %}<span class="muted">({{ d.outcome_reason }})</span>{% endif %}
+      <span class="muted">{{ fmt_duration(d.duration_s) }} · {{ fmt_rel(d.created_at) }}</span>
+      {% if d.status == 'running' %}
+        <button class="small" type="button"
+                hx-post="/dispatch/{{ d.id }}/open" hx-swap="none"
+                title="bring this dispatch's iTerm tab to the front">open in iTerm</button>
+      {% elif d.session_id %}
+        <button class="small" type="button"
+                hx-post="/dispatch/{{ d.id }}/open" hx-swap="none"
+                title="open a new iTerm tab and `claude --resume` this session">resume in iTerm</button>
+      {% endif %}
+      {% if d.transcript_path %}
+        <a href="/dispatch/{{ d.id }}/transcript" style="margin-left:auto;">raw transcript →</a>
+      {% endif %}
+    </div>
+
+    <div class="pane reveal">
+      <h3>original task</h3>
+      <pre>{{ d.user_task }}</pre>
+    </div>
+
+    <div class="pane reveal">
+      <h3>live activity
+        <span class="muted" style="font-weight: normal; font-size: 12px;">
+          (auto-refreshes every 1s while running)
+        </span>
+      </h3>
+      <div id="activity-log" data-dispatch-id="{{ d.id }}" data-status="{{ d.status }}"
+           style="background: var(--surface-inset); padding: 0.85rem 1rem; border-radius: var(--radius-sm);
+                  border: 1px solid var(--border); font-family: var(--mono); font-size: 12px;
+                  max-height: 480px; overflow-y: auto;">
+        <div class="muted" id="activity-empty" style="padding: 0.5rem;">loading…</div>
+      </div>
+      <p class="muted" id="activity-status" style="font-size: 11px; margin-top: 0.4rem;"></p>
+    </div>
+
+    <script>
+    (function() {
+      var el = document.getElementById('activity-log');
+      var empty = document.getElementById('activity-empty');
+      var statusLine = document.getElementById('activity-status');
+      var dispatchId = el.dataset.dispatchId;
+      var since = 0;
+      var status = el.dataset.status;
+      var stopped = false;
+
+      function fmtRelTs(ts) {
+        var d = new Date(ts * 1000);
+        return d.toLocaleTimeString();
+      }
+      function esc(s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      function badge(text, color) {
+        return '<span style="display:inline-block; padding:1px 7px; border-radius:999px; ' +
+               'background:' + color + '; color:#06141a; font-size:10px; font-weight:600; ' +
+               'text-transform:uppercase; margin-right:6px;">' + esc(text) + '</span>';
+      }
+      function renderEvent(ev) {
+        var p = ev.payload || {};
+        var line = '<div style="padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.06);">';
+        line += '<span class="muted" style="font-size:10px;">' + fmtRelTs(ev.ts) + '</span> ';
+        if (ev.kind === 'tool_use') {
+          line += badge(p.tool_name || '?', '#22d3ee');
+          line += '<span style="color:#e8ebf1;">called</span>';
+        } else if (ev.kind === 'tool_result') {
+          line += badge(p.tool_name || '?', '#5ed39a');
+          line += '<span style="color:#aeb6c4;">returned</span>';
+          if (p.response_bytes) {
+            line += ' <span class="muted">(' + p.response_bytes + 'B)</span>';
+          }
+          if (p.response_preview) {
+            var trunc = p.response_preview.length > 120 ?
+                        p.response_preview.slice(0, 120) + '…' : p.response_preview;
+            line += '<div style="margin-left:60px; color:#8a93a1; font-size:11px;">' +
+                    esc(trunc) + '</div>';
+          }
+        } else if (ev.kind === 'stage') {
+          var color = '#f0c659';
+          if (p.stage === 'completed' || p.stage === 'summarized' || p.stage === 'indexed') color = '#5ed39a';
+          if (p.stage === 'spawn_failed' || p.stage === 'summarizer_failed' || p.stage === 'loop_detected') color = '#f0676f';
+          line += badge(p.stage || 'stage', color);
+          var extras = [];
+          for (var k in p) {
+            if (k === 'stage') continue;
+            var v = p[k];
+            if (typeof v === 'object') v = JSON.stringify(v);
+            extras.push(esc(k) + '=' + esc(v));
+          }
+          if (extras.length) line += '<span class="muted">' + extras.join(' ') + '</span>';
+        } else {
+          line += badge(ev.kind, '#8a93a1');
+        }
+        line += '</div>';
+        return line;
+      }
+
+      function poll() {
+        if (stopped) return;
+        fetch('/api/events/' + dispatchId + '?since=' + since)
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            status = data.status;
+            if (data.events && data.events.length) {
+              if (empty) { empty.remove(); empty = null; }
+              var html = data.events.map(renderEvent).join('');
+              el.insertAdjacentHTML('beforeend', html);
+              el.scrollTop = el.scrollHeight;
+              since = data.next_since;
+            }
+            statusLine.textContent = 'status: ' + status +
+              (status === 'running' ? ' · polling…' : ' · done polling');
+            if (status === 'completed' || status === 'killed' || status === 'failed' || status === 'paused') {
+              // Poll a couple more times to catch trailing summarizer events
+              if (!stopped) {
+                setTimeout(function() {
+                  stopped = false;
+                  poll();
+                  setTimeout(function() { stopped = true; }, 4000);
+                }, 2000);
+                stopped = true;
+              }
+              return;
+            }
+            setTimeout(poll, 1000);
+          })
+          .catch(function(e) {
+            statusLine.textContent = 'poll error: ' + e + ' — retrying in 5s';
+            setTimeout(poll, 5000);
+          });
+      }
+      poll();
+    })();
+    </script>
+
+    {% if d.summary_md %}
+      <div class="pane reveal">
+        <h3 style="margin-top: 0;">summary</h3>
+        <p>{{ d.summary_md }}</p>
+        {% if tags %}
+          <div style="margin-top: 0.6rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
+            {% for t in tags %}<span class="badge badge-pending">{{ t }}</span>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      {% if d.what_worked %}
+      <div class="pane reveal">
+        <h3 style="margin-top: 0;">what worked</h3>
+        <pre style="white-space: pre-wrap; font-family: inherit;">{{ d.what_worked }}</pre>
+      </div>
+      {% endif %}
+
+      {% if d.what_broke %}
+      <div class="pane reveal">
+        <h3 style="margin-top: 0;">what broke</h3>
+        <pre style="white-space: pre-wrap; font-family: inherit;">{{ d.what_broke }}</pre>
+      </div>
+      {% endif %}
+
+      {% if d.lessons %}
+      <div class="pane reveal">
+        <h3 style="margin-top: 0;">lessons</h3>
+        <pre style="white-space: pre-wrap; font-family: inherit;">{{ d.lessons }}</pre>
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="pane reveal">
+        <p class="muted">
+          {% if d.status in ('completed','killed','orphaned') %}
+            Summary still being generated (or summarizer failed — check server logs).
+            Reload in a few seconds.
+          {% else %}
+            Dispatch hasn't finished yet — summary appears here when it's done.
+          {% endif %}
+        </p>
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

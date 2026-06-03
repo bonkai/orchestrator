@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+  <main style="grid-column: 1 / -1;">
+    <div class="page-head">
+      <a href="/?active={{ project.id }}">← back</a>
+      <h2>applied edits: {{ project.slug }}</h2>
+      <span class="muted">{{ results|length }} edit(s) attempted</span>
+    </div>
+
+    {% if not results %}
+      <div class="pane">
+        <p class="muted">No edits were selected.</p>
+      </div>
+    {% endif %}
+
+    {% for proposal, result in results %}
+      <div class="pane" style="border-color: {% if result.ok %}var(--ok){% else %}var(--bad){% endif %};">
+        <h3 style="margin-top: 0;">
+          {% if result.ok %}✓{% else %}✗{% endif %}
+          <code>{{ proposal.action }}</code>
+          <code>{{ proposal.path }}</code>
+        </h3>
+        {% if result.ok %}
+          <p class="muted">wrote {{ result.written_bytes }} bytes to <code>{{ result.path }}</code></p>
+        {% else %}
+          <p style="color: var(--bad);">{{ result.error }}</p>
+        {% endif %}
+        {% if proposal.rationale %}
+          <p><strong>rationale:</strong> {{ proposal.rationale }}</p>
+        {% endif %}
+        <details>
+          <summary class="muted" style="cursor: pointer;">content</summary>
+          <pre style="white-space: pre-wrap; background: var(--surface-inset); padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-top: 0.5rem;">{{ proposal.content }}</pre>
+        </details>
+      </div>
+    {% endfor %}
+
+    {% if rewritten_prompt %}
+      <div class="pane">
+        <h3 style="margin-top: 0;">now dispatch the rewritten task</h3>
+        <form method="post" action="/dispatch"
+              onsubmit="orchMarkLoading(this.querySelector('button[type=submit]'), 'dispatching…');">
+          <input type="hidden" name="project_id" value="{{ project.id }}">
+          <input type="hidden" name="task" value="{{ rewritten_prompt }}">
+          <input type="hidden" name="wall_cap_s" value="{{ wall_cap_s }}">
+          <button type="submit" class="primary">dispatch rewritten →</button>
+        </form>
+        <p class="muted" style="font-size: 12px; margin-top: 0.5rem;">
+          Or <a href="/?active={{ project.id }}">go back</a> without dispatching.
+        </p>
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

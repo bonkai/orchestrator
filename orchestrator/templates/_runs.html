@@ -1,0 +1,71 @@
+<div class="runs-grid">
+  {% if active_id %}
+  <div class="runs-col">
+    <h3>this project</h3>
+    {% if runs %}
+      <table>
+        <thead><tr><th>#</th><th>status</th><th>task</th><th>dur</th><th>when</th><th></th></tr></thead>
+        <tbody>
+        {% for r in runs %}
+          <tr class="status-{{ r.status }}">
+            <td>{{ r.id }}</td>
+            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+              {% if r.outcome_reason %}<small>({{ r.outcome_reason }})</small>{% endif %}
+              {% if r.tool_calls and r.tool_calls > 0 %}
+                <small class="muted" title="tool calls so far">· {{ r.tool_calls }}t</small>
+              {% endif %}
+            </td>
+            <td class="task-cell">{{ r.user_task[:120] }}{% if r.user_task|length > 120 %}…{% endif %}</td>
+            <td>{{ fmt_duration(r.duration_s) }}</td>
+            <td>{{ fmt_rel(r.created_at) }}</td>
+            <td style="white-space: nowrap;">
+              {% if r.status == 'running' %}
+                <button class="small" type="button"
+                        hx-post="/dispatch/{{ r.id }}/open" hx-swap="none"
+                        title="bring this dispatch's iTerm tab to the front">open</button>
+                <form method="post" action="/dispatch/{{ r.id }}/kill" style="display:inline;"
+                      hx-post="/dispatch/{{ r.id }}/kill" hx-swap="none"
+                      hx-confirm="Kill dispatch #{{ r.id }}?">
+                  <button class="danger small" type="submit">stop</button>
+                </form>
+              {% else %}
+                {% if r.session_id %}
+                  <button class="small" type="button"
+                          hx-post="/dispatch/{{ r.id }}/open" hx-swap="none"
+                          title="open a new iTerm tab and `claude --resume` this session">resume</button>
+                {% endif %}
+                <a href="/dispatch/{{ r.id }}">view</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">no dispatches yet</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="runs-col">
+    <h3>all recent</h3>
+    {% if all_runs %}
+      <table>
+        <thead><tr><th>#</th><th>project</th><th>status</th><th>task</th><th>dur</th></tr></thead>
+        <tbody>
+        {% for r in all_runs %}
+          <tr class="status-{{ r.status }}">
+            <td>{{ r.id }}</td>
+            <td>{{ r.project_slug }}</td>
+            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+            <td class="task-cell">{{ r.user_task[:80] }}{% if r.user_task|length > 80 %}…{% endif %}</td>
+            <td>{{ fmt_duration(r.duration_s) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">nothing yet</p>
+    {% endif %}
+  </div>
+</div>

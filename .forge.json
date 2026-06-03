@@ -1,0 +1,11 @@
+{
+  "name": "orchestrator",
+  "description": "Browser UI that dispatches enriched tasks to Claude Code across many projects, learns from outcomes.",
+  "layout": {
+    "memory_dirs": ["memory"],
+    "knowledge_dirs": ["knowledge"],
+    "task_dirs": ["tasks"],
+    "claude_md": "CLAUDE.md",
+    "plan_md": "PLAN.md"
+  }
+}

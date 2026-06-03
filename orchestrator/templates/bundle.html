@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+  <main style="grid-column: 1 / -1;">
+    <div class="page-head">
+      <a href="/?active={{ project.id }}">← back</a>
+      <h2>context pack: {{ project.slug }}</h2>
+      <span class="muted">{{ pack.total_chars }} chars · {{ pack.sections|length }} sections{% if pack.over_budget %} · <span style="color:var(--warn)">over budget</span>{% endif %}</span>
+      <a href="/bundle/{{ project.id }}/raw" style="margin-left: auto;" target="_blank">view raw .md →</a>
+    </div>
+
+    {% if pack.sections|length == 0 %}
+      <div class="pane">
+        <p class="muted">No bundle sections found. This project has no CLAUDE.md, memory/, knowledge/, tasks/, or git history yet.</p>
+      </div>
+    {% else %}
+      <div class="pane">
+        <details open>
+          <summary style="cursor: pointer; color: var(--muted); margin-bottom: 0.5rem;">section summary</summary>
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead><tr style="color:var(--muted)">
+              <th style="text-align:left; padding: 4px;">#</th>
+              <th style="text-align:left; padding: 4px;">section</th>
+              <th style="text-align:left; padding: 4px;">source</th>
+              <th style="text-align:right; padding: 4px;">chars</th>
+            </tr></thead>
+            <tbody>
+              {% for s in pack.sections %}
+              <tr>
+                <td style="padding: 4px;">{{ loop.index }}</td>
+                <td style="padding: 4px;">{{ s.title }}</td>
+                <td style="padding: 4px;"><code>{{ s.source }}</code></td>
+                <td style="padding: 4px; text-align: right;">{{ s.chars }}{% if s.truncated %} ✂{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      </div>
+      <div class="pane">
+        <pre style="white-space: pre-wrap; word-wrap: break-word; font-size: 12px; line-height: 1.4;">{{ markdown }}</pre>
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

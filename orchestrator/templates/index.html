@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+  <aside class="sidebar">
+    <h3>saved projects</h3>
+    {% if saved_projects %}
+      <ul class="saved-list">
+        {% for p in saved_projects %}
+          <li>
+            <form method="post" action="/tabs/open/{{ p.id }}">
+              <button type="submit" class="link">{{ p.slug }}</button>
+            </form>
+            <small>{{ p.path }}</small>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">(all open or none added yet)</p>
+    {% endif %}
+  </aside>
+
+  <main>
+    <nav class="tabs">
+      {% for t in tabs %}
+        <div class="tab {% if t.project_id == active_id %}active{% endif %}">
+          <a href="/?active={{ t.project_id }}" class="tab-label">{{ t.slug }}</a>
+          <form method="post" action="/tabs/close/{{ t.project_id }}" class="tab-close-form">
+            <button type="submit" class="tab-close" title="close tab">×</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="muted">no tabs open — add a project or open a saved one ←</p>
+      {% endfor %}
+    </nav>
+
+    {% if active_project %}
+    <section class="pane reveal">
+      <div class="pane-header">
+        <h2>{{ active_project.slug }}</h2>
+        <code>{{ active_project.path }}</code>
+        <div class="pane-actions">
+          <form method="post" action="/project/{{ active_project.id }}/onboard"
+                onsubmit="orchMarkLoading(this.querySelector('button[type=submit]'), 'analyzing…');">
+            <button type="submit" class="secondary small"
+                    title="Scan the project and auto-apply safe improvements. Safe to re-run anytime to check for new gaps.">analyze project →</button>
+          </form>
+          <a href="/project/{{ active_project.id }}/onboard/history"
+             title="See every past analyze-project round and what each one applied"
+             class="chip">history</a>
+          <form method="post" action="/projects/remove/{{ active_project.id }}"
+                onsubmit="return confirm('Forget project &quot;{{ active_project.slug }}&quot; and all its dispatch history?');"
+                class="forget">
+            <button type="submit" class="danger small">forget</button>
+          </form>
+        </div>
+      </div>
+
+      <form method="post" class="dispatch-form" id="dispatch-form"
+            data-project-id="{{ active_project.id }}">
+        <input type="hidden" name="project_id" value="{{ active_project.id }}">
+        <textarea name="task" id="task-textarea" rows="5"
+                  placeholder="What do you want claude to do in this project? (drag files anywhere into this pane to attach them)" required></textarea>
+
+        <div id="drop-zone" class="drop-zone">
+          <div id="drop-empty" class="muted" style="font-size: 12px; text-align: center;">drop files here to attach (or use the file picker below)</div>
+          <ul id="att-list" style="list-style: none; padding: 0; margin: 0; display: none;"></ul>
+          <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+            <input type="file" id="file-picker" multiple style="font-size: 11px;">
+            <span id="att-status" class="muted" style="font-size: 11px;"></span>
+          </div>
+        </div>
+
+        <div class="dispatch-controls">
+          <label>wall-cap (s, ≤6h): <input type="number" name="wall_cap_s" value="14400" min="60" max="21600" title="wall-clock cap in seconds — default 4h (14400), max 6h (21600). On timeout the dispatch is paused (resumable), not killed."></label>
+          <label>effort:
+            <select name="effort">
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max" selected>max</option>
+            </select>
+          </label>
+          <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
+          <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
+          <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+        </div>
+        <div id="submit-status" class="muted" style="display:none; font-size: 12px; margin-top: 0.5rem;"></div>
+      </form>
+
+      <script>
+      (function() {
+        // Show a spinner + elapsed counter on dispatch form submit so the
+        // user knows the orchestrator is working during the ~5-15s rewrite.
+        var form = document.getElementById('dispatch-form');
+        var statusEl = document.getElementById('submit-status');
+        var projectId = form.dataset.projectId;
+        var dropZone = document.getElementById('drop-zone');
+        var dropEmpty = document.getElementById('drop-empty');
+        var attList = document.getElementById('att-list');
+        var picker = document.getElementById('file-picker');
+        var attStatus = document.getElementById('att-status');
+
+        function bytesPretty(n) {
+          if (n < 1024) return n + 'B';
+          if (n < 1024*1024) return (n/1024).toFixed(1) + 'KB';
+          return (n/1024/1024).toFixed(1) + 'MB';
+        }
+        function renderAttachments(files) {
+          attList.innerHTML = '';
+          if (!files || !files.length) {
+            attList.style.display = 'none';
+            dropEmpty.style.display = '';
+            return;
+          }
+          dropEmpty.style.display = 'none';
+          attList.style.display = '';
+          files.forEach(function(f) {
+            var li = document.createElement('li');
+            li.style.cssText = 'padding: 3px 0; font-size: 12px; display: flex; align-items: center; gap: 0.5rem;';
+            li.innerHTML = '<span style="color:#5ed39a;">✓</span> <code>' + f.name +
+                           '</code> <span class="muted">(' + bytesPretty(f.size) + ')</span>';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '×';
+            btn.style.cssText = 'margin-left: auto; padding: 0 6px; font-size: 12px;';
+            btn.addEventListener('click', function() { removeFile(f.name); });
+            li.appendChild(btn);
+            attList.appendChild(li);
+          });
+        }
+        function uploadFile(file) {
+          if (file.size > 20*1024*1024) {
+            attStatus.textContent = file.name + ' too large (20MB cap)';
+            return;
+          }
+          attStatus.textContent = 'uploading ' + file.name + '…';
+          var fd = new FormData();
+          fd.append('file', file);
+          fetch('/attachments/' + projectId + '/upload', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data.ok) {
+                attStatus.textContent = 'added ' + data.added;
+                renderAttachments(data.files);
+                setTimeout(function() { attStatus.textContent = ''; }, 2000);
+              } else {
+                attStatus.textContent = 'error: ' + (data.error || 'upload failed');
+              }
+            })
+            .catch(function(e) { attStatus.textContent = 'error: ' + e; });
+        }
+        function removeFile(name) {
+          var fd = new FormData();
+          fd.append('name', name);
+          fetch('/attachments/' + projectId + '/remove', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderAttachments(data.files); });
+        }
+        function loadList() {
+          fetch('/attachments/' + projectId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderAttachments(data.files); });
+        }
+
+        // Drag-drop on the whole pane (not just the drop zone — that's tiny)
+        var pane = form.closest('.pane') || form;
+        ['dragenter','dragover'].forEach(function(ev) {
+          pane.addEventListener(ev, function(e) {
+            e.preventDefault();
+            dropZone.classList.add('dragging');
+          });
+        });
+        ['dragleave','drop'].forEach(function(ev) {
+          pane.addEventListener(ev, function(e) {
+            e.preventDefault();
+            dropZone.classList.remove('dragging');
+          });
+        });
+        pane.addEventListener('drop', function(e) {
+          e.preventDefault();
+          var files = e.dataTransfer && e.dataTransfer.files;
+          if (!files) return;
+          for (var i = 0; i < files.length; i++) uploadFile(files[i]);
+        });
+        picker.addEventListener('change', function() {
+          for (var i = 0; i < picker.files.length; i++) uploadFile(picker.files[i]);
+          picker.value = '';
+        });
+
+        loadList();
+
+        // Fire-and-forget send. Both buttons POST to /send via fetch() so
+        // the browser never navigates — the tab stays interactive while the
+        // rewrite (~5-15s) + dispatch happen in a background task on the
+        // server. The runs panel below polls every 3s and shows the row
+        // once the dispatch is created.
+        var btnRaw = document.getElementById('btn-send-raw');
+        var btnRewrite = document.getElementById('btn-send-rewrite');
+        var textarea = document.getElementById('task-textarea');
+        var statusTimer = null;
+
+        function flashStatus(msg, isError) {
+          if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+          statusEl.style.display = 'block';
+          statusEl.style.color = isError ? '#f0676f' : '';
+          statusEl.textContent = msg;
+          statusTimer = setTimeout(function() {
+            statusEl.style.display = 'none';
+            statusEl.textContent = '';
+          }, 5000);
+        }
+
+        function send(rewrite) {
+          var task = (textarea.value || '').trim();
+          if (!task) { flashStatus('empty task', true); return; }
+          var fd = new FormData();
+          fd.append('project_id', projectId);
+          fd.append('task', task);
+          fd.append('wall_cap_s', form.querySelector('input[name=wall_cap_s]').value);
+          fd.append('effort', form.querySelector('select[name=effort]').value);
+          fd.append('rewrite', rewrite ? 'true' : 'false');
+
+          // /send is fire-and-forget — it returns in ~50ms after scheduling a
+          // background task, then the rewriter (5-15s) + dispatch creation
+          // run server-side. So we keep the busy state visible until the
+          // new dispatch row actually appears in the runs panel below
+          // (or a 45s timeout fires as a safety net).
+          var activeBtn = rewrite ? btnRewrite : btnRaw;
+          var otherBtn = rewrite ? btnRaw : btnRewrite;
+          var globalSpinner = document.getElementById('global-spinner');
+          var runsSection = document.querySelector('.runs');
+          var rowsBefore = runsSection
+            ? runsSection.querySelectorAll('tbody tr').length : 0;
+
+          window.orchMarkLoading(activeBtn, rewrite ? 'rewriting…' : 'dispatching…');
+          otherBtn.disabled = true;
+          if (globalSpinner) globalSpinner.classList.add('visible');
+
+          if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+          statusEl.style.display = 'block';
+          statusEl.style.color = '#67e8f9';
+          statusEl.style.fontSize = '13px';
+          statusEl.innerHTML = '<span class="spinner"></span> Queued — ' +
+            (rewrite ? 'rewriting then dispatching (~5–15s). ' : 'dispatching. ') +
+            'Safe to leave this tab; the runs panel below will update when it’s ready.';
+
+          var observer = null, watchdog = null, settled = false;
+          function settle(reason) {
+            if (settled) return;
+            settled = true;
+            if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+            if (observer) { observer.disconnect(); observer = null; }
+            window.orchClearLoading(activeBtn);
+            otherBtn.disabled = false;
+            if (globalSpinner) globalSpinner.classList.remove('visible');
+            if (reason === 'appeared') {
+              statusEl.style.color = '#5ed39a';
+              statusEl.innerHTML = '✓ Dispatch is live — see the runs panel below.';
+            } else if (reason === 'timeout') {
+              statusEl.style.color = '#f0c659';
+              statusEl.innerHTML = 'Still working server-side after 45s — ' +
+                'check the runs panel below or the server logs. (Rewriter may be slow.)';
+            }
+            if (reason !== 'error') {
+              statusTimer = setTimeout(function() {
+                statusEl.style.display = 'none';
+                statusEl.textContent = '';
+              }, 8000);
+            }
+          }
+
+          fetch('/send', { method: 'POST', body: fd })
+            .then(function(r) {
+              if (!r.ok) return r.text().then(function(t) { throw new Error(t || ('HTTP ' + r.status)); });
+              return r.json();
+            })
+            .then(function(data) {
+              textarea.value = '';
+              // Clear dropzone optimistically: the server moves staged files
+              // into the dispatch dir as part of /send's background task, so
+              // the stash will be empty soon. Reconcile once after a delay.
+              renderAttachments([]);
+              attStatus.textContent = '';
+              setTimeout(loadList, 2500);
+
+              // Watch the 3s-polled runs panel for a new row, then settle.
+              if (runsSection) {
+                observer = new MutationObserver(function() {
+                  var rowsAfter = runsSection.querySelectorAll('tbody tr').length;
+                  if (rowsAfter > rowsBefore) settle('appeared');
+                });
+                observer.observe(runsSection, { childList: true, subtree: true });
+              }
+              watchdog = setTimeout(function() { settle('timeout'); }, 45000);
+            })
+            .catch(function(e) {
+              statusEl.style.color = '#f0676f';
+              statusEl.textContent = 'error: ' + e.message;
+              settle('error');
+            });
+        }
+
+        btnRaw.addEventListener('click', function() { send(false); });
+        btnRewrite.addEventListener('click', function() { send(true); });
+      })();
+      </script>
+    </section>
+    {% else %}
+      <section class="pane empty">
+        <p class="muted">No project selected. Add one above or open a saved project.</p>
+      </section>
+    {% endif %}
+
+    <section class="runs"
+             hx-get="/partials/runs?active={{ active_id or '' }}"
+             hx-trigger="every 3s"
+             hx-swap="innerHTML">
+      {% include "_runs.html" %}
+    </section>
+  </main>
+</div>
+{% endblock %}

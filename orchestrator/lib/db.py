@@ -1,0 +1,620 @@
+"""SQLite schema + helpers. One DB file at ~/.orchestrator/orchestrator.db."""
+
+import json
+import sqlite3
+import time
+from contextlib import contextmanager
+from pathlib import Path
+
+DATA_DIR = Path.home() / ".orchestrator"
+DB_PATH = DATA_DIR / "orchestrator.db"
+TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    path         TEXT NOT NULL UNIQUE,
+    slug         TEXT NOT NULL,
+    layout_json  TEXT,
+    added_at     INTEGER NOT NULL,
+    last_used_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ui_tabs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL UNIQUE,
+    opened_at   INTEGER NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS dispatches (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id        INTEGER NOT NULL,
+    created_at        INTEGER NOT NULL,
+    started_at        INTEGER,
+    ended_at          INTEGER,
+    status            TEXT NOT NULL DEFAULT 'pending',
+    user_task         TEXT NOT NULL,
+    rewritten_prompt  TEXT,
+    bundle_hash       TEXT,
+    session_id        TEXT,
+    terminal_pid      INTEGER,
+    claude_pid        INTEGER,
+    transcript_path   TEXT,
+    wall_clock_cap_s  INTEGER NOT NULL DEFAULT 1800,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatches_status ON dispatches(status);
+CREATE INDEX IF NOT EXISTS idx_dispatches_project ON dispatches(project_id);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+    dispatch_id     INTEGER PRIMARY KEY,
+    outcome         TEXT NOT NULL,
+    reason          TEXT,
+    duration_s      INTEGER,
+    summary_md      TEXT,
+    what_worked     TEXT,
+    what_broke      TEXT,
+    lessons         TEXT,
+    tags_json       TEXT,
+    FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    dispatch_id  INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    UNIQUE(dispatch_id, kind),
+    FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE
+);
+
+-- Phase 6: dense vectors for semantic cross-project retrieval.
+-- `vector` is float32 little-endian packed bytes; cosine is computed in Python.
+CREATE TABLE IF NOT EXISTS dispatch_embeddings (
+    dispatch_id  INTEGER PRIMARY KEY,
+    project_id   INTEGER NOT NULL,
+    model        TEXT NOT NULL,
+    dim          INTEGER NOT NULL,
+    vector       BLOB NOT NULL,
+    created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_project ON dispatch_embeddings(project_id);
+
+-- QoL: stream of live events for the dispatch detail page timeline.
+-- Kinds: 'stage' (orchestrator lifecycle), 'tool_use', 'tool_result'.
+-- payload_json is a small dict with kind-specific fields.
+CREATE TABLE IF NOT EXISTS dispatch_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    dispatch_id   INTEGER NOT NULL,
+    ts            INTEGER NOT NULL,
+    kind          TEXT NOT NULL,
+    payload_json  TEXT,
+    FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_events_dispatch ON dispatch_events(dispatch_id, id);
+
+-- Phase 9: persistent log of project onboarding runs. Each "analyze project"
+-- click writes one row so the user can rerun analysis over time and see
+-- exactly what changed each round. `result_json` is the full serialized
+-- OnboardingResult — applied/skipped/failed lists, edits, recommendations,
+-- scan — enough to fully re-render the detail page.
+CREATE TABLE IF NOT EXISTS onboarding_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id       INTEGER NOT NULL,
+    created_at       INTEGER NOT NULL,
+    ok               INTEGER NOT NULL DEFAULT 0,
+    model            TEXT,
+    duration_s       REAL,
+    cost_usd         REAL,
+    project_summary  TEXT,
+    error            TEXT,
+    applied_count    INTEGER NOT NULL DEFAULT 0,
+    skipped_count    INTEGER NOT NULL DEFAULT 0,
+    failed_count     INTEGER NOT NULL DEFAULT 0,
+    result_json      TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_runs_project ON onboarding_runs(project_id, id);
+"""
+
+
+def now() -> int:
+    return int(time.time())
+
+
+@contextmanager
+def conn():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    # timeout=10 → wait up to 10s if another writer holds the lock instead of
+    # immediately raising OperationalError. WAL mode (set in init_db) lets
+    # readers + one writer proceed concurrently, which matters with 10+
+    # parallel dispatches all writing to the same db.
+    c = sqlite3.connect(DB_PATH, timeout=10.0)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA foreign_keys = ON")
+    c.execute("PRAGMA busy_timeout = 10000")
+    try:
+        yield c
+        c.commit()
+    finally:
+        c.close()
+
+
+def init_db():
+    with conn() as c:
+        # WAL allows concurrent reads with one writer. NORMAL synchronous is
+        # safe with WAL and noticeably faster than FULL for our workload.
+        c.execute("PRAGMA journal_mode = WAL")
+        c.execute("PRAGMA synchronous = NORMAL")
+        c.executescript(SCHEMA)
+
+
+# ─── projects ─────────────────────────────────────────────────────────────
+
+def slugify(name: str) -> str:
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s or "project"
+
+
+def add_project(path: str) -> dict:
+    p = Path(path).expanduser().resolve()
+    if not p.is_dir():
+        raise ValueError(f"Not a directory: {p}")
+    slug = slugify(p.name)
+    layout = None
+    forge_json = p / ".forge.json"
+    if forge_json.is_file():
+        try:
+            layout = forge_json.read_text()
+        except Exception:
+            pass
+    with conn() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO projects(path, slug, layout_json, added_at) "
+            "VALUES (?, ?, ?, ?)",
+            (str(p), slug, layout, now()),
+        )
+        row = c.execute("SELECT * FROM projects WHERE path = ?", (str(p),)).fetchone()
+        return dict(row)
+
+
+def list_projects() -> list[dict]:
+    with conn() as c:
+        rows = c.execute("SELECT * FROM projects ORDER BY last_used_at DESC, added_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_project(pid: int) -> dict | None:
+    with conn() as c:
+        row = c.execute("SELECT * FROM projects WHERE id = ?", (pid,)).fetchone()
+        return dict(row) if row else None
+
+
+def touch_project(pid: int):
+    with conn() as c:
+        c.execute("UPDATE projects SET last_used_at = ? WHERE id = ?", (now(), pid))
+
+
+# ─── tabs ─────────────────────────────────────────────────────────────────
+
+def list_tabs() -> list[dict]:
+    with conn() as c:
+        rows = c.execute(
+            "SELECT t.*, p.path, p.slug FROM ui_tabs t "
+            "JOIN projects p ON p.id = t.project_id "
+            "ORDER BY t.sort_order, t.opened_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def open_tab(project_id: int):
+    with conn() as c:
+        max_order = c.execute("SELECT COALESCE(MAX(sort_order), -1) FROM ui_tabs").fetchone()[0]
+        c.execute(
+            "INSERT OR IGNORE INTO ui_tabs(project_id, opened_at, sort_order) VALUES (?, ?, ?)",
+            (project_id, now(), max_order + 1),
+        )
+
+
+def close_tab(project_id: int):
+    with conn() as c:
+        c.execute("DELETE FROM ui_tabs WHERE project_id = ?", (project_id,))
+
+
+# ─── dispatches ───────────────────────────────────────────────────────────
+
+def create_dispatch(project_id: int, user_task: str, wall_clock_cap_s: int = 1800) -> int:
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO dispatches(project_id, created_at, status, user_task, wall_clock_cap_s) "
+            "VALUES (?, ?, 'pending', ?, ?)",
+            (project_id, now(), user_task, wall_clock_cap_s),
+        )
+        return cur.lastrowid
+
+
+def mark_started(dispatch_id: int, terminal_pid: int | None, claude_pid: int | None = None):
+    with conn() as c:
+        c.execute(
+            "UPDATE dispatches SET status = 'running', started_at = ?, "
+            "terminal_pid = ?, claude_pid = ? WHERE id = ?",
+            (now(), terminal_pid, claude_pid, dispatch_id),
+        )
+
+
+def mark_failed_to_spawn(dispatch_id: int, reason: str):
+    with conn() as c:
+        c.execute(
+            "UPDATE dispatches SET status = 'failed', ended_at = ? WHERE id = ?",
+            (now(), dispatch_id),
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
+            "VALUES (?, 'failed_to_spawn', ?, 0)",
+            (dispatch_id, reason),
+        )
+
+
+def complete_dispatch(
+    dispatch_id: int,
+    session_id: str | None,
+    transcript_path: str | None,
+    exit_reason: str | None,
+    outcome: str = "completed",
+) -> bool:
+    """Atomically mark a dispatch completed. Returns True only if this call
+    actually changed the row (i.e., it was still 'running' or 'pending').
+
+    The UPDATE guards on current status, so concurrent Stop-hook POSTs for
+    the same dispatch race to set the row exactly once — the loser sees
+    rowcount=0 and skips outcome/transcript work.
+    """
+    with conn() as c:
+        row = c.execute(
+            "SELECT started_at, created_at FROM dispatches WHERE id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        if not row:
+            return False
+        started = row["started_at"] or row["created_at"]
+        duration = now() - started
+        cur = c.execute(
+            "UPDATE dispatches SET status = ?, ended_at = ?, session_id = ?, transcript_path = ? "
+            "WHERE id = ? AND status NOT IN ('completed','killed','failed','paused')",
+            (outcome, now(), session_id, transcript_path, dispatch_id),
+        )
+        if cur.rowcount == 0:
+            return False
+        c.execute(
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
+            "VALUES (?, ?, ?, ?)",
+            (dispatch_id, outcome, exit_reason, duration),
+        )
+        return True
+
+
+def kill_dispatch_record(dispatch_id: int, reason: str):
+    """Mark as killed in DB. The actual SIGTERM happens in spawn.py."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT started_at, created_at, status FROM dispatches WHERE id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        if not row or row["status"] in ("completed", "killed", "failed"):
+            return
+        started = row["started_at"] or row["created_at"]
+        duration = now() - started
+        c.execute(
+            "UPDATE dispatches SET status = 'killed', ended_at = ? WHERE id = ?",
+            (now(), dispatch_id),
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
+            "VALUES (?, 'killed', ?, ?)",
+            (dispatch_id, reason, duration),
+        )
+
+
+def mark_paused(dispatch_id: int, reason: str):
+    """Mark a dispatch as gracefully paused (e.g. on wall-clock timeout).
+
+    Same shape as `kill_dispatch_record` but the terminal status is 'paused'
+    and the outcome is 'paused'. Crucially this does NOT touch session_id, so
+    a session_id captured by the Stop hook (via `attach_session`) survives and
+    the dispatch stays resumable. The actual SIGTERM happens in spawn.py.
+    """
+    with conn() as c:
+        row = c.execute(
+            "SELECT started_at, created_at, status FROM dispatches WHERE id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        if not row or row["status"] in ("completed", "killed", "failed", "paused"):
+            return
+        started = row["started_at"] or row["created_at"]
+        duration = now() - started
+        c.execute(
+            "UPDATE dispatches SET status = 'paused', ended_at = ? WHERE id = ?",
+            (now(), dispatch_id),
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
+            "VALUES (?, 'paused', ?, ?)",
+            (dispatch_id, reason, duration),
+        )
+
+
+def attach_session(dispatch_id: int, session_id: str | None, transcript_path: str | None):
+    """Store the session_id / transcript_path on a dispatch WITHOUT changing
+    its status or writing an outcome row.
+
+    Used during a graceful pause: the wall-clock watchdog has SIGTERM'd the
+    dispatch and is waiting for the Stop hook's POST to deliver the session_id
+    it needs to stay resumable, but the watchdog — not /api/complete — owns the
+    terminal 'paused' status. Columns are filled with COALESCE so we never
+    clobber a value a real completion already wrote.
+    """
+    with conn() as c:
+        c.execute(
+            "UPDATE dispatches SET "
+            "session_id = COALESCE(session_id, ?), "
+            "transcript_path = COALESCE(transcript_path, ?) "
+            "WHERE id = ?",
+            (session_id, transcript_path, dispatch_id),
+        )
+
+
+def get_dispatch(dispatch_id: int) -> dict | None:
+    with conn() as c:
+        row = c.execute(
+            "SELECT d.*, o.outcome as final_outcome, o.reason as outcome_reason, o.duration_s "
+            "FROM dispatches d LEFT JOIN outcomes o ON o.dispatch_id = d.id "
+            "WHERE d.id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def recent_dispatches(limit: int = 50, project_id: int | None = None) -> list[dict]:
+    q = (
+        "SELECT d.*, p.slug as project_slug, p.path as project_path, "
+        "o.outcome as final_outcome, o.reason as outcome_reason, o.duration_s, "
+        "(SELECT COUNT(*) FROM dispatch_events WHERE dispatch_id=d.id AND kind='tool_use') as tool_calls "
+        "FROM dispatches d "
+        "JOIN projects p ON p.id = d.project_id "
+        "LEFT JOIN outcomes o ON o.dispatch_id = d.id "
+    )
+    args: tuple = ()
+    if project_id is not None:
+        q += "WHERE d.project_id = ? "
+        args = (project_id,)
+    q += "ORDER BY d.id DESC LIMIT ?"
+    args = args + (limit,)
+    with conn() as c:
+        rows = c.execute(q, args).fetchall()
+        return [dict(r) for r in rows]
+
+
+def running_dispatches() -> list[dict]:
+    with conn() as c:
+        rows = c.execute(
+            "SELECT d.*, p.slug as project_slug, p.path as project_path "
+            "FROM dispatches d JOIN projects p ON p.id = d.project_id "
+            "WHERE d.status = 'running' ORDER BY d.id DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_running_dispatch_last_tool_use(dispatch_id: int) -> int | None:
+    with conn() as c:
+        row = c.execute(
+            "SELECT MAX(ts) FROM dispatch_events "
+            "WHERE dispatch_id = ? AND kind = 'tool_use'",
+            (dispatch_id,),
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+
+def running_dispatches_with_last_activity() -> list[dict]:
+    with conn() as c:
+        rows = c.execute(
+            "SELECT d.*, p.slug as project_slug, p.path as project_path, "
+            "MAX(CASE WHEN e.kind = 'tool_use' THEN e.ts END) as last_tool_use_ts "
+            "FROM dispatches d "
+            "JOIN projects p ON p.id = d.project_id "
+            "LEFT JOIN dispatch_events e ON e.dispatch_id = d.id "
+            "WHERE d.status = 'running' "
+            "GROUP BY d.id ORDER BY d.id DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def record_event(dispatch_id: int, kind: str, payload: dict | None = None):
+    """Append an event to the dispatch's timeline. Used by:
+      - /api/tool_use     (kind='tool_use')
+      - /api/tool_result  (kind='tool_result')
+      - orchestrator-internal lifecycle stages (kind='stage')
+
+    Never raises — events are best-effort UX, not correctness-critical."""
+    try:
+        with conn() as c:
+            c.execute(
+                "INSERT INTO dispatch_events(dispatch_id, ts, kind, payload_json) "
+                "VALUES (?, ?, ?, ?)",
+                (dispatch_id, now(), kind, json.dumps(payload or {}, default=str)),
+            )
+    except Exception as e:
+        # Silently swallow — better to lose a UX event than break a dispatch
+        import logging
+        logging.getLogger("orchestrator.db").warning("record_event failed: %s", e)
+
+
+def get_events(dispatch_id: int, since_id: int = 0, limit: int = 200) -> list[dict]:
+    """Return events for a dispatch with id > since_id, oldest first.
+    Used by the UI's polling timeline."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, ts, kind, payload_json FROM dispatch_events "
+            "WHERE dispatch_id = ? AND id > ? "
+            "ORDER BY id ASC LIMIT ?",
+            (dispatch_id, since_id, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            payload = {}
+            try:
+                payload = json.loads(r["payload_json"]) if r["payload_json"] else {}
+            except (ValueError, TypeError):
+                pass
+            out.append({"id": r["id"], "ts": r["ts"], "kind": r["kind"], "payload": payload})
+        return out
+
+
+def count_events(dispatch_id: int, kind: str | None = None) -> int:
+    """How many events of `kind` (or any kind) for this dispatch. Used by
+    the runs panel to show 'N tool calls' as a quick progress indicator."""
+    with conn() as c:
+        if kind:
+            row = c.execute(
+                "SELECT COUNT(*) FROM dispatch_events WHERE dispatch_id = ? AND kind = ?",
+                (dispatch_id, kind),
+            ).fetchone()
+        else:
+            row = c.execute(
+                "SELECT COUNT(*) FROM dispatch_events WHERE dispatch_id = ?",
+                (dispatch_id,),
+            ).fetchone()
+        return row[0] if row else 0
+
+
+def update_claude_pid(dispatch_id: int, pid: int):
+    """Late update: if the PID arrived after dispatch returned."""
+    with conn() as c:
+        c.execute(
+            "UPDATE dispatches SET claude_pid = ? WHERE id = ? AND claude_pid IS NULL",
+            (pid, dispatch_id),
+        )
+
+
+def set_summary(dispatch_id: int, summary_md: str, what_worked: str,
+                 what_broke: str, lessons: str, tags: list[str]):
+    """Fill the outcomes-row summary fields. Used by the summarizer
+    background task after /api/complete fires."""
+    tags_json = json.dumps(tags) if tags else None
+    with conn() as c:
+        c.execute(
+            "UPDATE outcomes SET summary_md = ?, what_worked = ?, what_broke = ?, "
+            "lessons = ?, tags_json = ? WHERE dispatch_id = ?",
+            (summary_md, what_worked, what_broke, lessons, tags_json, dispatch_id),
+        )
+
+
+def get_dispatch_with_project(dispatch_id: int) -> dict | None:
+    """get_dispatch + project_path joined in. Used by summarizer to know
+    which cwd to run from."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT d.*, p.path as project_path, p.slug as project_slug, "
+            "o.outcome as final_outcome, o.reason as outcome_reason, o.duration_s, "
+            "o.summary_md, o.what_worked, o.what_broke, o.lessons, o.tags_json "
+            "FROM dispatches d "
+            "JOIN projects p ON p.id = d.project_id "
+            "LEFT JOIN outcomes o ON o.dispatch_id = d.id "
+            "WHERE d.id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# ─── onboarding runs ──────────────────────────────────────────────────────
+
+def save_onboarding_run(
+    project_id: int,
+    *,
+    ok: bool,
+    model: str | None,
+    duration_s: float | None,
+    cost_usd: float | None,
+    project_summary: str | None,
+    error: str | None,
+    applied_count: int,
+    skipped_count: int,
+    failed_count: int,
+    result_json: str,
+) -> int:
+    """Persist one onboarding analysis round. Returns the new run id."""
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO onboarding_runs("
+            "project_id, created_at, ok, model, duration_s, cost_usd, "
+            "project_summary, error, applied_count, skipped_count, failed_count, result_json"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (project_id, now(), 1 if ok else 0, model, duration_s, cost_usd,
+             project_summary, error, applied_count, skipped_count, failed_count,
+             result_json),
+        )
+        return cur.lastrowid
+
+
+def list_onboarding_runs(project_id: int, limit: int = 50) -> list[dict]:
+    """Newest first. Excludes `result_json` to keep the list view light."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, project_id, created_at, ok, model, duration_s, cost_usd, "
+            "project_summary, error, applied_count, skipped_count, failed_count "
+            "FROM onboarding_runs WHERE project_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (project_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_onboarding_run(run_id: int) -> dict | None:
+    """Full row including `result_json` for the detail view."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT * FROM onboarding_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def latest_onboarding_run(project_id: int) -> dict | None:
+    """Most recent run for a project (header row only, no result_json)."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT id, project_id, created_at, ok, applied_count, skipped_count, "
+            "failed_count, project_summary "
+            "FROM onboarding_runs WHERE project_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def mark_orphaned(dispatch_id: int, reason: str = "process_gone"):
+    """Used by the stale reaper: dispatch's claude PID no longer exists."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT started_at, created_at FROM dispatches WHERE id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        if not row:
+            return
+        started = row["started_at"] or row["created_at"]
+        duration = now() - started
+        c.execute(
+            "UPDATE dispatches SET status = 'completed', ended_at = ? WHERE id = ?",
+            (now(), dispatch_id),
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
+            "VALUES (?, 'orphaned', ?, ?)",
+            (dispatch_id, reason, duration),
+        )
