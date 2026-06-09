@@ -208,6 +208,18 @@
         var textarea = document.getElementById('task-textarea');
         var statusTimer = null;
 
+        // Per-project prompt draft. Saved to localStorage at dispatch time and
+        // cleared only once a dispatch is CONFIRMED created (a running/completed
+        // row appears below) — so a spawn failure, rewrite failure, or network
+        // error never loses the user's work. The textarea lives outside the
+        // HTMX-swapped runs panel, so the 3s polls leave it untouched; only a
+        // full page reload re-renders it empty, which is why we restore here.
+        var draftKey = 'orch_prompt_' + projectId;
+        try {
+          var savedDraft = localStorage.getItem(draftKey);
+          if (savedDraft && !textarea.value) textarea.value = savedDraft;
+        } catch (e) {}
+
         function flashStatus(msg, isError) {
           if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
           statusEl.style.display = 'block';

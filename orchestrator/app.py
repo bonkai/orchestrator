@@ -557,16 +557,23 @@ async def _run_summarizer(dispatch_id: int):
 
 async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = ""):
     """Background task spawned by /send. If do_rewrite, run the rewriter
-    first and use its output; on any rewrite failure fall back to the
-    original task and record a stage event so the UI timeline surfaces it.
-    Then run the standard dispatch flow."""
+    first and use its output. If the rewrite FAILS we no longer silently
+    fall back to dispatching the original task — that hid the failure behind
+    a normal-looking run, so the user couldn't tell their rewrite never
+    happened. Instead we create a dispatch row, mark it failed (with the
+    rewrite reason), record the stage event, and stop: no iTerm tab opens
+    and the UI shows a clear failed row. The user can re-submit (e.g. via
+    "skip rewrite & send") to run the task as-is. On rewrite success the
+    flow is unchanged."""
     proj = db.get_project(project_id)
     if not proj:
         return
     final_task = task
     # Capture rewrite outcome before the dispatch row exists; recorded on the
-    # event timeline once we have a dispatch_id from _run_dispatch.
+    # event timeline once we have a dispatch_id.
     rewrite_event: dict | None = None
+    rewrite_failed = False
+    rewrite_error = ""
     if do_rewrite:
         # Include staged attachments in the rewriter input so it can plan
         # around them. They get moved to the dispatch dir inside _run_dispatch.
@@ -605,12 +612,30 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                     "bundle_chars": result.bundle_chars,
                     "raw_preview": raw_preview,
                 }
-                print(f"[orchestrator] /send rewrite skipped, using original task: {reason}")
+                rewrite_failed = True
+                rewrite_error = reason
+                print(f"[orchestrator] /send rewrite failed, not dispatching: {reason}")
                 if raw_preview:
                     print(f"[orchestrator] rewriter raw response preview:\n{raw_preview}")
         except Exception as e:
             rewrite_event = {"stage": "rewrite_skipped", "reason": f"exception: {e}"}
-            print(f"[orchestrator] /send rewrite failed, using original task: {e}")
+            rewrite_failed = True
+            rewrite_error = f"exception: {e}"
+            print(f"[orchestrator] /send rewrite failed, not dispatching: {e}")
+
+    # Rewrite was requested but failed: surface it as a failed dispatch row
+    # instead of quietly running the original task. Create the row, mark it
+    # failed with the rewrite reason (shown as the row's outcome reason), and
+    # record the rewrite_skipped stage event for the timeline. Then stop —
+    # _run_dispatch is never called, so no iTerm tab opens. The user's prompt
+    # is preserved client-side (localStorage) for a re-submit.
+    if do_rewrite and rewrite_failed:
+        dispatch_id = db.create_dispatch(project_id, task, wall_clock_cap_s=wall_cap_s)
+        db.mark_failed_to_spawn(dispatch_id, f"rewrite failed: {rewrite_error}")
+        if rewrite_event:
+            db.record_event(dispatch_id, "stage", rewrite_event)
+        print(f"[orchestrator] /send created failed dispatch #{dispatch_id} (rewrite failed)")
+        return
 
     dispatch_id, err = await _run_dispatch(project_id, final_task, wall_cap_s, effort, model)
     if err:
