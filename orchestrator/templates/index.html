@@ -227,6 +227,7 @@
           fd.append('task', task);
           fd.append('wall_cap_s', form.querySelector('input[name=wall_cap_s]').value);
           fd.append('effort', form.querySelector('select[name=effort]').value);
+          fd.append('model', form.querySelector('select[name=model]').value);
           fd.append('rewrite', rewrite ? 'true' : 'false');
 
           // /send is fire-and-forget — it returns in ~50ms after scheduling a

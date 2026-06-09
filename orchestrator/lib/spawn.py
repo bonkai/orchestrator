@@ -100,7 +100,7 @@ def iterm2_installed() -> bool:
     return False
 
 
-def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str | None = None, effort: str = "max") -> None:
+def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str | None = None, effort: str = "max", model: str = "") -> None:
     """Open a new iTerm2 tab and start the runner for this dispatch.
 
     `effort` (medium/high/xhigh/max) is written to an <id>.effort sidecar
@@ -114,6 +114,8 @@ def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str 
     task_file.write_text(task.strip())
     effort_file = TASKS_DIR / f"{dispatch_id}.effort"
     effort_file.write_text(effort.strip() or "max")
+    if model.strip():
+        (TASKS_DIR / f"{dispatch_id}.model").write_text(model.strip())
 
     safe_proj = project_path.replace('"', '\\"')
     title = tab_title or f"orch #{dispatch_id}"
@@ -146,7 +148,7 @@ end tell
         _osascript(script)
     except Exception:
         # Clean up the orphan sidecar files so we don't leak files on failure.
-        for f in (task_file, effort_file):
+        for f in (task_file, effort_file, TASKS_DIR / f"{dispatch_id}.model"):
             try:
                 f.unlink()
             except FileNotFoundError:
@@ -268,7 +270,7 @@ end tell
     return out.strip().lower() == "true"
 
 
-def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, effort: str = "max") -> None:
+def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, effort: str = "max", model: str = "") -> None:
     """Open a new iTerm2 tab and `claude --resume <session_id>` in it,
     tracked under `dispatch_id` so the Stop hook fires `/api/complete`
     and the summarizer updates project memory.
@@ -287,6 +289,8 @@ def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, ef
     resume_file.write_text(session_id.strip())
     effort_file = TASKS_DIR / f"{dispatch_id}.effort"
     effort_file.write_text(effort.strip() or "max")
+    if model.strip():
+        (TASKS_DIR / f"{dispatch_id}.model").write_text(model.strip())
 
     safe_proj = project_path.replace('"', '\\"')
     title = f"orch #{dispatch_id} (resumed)"
@@ -317,7 +321,7 @@ end tell
     try:
         _osascript(script)
     except Exception:
-        for f in (resume_file, effort_file):
+        for f in (resume_file, effort_file, TASKS_DIR / f"{dispatch_id}.model"):
             try:
                 f.unlink()
             except FileNotFoundError:
@@ -438,6 +442,7 @@ def cleanup_dispatch_files(dispatch_id: int):
         TASKS_DIR / f"{dispatch_id}.txt",
         TASKS_DIR / f"{dispatch_id}.resume",
         TASKS_DIR / f"{dispatch_id}.effort",
+        TASKS_DIR / f"{dispatch_id}.model",
         PIDS_DIR / f"{dispatch_id}.pid",
     ]:
         try:

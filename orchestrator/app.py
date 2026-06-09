@@ -181,6 +181,7 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     effort = (effort or "").strip()
     if effort not in ("medium", "high", "xhigh", "max"):
         effort = "max"
+    model = (model or "").strip()
 
     # Pick up any staged attachments (drag-drop), move them to a dispatch-
     # owned dir so they survive after the stash is cleared, prepend their
@@ -214,7 +215,7 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(
-            None, spawn.spawn_iterm2, proj["path"], dispatch_id, task, None, effort
+            None, spawn.spawn_iterm2, proj["path"], dispatch_id, task, None, effort, model
         )
     except Exception as e:
         db.mark_failed_to_spawn(dispatch_id, str(e))
@@ -232,10 +233,10 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
 
 
 @app.post("/dispatch")
-async def dispatch(project_id: int = Form(...), task: str = Form(...), wall_cap_s: int = Form(14400), effort: str = Form("max")):
+async def dispatch(project_id: int = Form(...), task: str = Form(...), wall_cap_s: int = Form(14400), effort: str = Form("max"), model: str = Form("")):
     """Sync dispatch — used by the onboarding /apply_edits flow which wants
     a redirect back to the main page. The main pane uses /send instead."""
-    dispatch_id, err = await _run_dispatch(project_id, task, wall_cap_s, effort)
+    dispatch_id, err = await _run_dispatch(project_id, task, wall_cap_s, effort, model)
     if err:
         # Surface common validation errors with appropriate codes
         if "unknown project" in err:
@@ -554,7 +555,7 @@ async def _run_summarizer(dispatch_id: int):
 
 # ─── fire-and-forget send (rewrite optional) ─────────────────────────────
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max"):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = ""):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output; on any rewrite failure fall back to the
     original task and record a stage event so the UI timeline surfaces it.
@@ -611,7 +612,7 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             rewrite_event = {"stage": "rewrite_skipped", "reason": f"exception: {e}"}
             print(f"[orchestrator] /send rewrite failed, using original task: {e}")
 
-    dispatch_id, err = await _run_dispatch(project_id, final_task, wall_cap_s, effort)
+    dispatch_id, err = await _run_dispatch(project_id, final_task, wall_cap_s, effort, model)
     if err:
         print(f"[orchestrator] /send dispatch failed: {err}")
         return
