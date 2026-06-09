@@ -231,9 +231,37 @@
           }, 5000);
         }
 
+        // Scan the "this project" runs table into a map of dispatch id ->
+        // status. Used to spot OUR new dispatch row (an id not present before
+        // submit) and tell whether it landed running/completed (confirmed) or
+        // failed (e.g. rewrite/spawn failure).
+        function scanProjectRows(runsSection) {
+          var map = {};
+          if (!runsSection) return map;
+          var cols = runsSection.querySelectorAll('.runs-col');
+          var col = null;
+          for (var i = 0; i < cols.length; i++) {
+            var h = cols[i].querySelector('h3');
+            if (h && /this project/i.test(h.textContent)) { col = cols[i]; break; }
+          }
+          if (!col) col = cols.length ? cols[0] : null;
+          if (!col) return map;
+          col.querySelectorAll('tbody tr').forEach(function(tr) {
+            var idCell = tr.querySelector('td');
+            if (!idCell) return;
+            var id = (idCell.textContent || '').trim();
+            var m = (tr.className || '').match(/status-([a-z]+)/);
+            if (id) map[id] = m ? m[1] : '';
+          });
+          return map;
+        }
+
         function send(rewrite) {
           var task = (textarea.value || '').trim();
           if (!task) { flashStatus('empty task', true); return; }
+          // Persist the draft BEFORE dispatching so it survives any failure on
+          // the path to a live dispatch. Cleared only on confirmed success.
+          try { localStorage.setItem(draftKey, task); } catch (e) {}
           var fd = new FormData();
           fd.append('project_id', projectId);
           fd.append('task', task);
@@ -251,8 +279,8 @@
           var otherBtn = rewrite ? btnRaw : btnRewrite;
           var globalSpinner = document.getElementById('global-spinner');
           var runsSection = document.querySelector('.runs');
-          var rowsBefore = runsSection
-            ? runsSection.querySelectorAll('tbody tr').length : 0;
+          // Snapshot the dispatch ids already shown so we can spot the new one.
+          var idsBefore = scanProjectRows(runsSection);
 
           window.orchMarkLoading(activeBtn, rewrite ? 'rewriting…' : 'dispatching…');
           otherBtn.disabled = true;
@@ -276,8 +304,18 @@
             otherBtn.disabled = false;
             if (globalSpinner) globalSpinner.classList.remove('visible');
             if (reason === 'appeared') {
+              // Confirmed: a new running/completed dispatch row exists. Only
+              // now do we drop the draft — clear the textarea AND localStorage.
+              textarea.value = '';
+              try { localStorage.removeItem(draftKey); } catch (e) {}
               statusEl.style.color = '#5ed39a';
               statusEl.innerHTML = '✓ Dispatch is live — see the runs panel below.';
+            } else if (reason === 'failed') {
+              // A row appeared but failed (rewrite failed, spawn failed). Keep
+              // the prompt so the user can fix/retry — do NOT clear the draft.
+              statusEl.style.color = '#f0676f';
+              statusEl.innerHTML = '✗ Dispatch failed — your prompt was kept. ' +
+                'See the failed row below for the reason.';
             } else if (reason === 'timeout') {
               statusEl.style.color = '#f0c659';
               statusEl.innerHTML = 'Still working server-side after 45s — ' +
@@ -297,7 +335,10 @@
               return r.json();
             })
             .then(function(data) {
-              textarea.value = '';
+              // NOTE: do NOT clear the textarea here. A 200 from /send only
+              // means the background task was scheduled; the dispatch row can
+              // still fail to be created (rewrite/spawn failure). We clear the
+              // prompt only once a running/completed row is confirmed below.
               // Clear dropzone optimistically: the server moves staged files
               // into the dispatch dir as part of /send's background task, so
               // the stash will be empty soon. Reconcile once after a delay.
@@ -305,11 +346,19 @@
               attStatus.textContent = '';
               setTimeout(loadList, 2500);
 
-              // Watch the 3s-polled runs panel for a new row, then settle.
+              // Watch the 3s-polled runs panel for OUR new dispatch row:
+              //   running/completed → confirmed success: clear the draft.
+              //   failed            → surface it, but keep the draft to retry.
+              //   pending/other     → keep waiting (it'll transition).
               if (runsSection) {
                 observer = new MutationObserver(function() {
-                  var rowsAfter = runsSection.querySelectorAll('tbody tr').length;
-                  if (rowsAfter > rowsBefore) settle('appeared');
+                  var nowRows = scanProjectRows(runsSection);
+                  for (var id in nowRows) {
+                    if (idsBefore.hasOwnProperty(id)) continue;
+                    var st = nowRows[id];
+                    if (st === 'running' || st === 'completed') { settle('appeared'); return; }
+                    if (st === 'failed') { settle('failed'); return; }
+                  }
                 });
                 observer.observe(runsSection, { childList: true, subtree: true });
               }
