@@ -627,6 +627,7 @@ async def send(
     wall_cap_s: int = Form(14400),
     rewrite: str = Form("false"),
     effort: str = Form("max"),
+    model: str = Form(""),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
@@ -645,7 +646,7 @@ async def send(
 
     # Strong-ref the task so Python's GC can't drop the rewrite+dispatch
     # mid-run when the browser tab disconnects after the immediate response.
-    task = asyncio.create_task(_send_in_background(project_id, task, wall_cap_s, do_rewrite, effort))
+    task = asyncio.create_task(_send_in_background(project_id, task, wall_cap_s, do_rewrite, effort, model))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return JSONResponse({"ok": True, "rewrite": do_rewrite})
