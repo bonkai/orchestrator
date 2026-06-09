@@ -80,6 +80,15 @@
               <option value="max" selected>max</option>
             </select>
           </label>
+          <label>model:
+            <select name="model">
+              <option value="" selected>default</option>
+              <option value="fable">fable 5</option>
+              <option value="opus">opus 4.8</option>
+              <option value="sonnet">sonnet 4.6</option>
+              <option value="haiku">haiku 4.5</option>
+            </select>
+          </label>
           <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
           <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
           <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>

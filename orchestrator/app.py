@@ -163,7 +163,7 @@ async def project_remove(project_id: int):
 
 # ─── dispatch ─────────────────────────────────────────────────────────────
 
-async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max") -> tuple[int | None, str]:
+async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max", model: str = "") -> tuple[int | None, str]:
     """Core dispatch flow shared by `/dispatch` (sync redirect) and `/send`
     (background task). Returns (dispatch_id, error). On any failure, returns
     (None, reason) — never raises HTTPException, since the background-task

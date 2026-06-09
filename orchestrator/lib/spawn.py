@@ -48,17 +48,18 @@ PID_FILE="$HOME/.orchestrator/pids/${ORCHESTRATOR_RUN_ID}.pid"
 RESUME_FILE="$HOME/.orchestrator/tasks/${ORCHESTRATOR_RUN_ID}.resume"
 TASK_FILE="$HOME/.orchestrator/tasks/${ORCHESTRATOR_RUN_ID}.txt"
 EFFORT=$(cat "$HOME/.orchestrator/tasks/${ORCHESTRATOR_RUN_ID}.effort" 2>/dev/null || echo max)
+MODEL=$(cat "$HOME/.orchestrator/tasks/${ORCHESTRATOR_RUN_ID}.model" 2>/dev/null || echo "")
 echo $$ > "$PID_FILE"
 if [ -f "$RESUME_FILE" ]; then
     SID=$(cat "$RESUME_FILE")
-    exec claude --dangerously-skip-permissions --effort "$EFFORT" --resume "$SID"
+    exec claude --dangerously-skip-permissions --effort "$EFFORT" ${MODEL:+--model "$MODEL"} --resume "$SID"
 fi
 if [ ! -f "$TASK_FILE" ]; then
     echo "Orchestrator: missing task file $TASK_FILE" >&2
     exit 2
 fi
 TASK=$(cat "$TASK_FILE")
-exec claude --dangerously-skip-permissions --effort "$EFFORT" "$TASK"
+exec claude --dangerously-skip-permissions --effort "$EFFORT" ${MODEL:+--model "$MODEL"} "$TASK"
 """
 
 
