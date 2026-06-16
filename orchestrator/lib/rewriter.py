@@ -1,4 +1,4 @@
-"""Rewriter — takes user task + project bundle, asks headless claude to
+"""Rewriter — takes user task + project bundle, asks `claude` (visible iTerm2 tab) to
 produce a richer prompt, returns structured result for the preview UI.
 """
 
