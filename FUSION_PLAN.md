@@ -336,7 +336,7 @@ module's existing `_strip_fences` for JSON extraction.
 - [ ] **F1.2** `_fusion_envelope_to_run(envelope, judge) -> ClaudeRun` (reuse `_strip_fences`). · *verify:* feed a sample envelope → `ClaudeRun(ok=True)` with `cost_usd` set and JSON parsed when present.
 - [ ] **F1.3** `_run_fusion_headless(body, key, timeout, judge)` (wraps F1.1+F1.2 as the explicit fallback) **+** `run_fusion_json(...)` that resolves panel/judge/mode/timeout (arg → `config.fusion_config()` → seed) and, for now, calls `_run_fusion_headless` (no tab yet). · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, cost > 0; editing `config.json`'s `panel` changes which models are billed. *(In-process for now; F1.5–F1.6 put the visible tab in front of it.)*
 - [ ] **F1.4** ⟂ `fusion_call.py` (~30 lines, stdlib `urllib`): read the request-body sidecar, resolve the key (env → config.json), POST, echo the answer to **stderr** (watchable), print the envelope to **stdout** (captured). · *verify:* run it by hand with a request file → you SEE the response; `<id>.json` holds a clean envelope.
-- [ ] **F1.5** `spawn.spawn_fusion_tab(body, cwd)` + `ensure_fusion_runner()` (writes `fusion_run.sh` + `fusion_call.py`); mirror `spawn_brain_tab`. Sidecars in `~/.orchestrator/fusion/`; tab sets `ORCHESTRATOR_FUSION_ID`. · *verify:* calling it opens a visible iTerm2 tab that runs and writes `.pid`/`.json`/`.done`.
+- [ ] **F1.5** `spawn.spawn_fusion_tab(fusion_id, body, cwd)` (id first, mirroring `spawn_brain_tab`) — writes the body to `~/.orchestrator/fusion/<fusion_id>.request.json` and opens a tab that sets `ORCHESTRATOR_FUSION_ID` — plus `ensure_fusion_runner()` (writes `fusion_run.sh` + `fusion_call.py`). · *verify:* calling it with a test id opens a visible iTerm2 tab that runs and writes `.pid`/`.json`/`.done`.
 - [ ] **F1.6** `_run_fusion_in_tab(body, cwd, timeout)` poll loop (copy `run_claude_json`'s `.done`/`.pid` loop) **+** rewire `run_fusion_json` to prefer the tab, falling back to `_run_fusion_headless` only when `spawn.iterm2_installed()` is false or the tab fails. · *verify:* `run_fusion_json(...)` now opens a visible tab and returns the parsed `ClaudeRun`; faked-no-iTerm2 still returns a valid result.
 - [ ] **F1.7** `run_brain_json(prompt, cwd, fusion=False, **kw)` dispatcher (fusion→`run_fusion_json`; else, or on failure→`run_claude_json`). · *verify:* `fusion=True` + bad key falls back to the normal visible-tab claude call with no hard error.
 - [ ] **F1.8** ⟂ `list_openrouter_models()` (live `/api/v1/models`, used later by F8). · *verify:* returns a non-empty list of `{id, …}` when a key is set, `[]` otherwise.
@@ -435,15 +435,22 @@ def _fusion_envelope_to_run(envelope: dict, judge: str) -> ClaudeRun:
                      cost_usd=cost, model=envelope.get("model") or judge, raw=envelope)
 
 
-def _run_fusion_headless(body: dict, key: str, timeout_s: int, judge: str) -> ClaudeRun:
-    """FALLBACK only (iTerm2 absent): the invisible in-process HTTPS call."""
+def _post_openrouter(body: dict, key: str, timeout_s: int) -> dict:
+    """POST to OpenRouter; return the parsed JSON envelope. Raises on HTTP/URL/parse
+    error (the caller converts to ClaudeRun.ok=False). NOTE: `fusion_call.py`
+    duplicates this — it runs standalone in the tab and can't import this module."""
     req = urllib.request.Request(
         OPENROUTER_URL, data=json.dumps(body).encode(), method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
                  "HTTP-Referer": "http://localhost:7878", "X-Title": "orchestrator"})
+    with urllib.request.urlopen(req, timeout=timeout_s) as r:
+        return json.loads(r.read().decode())
+
+
+def _run_fusion_headless(body: dict, key: str, timeout_s: int, judge: str) -> ClaudeRun:
+    """FALLBACK only (iTerm2 absent): the invisible in-process HTTPS call."""
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as r:
-            envelope = json.loads(r.read().decode())
+        envelope = _post_openrouter(body, key, timeout_s)
     except urllib.error.HTTPError as e:
         return ClaudeRun(ok=False, error=f"openrouter HTTP {e.code}: {e.read()[:300]!r}")
     except (urllib.error.URLError, TimeoutError) as e:
@@ -509,10 +516,11 @@ answer; `usage.cost` (with `usage.include=true`) is the summed dollar cost.
 **Visible-tab plumbing (mirror the existing brain-tab path).** `run_claude_json`
 already runs brain calls in watchable tabs via `spawn.spawn_brain_tab` +
 `brain_run.sh` (sidecars in `~/.orchestrator/brain/`, `.done`/`.pid` poll loop).
-Fusion reuses that exact shape: add `spawn.spawn_fusion_tab(body, cwd)` + a
-`fusion_run.sh`, sidecars in `~/.orchestrator/fusion/`, and `_run_fusion_in_tab`
-polls `<id>.done`/`<id>.pid` just like the brain loop. The OpenRouter key is read
-**inside the tab** (env → `config.json`) — never passed through AppleScript,
+Fusion reuses that exact shape: `_run_fusion_in_tab` generates a `fusion_id`, calls
+`spawn.spawn_fusion_tab(fusion_id, body, cwd)` (which writes `<fusion_id>.request.json`
++ opens the tab via `fusion_run.sh`), then polls `<fusion_id>.done`/`.pid` just like
+the brain loop. Sidecars live in `~/.orchestrator/fusion/`. The OpenRouter key is
+read **inside the tab** (env → `config.json`) — never passed through AppleScript,
 never written to a temp file.
 
 ```bash
@@ -557,7 +565,7 @@ set; fusion unavailable"`; with iTerm2 uninstalled, it still returns a valid
 
 ### Phase F4 — Dispatch-form toggle *(the on/off toggle, UI side)*
 *Goal: a checkbox the user flips; default OFF, persisted, disabled when no key.*
-- [ ] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects (~index.html:76–94). Label `fusion (multi-model) ⚡` + muted hint `~4–5× cost; best for architecture / research / high-stakes`. Persist its state in `localStorage` like the draft textarea; **default OFF**. · *verify:* toggling it and reloading keeps the state.
+- [ ] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects (~index.html:76–94). Label `fusion (multi-model) ⚡` + muted hint `multi-model panel — costs more than a solo rewrite; best for architecture / research / high-stakes`. Persist its state in `localStorage` like the draft textarea; **default OFF**. · *verify:* toggling it and reloading keeps the state.
 - [ ] **F4.2** In `send(rewrite)` (index.html:259) append `fd.append('fusion', chkFusion.checked ? 'true':'false')` next to the existing `effort`/`model`/`rewrite` appends (lines 266–271); works with **both** buttons. · *verify:* the `/send` request payload includes `fusion`.
 - [ ] **F4.3** Disabled state + affordances: extend `_view_ctx()` to pass `fusion_available = config.is_fusion_available()`; when false, render the checkbox **disabled** with *"Set openrouter_api_key in ~/.orchestrator/config.json to enable."* When on, the in-flight banner (index.html:294) reads `rewriting (multi-model) then dispatching (~15–40s).` · *verify:* no key → disabled w/ note; key present → enabled. **End-to-end toggle now works (F3 + F4).**
 
