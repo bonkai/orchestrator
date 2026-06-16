@@ -292,7 +292,7 @@ from disagreement among models.** Everything routine stays solo.
 | **F5** | Surface + cost | show `fusion`/`rewrite` events; cost in outcomes | ☐ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
-| **F8** (opt) | Config UI & presets | switch budget/balanced/frontier presets; key stays file-only | ☐ |
+| **F8** (opt) | Model-selection UI | pick a preset or hand-select each model/version (live `/api/v1/models` list) | ☐ |
 
 **F0–F5 deliver a working, shippable Fusion toggle.** F6–F8 are extensions and
 polish. Each phase is independently testable and sized for a single dispatch.
@@ -536,12 +536,17 @@ dispatch**, unlike a failed rewrite). Cap the panel input (~12K chars, à la
 Record a separate `fusion_ok`/`fusion_skipped` stage event (this path's cost is
 *not* the rewrite's). Surface the collapsible analysis on the detail page.
 
-### Phase F8 — Config UI & presets *(optional polish)*
-A read-only `/settings` view: fusion availability, current panel/judge/mode, and
-preset switch (`budget` / `balanced` / `frontier` / `custom`) resolved by
-`config.fusion_config()` against the §6 catalog. The **key is never editable from
-the browser**. Append a `Phase 10 — Fusion ✅` entry to `PLAN.md` and a short
-`## Fusion` note to `CLAUDE.md` once shipped.
+### Phase F8 — Model-selection UI *(optional — the capability already exists)*
+You can already change models **without** this phase: edit `panel`/`judge`/`mode`
+in `~/.orchestrator/config.json`, or pass them per call. F8 just makes it clickable.
+A `/settings` (or dispatch-form) picker that (a) lists **currently-available**
+models/versions via `claude_runner.list_openrouter_models()` (live `/api/v1/models`,
+so new releases show up with zero code change), (b) lets you choose a preset
+(`budget`/`balanced`/`frontier`/`custom`) **or** hand-pick each panel seat + judge +
+version, and (c) saves the choice to `config.json` (or threads it per-dispatch like
+`effort`/`model`). The **key is never editable from the browser**. Append a
+`Phase 10 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`
+once shipped.
 
 ---
 
