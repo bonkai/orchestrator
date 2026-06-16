@@ -313,15 +313,10 @@ Every task leaves the system working — fusion simply stays off until F3+F4 wir
 toggle. **⟂** marks tasks whose order doesn't matter.
 
 ### Phase F0 — Config & key management
-New `orchestrator/lib/config.py`: `load_config() -> dict` (reads
-`~/.orchestrator/config.json`, returns `{}` if absent/malformed — never raises),
-`get_openrouter_key() -> str | None` (env → file → None), `fusion_config() -> dict`
-(`{mode, panel, judge, preset, timeout_s}` merged over the §6 defaults),
-`is_fusion_available() -> bool`. `bin/install.sh` writes a `config.json` template
-**only if absent** (idempotent), all keys present with `openrouter_api_key`
-empty, and prints where to paste the key.
-*Acceptance:* `python -c "from orchestrator.lib import config; print(config.is_fusion_available())"`
-is `False` clean, `True` once the key is set via either source.
+*Goal: a `config.py` that resolves the key + fusion settings, and an installer that scaffolds the config file.*
+- [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_openrouter_key()` (env → file → None) + `is_fusion_available()`. · *verify:* `python -c "from orchestrator.lib import config; print(config.is_fusion_available())"` → `False` clean, `True` once the key is set via env **or** file.
+- [ ] **F0.2** `config.py`: `fusion_config()` → `{mode, panel, judge, timeout_s}` merged over the §6 seed defaults. · *verify:* returns seeds with no file present; returns your values when `config.json` sets them.
+- [ ] **F0.3** `install.sh`: write a `config.json` template **only if absent** (idempotent) — all keys present, `openrouter_api_key` empty — and print where to paste the key. · *verify:* run it twice; the 2nd run is a no-op and never clobbers an existing key.
 
 ### Phase F1 — `claude_runner.py` extension *(the core)*
 Add `run_fusion_json()` beside `run_claude_json()`: same `ClaudeRun` return, same
@@ -332,6 +327,18 @@ never-raises contract, and — crucially — the **same visible-tab behavior**.
 OpenRouter call is equally watchable. An in-process `urllib` call (stdlib, **no
 new deps**) is kept as a fallback for when iTerm2 isn't installed. Reuse the
 module's existing `_strip_fences` for JSON extraction.
+
+**Build order (each step independently runnable; the visible tab wraps the simpler in-process call):**
+- [ ] **F1.1** Constants + `_build_fusion_body(prompt, panel, judge, mode, outer_model)` (all three modes) + a private `_post_openrouter(body, key, timeout) -> envelope` (the stdlib `urllib` POST). · *verify:* in a REPL, `_post_openrouter(_build_fusion_body("2+2?", panel, judge, "plugin", judge), key, 60)` returns an OpenAI-shaped envelope with `choices` + `usage`.
+- [ ] **F1.2** `_fusion_envelope_to_run(envelope, judge) -> ClaudeRun` (reuse `_strip_fences`). · *verify:* feed a sample envelope → `ClaudeRun(ok=True)` with `cost_usd` set and JSON parsed when present.
+- [ ] **F1.3** `_run_fusion_headless(body, key, timeout, judge)` (wraps F1.1+F1.2 as the explicit fallback) **+** `run_fusion_json(...)` that resolves panel/judge/mode/timeout (arg → `config.fusion_config()` → seed) and, for now, calls `_run_fusion_headless` (no tab yet). · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, cost > 0; editing `config.json`'s `panel` changes which models are billed. *(In-process for now; F1.5–F1.6 put the visible tab in front of it.)*
+- [ ] **F1.4** ⟂ `fusion_call.py` (~30 lines, stdlib `urllib`): read the request-body sidecar, resolve the key (env → config.json), POST, echo the answer to **stderr** (watchable), print the envelope to **stdout** (captured). · *verify:* run it by hand with a request file → you SEE the response; `<id>.json` holds a clean envelope.
+- [ ] **F1.5** `spawn.spawn_fusion_tab(body, cwd)` + `ensure_fusion_runner()` (writes `fusion_run.sh` + `fusion_call.py`); mirror `spawn_brain_tab`. Sidecars in `~/.orchestrator/fusion/`; tab sets `ORCHESTRATOR_FUSION_ID`. · *verify:* calling it opens a visible iTerm2 tab that runs and writes `.pid`/`.json`/`.done`.
+- [ ] **F1.6** `_run_fusion_in_tab(body, cwd, timeout)` poll loop (copy `run_claude_json`'s `.done`/`.pid` loop) **+** rewire `run_fusion_json` to prefer the tab, falling back to `_run_fusion_headless` only when `spawn.iterm2_installed()` is false or the tab fails. · *verify:* `run_fusion_json(...)` now opens a visible tab and returns the parsed `ClaudeRun`; faked-no-iTerm2 still returns a valid result.
+- [ ] **F1.7** `run_brain_json(prompt, cwd, fusion=False, **kw)` dispatcher (fusion→`run_fusion_json`; else, or on failure→`run_claude_json`). · *verify:* `fusion=True` + bad key falls back to the normal visible-tab claude call with no hard error.
+- [ ] **F1.8** ⟂ `list_openrouter_models()` (live `/api/v1/models`, used later by F8). · *verify:* returns a non-empty list of `{id, …}` when a key is set, `[]` otherwise.
+
+*Code reference for F1 — the target shapes for the tasks above (not extra work):*
 
 ```python
 # ── additions to orchestrator/lib/claude_runner.py ───────────────────────────
@@ -533,25 +540,14 @@ set; fusion unavailable"`; with iTerm2 uninstalled, it still returns a valid
 `ClaudeRun` via the in-process fallback.
 
 ### Phase F2 — Rewriter integration
-`rewriter.rewrite(user_task, project_path, fusion: bool = False)` swaps one line:
-`run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion)`.
-Everything downstream (`run.ok` / `run.parsed_json` / `run.cost_usd`) is
-unchanged. **The existing auto-retry must NOT re-run Fusion** — force the retry
-through `run_claude_json` directly (a strict-JSON reminder to one model is the
-cheap, reliable fix). Default panel: budget preset (§6).
-*Acceptance:* with fusion on + key, the rewrite's cost reflects panel spend and
-the prompt is panel-authored; with fusion on + no key, it transparently produces
-the same result as today.
+*Goal: the rewriter can route its one brain call through Fusion.*
+- [ ] **F2.1** Add `fusion: bool = False` to `rewriter.rewrite(...)` and swap the brain call to `run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion)`. Downstream (`run.ok`/`run.parsed_json`/`run.cost_usd`) is unchanged. · *verify:* `fusion=False` behaves exactly as today; `fusion=True` opens a fusion tab and returns a rewrite.
+- [ ] **F2.2** Make the existing auto-retry force `run_claude_json` directly (a strict-JSON reminder to one model) so a flaky panel never re-fans-out at 5×. · *verify:* trigger a retry → it does **not** open a second fusion tab.
 
-### Phase F3 — Pipeline wiring
-`app.py`: add `fusion: str = Form("false")` to `/send`; parse
-`do_fusion = fusion.lower() in ("1","true","yes","on")`; pass through
-`_send_in_background(... do_fusion=False)` → `rewriter.rewrite(..., fusion=do_fusion)`.
-`_run_dispatch` needs **no change** (fusion only affects the rewrite call). Record
-`do_fusion` on the existing `rewrite_ok` stage event for later cost analysis. No
-DB column needed for the MVP.
-*Acceptance:* `fusion=true` + key produces a panel-authored rewrite with cost on
-the timeline; `fusion=true` + no key still dispatches (fallback), no hard failure.
+### Phase F3 — Pipeline wiring *(the on/off toggle, server side)*
+*Goal: a `fusion` flag flows from the request all the way to the rewrite call.*
+- [ ] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")`, parse `do_fusion = fusion.lower() in ("1","true","yes","on")`, and thread it into `_send_in_background(... do_fusion=...)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true` → a temporary log in `_send_in_background` shows `do_fusion=True`.
+- [ ] **F3.2** `_send_in_background`: pass `fusion=do_fusion` into `rewriter.rewrite(...)` and record `do_fusion` on the existing `rewrite_ok` stage event. (No DB column needed.) · *verify:* a `fusion=true` send produces a panel-authored rewrite whose cost shows on the timeline; `fusion=true` + no key still dispatches via fallback, no hard failure.
 
 ### Phase F4 — Dispatch-form toggle
 `templates/index.html`: a **Fusion checkbox** next to the effort/model selects
