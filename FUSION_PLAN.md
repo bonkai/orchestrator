@@ -110,16 +110,19 @@ OpenAI-compatible).
 | Mode | Request shape | Control | Notes |
 |------|---------------|---------|-------|
 | **Model alias** | `"model": "openrouter/fusion"` | OpenRouter picks panel + judge | Simplest drop-in. Least cost control. |
-| **Server tool** ✅ | strong outer model + `tools:[{"type":"openrouter:fusion"}]` | The outer model decides *when* to convene the panel | Answers easy prompts itself, escalates only hard ones — cost-aware by construction. |
-| **Plugin / custom** | `plugins:[{id:"fusion", analysis_models:[…], judge_model:…}]` | We name every panel model + judge | Max control / determinism. Best for a fixed budget panel. |
+| **Server tool** | strong outer model + `tools:[{"type":"openrouter:fusion"}]` | The outer model decides *when* to convene the panel | Answers easy prompts itself, escalates only hard ones — cost-aware by construction. |
+| **Plugin / custom** ✅ | `plugins:[{id:"fusion", analysis_models:[…], judge_model:…}]` | We name every panel model + judge | Max control / determinism. Best for a fixed budget panel. |
 
-**Recommendation:** start with the **server-tool** mode — a strong outer model
-(e.g. `anthropic/claude-opus-4-8`) with the Fusion tool attached. It answers
-routine rewrites directly and fans out only when the panel earns it, so we don't
-pay 5× on every dispatch. Keep both server-tool and plugin paths behind one
-private `_build_fusion_body()` helper so the public signature never changes; the
-**plugin** mode is the natural second step once we want a fixed, auditable budget
-panel from the catalog in §6.
+**Recommendation:** start with **plugin** mode — it's the only mode that actually
+uses the panel + judge you configure, so it's what the presets (§6), the cost
+model (§5), and the F8 model picker all operate on, and it's the most predictable
+and auditable (you see exactly which models ran). Build all three modes behind one
+private `_build_fusion_body()` helper (the public signature never changes), but
+**default to plugin**. **Server-tool** is a later, optional cost-saver — but note
+it hands model choice to the *outer* model, so your configured panel/judge (and the
+F8 picker) won't drive it; **alias** is the zero-config fallback. The cheap
+**budget** preset (§6) already keeps plugin-mode cost to ~0.5× a solo frontier
+call, so you don't need server-tool to stay affordable.
 
 > ⚠️ **Verify field names at implementation time.** `openrouter:fusion`,
 > `plugins[].analysis_models`, `judge_model` are the shapes described in the
@@ -315,7 +318,7 @@ toggle. **⟂** marks tasks whose order doesn't matter.
 ### Phase F0 — Config & key management
 *Goal: a `config.py` that resolves the key + fusion settings, and an installer that scaffolds the config file.*
 - [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_openrouter_key()` (env → file → None) + `is_fusion_available()`. · *verify:* `python -c "from orchestrator.lib import config; print(config.is_fusion_available())"` → `False` clean, `True` once the key is set via env **or** file.
-- [ ] **F0.2** `config.py`: `fusion_config()` → `{mode, panel, judge, timeout_s}` merged over the §6 seed defaults. · *verify:* returns seeds with no file present; returns your values when `config.json` sets them.
+- [ ] **F0.2** `config.py`: `fusion_config()` → `{mode, panel, judge, outer, timeout_s}` (all optional; merged over the §6 seed defaults — `outer` is only used by server-tool mode and defaults to the judge). · *verify:* returns seeds with no file present; returns your values when `config.json` sets them.
 - [ ] **F0.3** `install.sh`: write a `config.json` template **only if absent** (idempotent) — all keys present, `openrouter_api_key` empty — and print where to paste the key. · *verify:* run it twice; the 2nd run is a no-op and never clobbers an existing key.
 
 ### Phase F1 — `claude_runner.py` extension *(the core)*
@@ -359,7 +362,7 @@ FUSION_PANEL_FRONTIER = ["openai/gpt-5.5",                 # $5→$30
                          "x-ai/grok-4.3"]                  # $1.25→$2.50
 DEFAULT_FUSION_PANEL     = FUSION_PANEL_BUDGET
 DEFAULT_FUSION_JUDGE     = "anthropic/claude-opus-4-8"     # strong cross-family synthesizer
-DEFAULT_FUSION_MODE      = "server_tool"        # "alias" | "server_tool" | "plugin"
+DEFAULT_FUSION_MODE      = "plugin"             # "plugin" uses your panel+judge | "server_tool" | "alias"
 DEFAULT_FUSION_TIMEOUT_S = 300
 
 
@@ -527,11 +530,14 @@ echo "${PIPESTATUS[0]}" > "$DIR/$ID.done"
 echo "---- fusion call finished ----"
 ```
 
-`fusion_call.py` is ~30 lines of stdlib `urllib` sharing the POST with
-`_run_fusion_headless`: read the request-body sidecar, resolve the key
-(env → `config.json`), POST, echo the answer to stderr for watching, print the
-envelope to stdout for capture. (Add `"stream": true` later if you want tokens to
-appear live — non-streaming still shows the call fire and the response land.)
+`fusion_call.py` is ~30 lines of stdlib `urllib`, **standalone** — it runs in the
+tab's own process, so it must NOT import from the `orchestrator` package; it
+duplicates the same small POST as `_run_fusion_headless`. It reads the full request
+body from the sidecar `spawn_fusion_tab` wrote (`<id>.request.json`), resolves the
+key itself (env → `config.json`), POSTs, echoes the answer to stderr for watching,
+and prints the envelope to stdout for capture. (Add `"stream": true` later if you
+want tokens to appear live — non-streaming still shows the call fire and the
+response land.)
 
 *Acceptance:* with a key set, `run_fusion_json("Should a single-writer local app
 use SQLite WAL mode?")` opens a visible iTerm2 tab, and on completion returns
