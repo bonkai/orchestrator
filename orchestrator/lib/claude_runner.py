@@ -25,7 +25,7 @@ from typing import Optional
 DEFAULT_MODEL = "sonnet"
 DEFAULT_EFFORT = "medium"
 DEFAULT_MAX_TURNS = 30
-DEFAULT_TIMEOUT_S = 180
+DEFAULT_TIMEOUT_S = 900
 
 
 @dataclass
