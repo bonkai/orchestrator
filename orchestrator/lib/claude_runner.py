@@ -44,6 +44,11 @@ DEFAULT_MAX_TURNS = 30
 DEFAULT_TIMEOUT_S = 900
 # How often the tab path polls the .done / .pid sidecars.
 _POLL_INTERVAL_S = 0.3
+# brain_run.sh writes its PID almost immediately; if no PID appears within this
+# window the tab never started its runner, so give up rather than spin forever
+# (matters because the default timeout is unlimited). Independent of how long
+# the call itself may run.
+_STARTUP_GRACE_S = 60
 
 
 @dataclass
@@ -280,6 +285,7 @@ def run_claude_json(
     result: Optional[ClaudeRun] = None
     success = False
     pid: Optional[int] = None
+    started_at = time.time()
     try:
         while result is None:
             if done_file.is_file():
@@ -304,6 +310,11 @@ def run_claude_json(
             # .done (no completion marker would ever arrive otherwise).
             if pid is None:
                 pid = _read_pid(pid_file)
+                if pid is None and (time.time() - started_at) > _STARTUP_GRACE_S:
+                    result = ClaudeRun(ok=False,
+                                       error="brain call tab failed to start "
+                                             f"(no PID after {_STARTUP_GRACE_S}s)")
+                    break
             elif not spawn.pid_alive(pid):
                 if done_file.is_file():
                     continue  # race: .done landed; handle on next loop top
