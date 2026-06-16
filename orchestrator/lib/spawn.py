@@ -118,7 +118,36 @@ claude -p "$PROMPT" \
     --output-format stream-json \
     --verbose \
     --dangerously-skip-permissions \
-    --effort "$EFFORT" < /dev/null | tee "$OUT_FILE"
+    --effort "$EFFORT" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        print(line)
+        continue
+    t = obj.get('type', '')
+    if t == 'assistant':
+        for blk in (obj.get('message') or {}).get('content', []):
+            if not isinstance(blk, dict):
+                continue
+            bt = blk.get('type')
+            if bt == 'text':
+                txt = (blk.get('text') or '').strip()
+                if txt:
+                    print('[assistant]', txt)
+            elif bt == 'tool_use':
+                inp = json.dumps(blk.get('input') or {}, default=str)
+                print('[tool]', blk.get('name') or '?', inp[:200])
+    elif t == 'result':
+        cost = obj.get('total_cost_usd') or obj.get('cost_usd') or 0
+        print(f'[done] cost=\\${cost:.4f}')
+    elif t == 'system' and obj.get('subtype') == 'init':
+        print('[brain]', obj.get('model') or '', '/', (obj.get('session_id') or '')[:8])
+"
 code=${PIPESTATUS[0]}
 echo "$code" > "$DONE_FILE"
 echo
