@@ -175,7 +175,7 @@ def summarize(transcript_path: str, user_task: str, cwd: str) -> SummaryResult:
     })
 
     run = claude_runner.run_claude_json(
-        prompt=prompt, cwd=cwd, effort="medium",
+        prompt=prompt, cwd=cwd, effort="medium", label="summarizer",
     )
     if not run.ok:
         return SummaryResult(ok=False, error=run.error,

@@ -400,7 +400,7 @@ def analyze(project_path: str, prior_runs_context: str = "",
         "git_changes": git_changes,
     })
 
-    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(root), effort="medium")
+    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(root), effort="medium", label="onboarding")
     if not run.ok:
         return OnboardingResult(ok=False, error=run.error,
                                 cost_usd=run.cost_usd, model=run.model, scan=scan)
