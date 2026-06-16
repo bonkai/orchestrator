@@ -367,7 +367,7 @@ def _build_fusion_body(prompt, panel, judge, mode, outer_model) -> dict:
 
 def run_fusion_json(
     prompt: str,
-    cwd: str = "",                                  # accepted for parity; unused (no local fs)
+    cwd: str = "",                                  # working dir for the visible tab
     panel: Optional[list] = None,                   # any list of slugs; None → config → seed
     judge: Optional[str] = None,                    # any slug;          None → config → seed
     mode: Optional[str] = None,                     # alias|server_tool|plugin; None → config → seed
@@ -375,12 +375,12 @@ def run_fusion_json(
     timeout_s: Optional[int] = None,                # None → config → seed
     api_key: Optional[str] = None,                  # None → config.get_openrouter_key()
 ) -> ClaudeRun:
-    """OpenRouter Fusion sibling of run_claude_json. Returns the SAME ClaudeRun so
-    the rewriter/summarizer can call either interchangeably. Never raises: returns
-    ClaudeRun(ok=False, error=...) on missing key, HTTP/timeout error, or
-    unparseable body. Any slug works at any level (panel/judge/outer) — forwarded
-    verbatim to OpenRouter, no allowlist; choice resolves arg → config → seed.
-    NOTE: calls OpenRouter's servers — see FUSION_PLAN §9."""
+    """OpenRouter Fusion sibling of run_claude_json — and, exactly like it, the
+    call runs in a WATCHABLE iTerm2 tab: you see the request go out and the
+    panel/judge response come back, no hidden in-process HTTP. Returns the SAME
+    ClaudeRun. Any slug works at any level (panel/judge/outer) — forwarded
+    verbatim, no allowlist; choice resolves arg → config → seed. Falls back to an
+    in-process HTTP call ONLY when iTerm2 is absent. Never raises. See §9."""
     key = api_key or config.get_openrouter_key()
     if not key:
         return ClaudeRun(ok=False, error="OPENROUTER_API_KEY not set; fusion unavailable")
@@ -392,13 +392,41 @@ def run_fusion_json(
     outer_model = outer_model or cfg.get("outer")     or judge
     timeout_s   = timeout_s   or cfg.get("timeout_s") or DEFAULT_FUSION_TIMEOUT_S
     body = _build_fusion_body(prompt, panel, judge, mode, outer_model)
+
+    # PRIMARY: run the OpenRouter call in a visible iTerm2 tab, just like a brain
+    # call. fusion_run.sh streams the response on screen and tee's the JSON
+    # envelope to <id>.json; _run_fusion_in_tab polls <id>.done/<id>.pid with the
+    # same loop as run_claude_json. The tab sets ORCHESTRATOR_FUSION_ID (never
+    # ORCHESTRATOR_RUN_ID), so the Stop hook stays a no-op.
+    if spawn.iterm2_installed():
+        envelope = _run_fusion_in_tab(body, cwd, timeout_s)   # None on tab spawn/poll failure
+        if envelope is not None:
+            return _fusion_envelope_to_run(envelope, judge)
+        print("[claude_runner] fusion tab failed; falling back to in-process call")
+    # FALLBACK (no iTerm2, or tab failed): the invisible in-process HTTPS call.
+    return _run_fusion_headless(body, key, timeout_s, judge)
+
+
+def _fusion_envelope_to_run(envelope: dict, judge: str) -> ClaudeRun:
+    """OpenRouter (OpenAI-shaped) envelope → ClaudeRun, parsing JSON out of the
+    synthesized content. Shared by the tab path and the headless fallback."""
+    text  = (envelope.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+    usage = envelope.get("usage") or {}
+    cost  = float(usage.get("cost") or usage.get("total_cost") or 0.0)
+    parsed, stripped = None, _strip_fences(text)
+    if stripped.startswith("{") or stripped.startswith("["):
+        try: parsed = json.loads(stripped)
+        except json.JSONDecodeError: parsed = None
+    return ClaudeRun(ok=True, text=text, parsed_json=parsed,
+                     cost_usd=cost, model=envelope.get("model") or judge, raw=envelope)
+
+
+def _run_fusion_headless(body: dict, key: str, timeout_s: int, judge: str) -> ClaudeRun:
+    """FALLBACK only (iTerm2 absent): the invisible in-process HTTPS call."""
     req = urllib.request.Request(
         OPENROUTER_URL, data=json.dumps(body).encode(), method="POST",
-        headers={"Authorization": f"Bearer {key}",
-                 "Content-Type": "application/json",
-                 "HTTP-Referer": "http://localhost:7878",   # OpenRouter attribution
-                 "X-Title": "orchestrator"},
-    )
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                 "HTTP-Referer": "http://localhost:7878", "X-Title": "orchestrator"})
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as r:
             envelope = json.loads(r.read().decode())
@@ -408,20 +436,7 @@ def run_fusion_json(
         return ClaudeRun(ok=False, error=f"openrouter unreachable: {e}")
     except (json.JSONDecodeError, OSError) as e:
         return ClaudeRun(ok=False, error=f"openrouter bad response: {e}")
-
-    text  = (envelope.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-    usage = envelope.get("usage") or {}
-    cost  = float(usage.get("cost") or usage.get("total_cost") or 0.0)
-
-    parsed, stripped = None, _strip_fences(text)
-    if stripped.startswith("{") or stripped.startswith("["):
-        try: parsed = json.loads(stripped)
-        except json.JSONDecodeError: parsed = None
-    if parsed is None and text:
-        print(f"[claude_runner] fusion JSON parse failed; first 400 chars:\n{text[:400]}")
-
-    return ClaudeRun(ok=True, text=text, parsed_json=parsed,
-                     cost_usd=cost, model=envelope.get("model") or judge, raw=envelope)
+    return _fusion_envelope_to_run(envelope, judge)
 
 
 def run_brain_json(prompt: str, cwd: str, fusion: bool = False, **kw) -> ClaudeRun:
