@@ -549,40 +549,34 @@ set; fusion unavailable"`; with iTerm2 uninstalled, it still returns a valid
 - [ ] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")`, parse `do_fusion = fusion.lower() in ("1","true","yes","on")`, and thread it into `_send_in_background(... do_fusion=...)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true` → a temporary log in `_send_in_background` shows `do_fusion=True`.
 - [ ] **F3.2** `_send_in_background`: pass `fusion=do_fusion` into `rewriter.rewrite(...)` and record `do_fusion` on the existing `rewrite_ok` stage event. (No DB column needed.) · *verify:* a `fusion=true` send produces a panel-authored rewrite whose cost shows on the timeline; `fusion=true` + no key still dispatches via fallback, no hard failure.
 
-### Phase F4 — Dispatch-form toggle
-`templates/index.html`: a **Fusion checkbox** next to the effort/model selects
-(~index.html:76–94). Label `fusion (multi-model) ⚡`; muted hint
-`~4–5× cost; best for architecture / research / high-stakes`. In `send(rewrite)`
-(index.html:259) append `fd.append('fusion', chkFusion.checked ? 'true':'false')`
-alongside the existing `effort`/`model`/`rewrite` appends (lines 266–271). Works
-with **either** button (`rewrite & send` or `skip rewrite & send`). **Default
-OFF**, persisted in `localStorage` like the draft textarea. When
-`config.is_fusion_available()` is `False`, render the checkbox **disabled** with
-the note *"Set openrouter_api_key in ~/.orchestrator/config.json to enable."*
-(extend `_view_ctx()` to pass `fusion_available`). When on, the in-flight banner
-(index.html:294) should read `rewriting (multi-model) then dispatching (~15–40s).`
+### Phase F4 — Dispatch-form toggle *(the on/off toggle, UI side)*
+*Goal: a checkbox the user flips; default OFF, persisted, disabled when no key.*
+- [ ] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects (~index.html:76–94). Label `fusion (multi-model) ⚡` + muted hint `~4–5× cost; best for architecture / research / high-stakes`. Persist its state in `localStorage` like the draft textarea; **default OFF**. · *verify:* toggling it and reloading keeps the state.
+- [ ] **F4.2** In `send(rewrite)` (index.html:259) append `fd.append('fusion', chkFusion.checked ? 'true':'false')` next to the existing `effort`/`model`/`rewrite` appends (lines 266–271); works with **both** buttons. · *verify:* the `/send` request payload includes `fusion`.
+- [ ] **F4.3** Disabled state + affordances: extend `_view_ctx()` to pass `fusion_available = config.is_fusion_available()`; when false, render the checkbox **disabled** with *"Set openrouter_api_key in ~/.orchestrator/config.json to enable."* When on, the in-flight banner (index.html:294) reads `rewriting (multi-model) then dispatching (~15–40s).` · *verify:* no key → disabled w/ note; key present → enabled. **End-to-end toggle now works (F3 + F4).**
 
 ### Phase F5 — Surface + cost accounting
-In `/dispatch/{id}` (`templates/dispatch.html`), render `rewrite_ok`/`rewrite_skipped`
-events as today — they now carry fusion cost automatically (§2a). The `outcomes`
-row already has `cost_usd` (db.py:113); ensure the fused rewrite's cost flows into
-it so the future "when is fusion worth it?" learning loop sees true cost. Optional:
-a ⚡ badge on fused rows in `templates/_runs.html`.
+*Goal: fused dispatches are visible and their true cost is recorded.*
+- [ ] **F5.1** `/dispatch/{id}` (`templates/dispatch.html`): render the `rewrite_ok`/`rewrite_skipped` stage events (they already carry fusion cost — §2a). · *verify:* a fused dispatch's detail page shows the panel cost + model.
+- [ ] **F5.2** Ensure the fused rewrite's `cost_usd` flows into the `outcomes` row (`cost_usd` exists at db.py:113) so the learning loop sees true cost. · *verify:* the outcomes row for a fused dispatch reflects the panel spend.
+- [ ] **F5.3** ⟂ *(optional)* a ⚡ badge on fused rows in `templates/_runs.html`. · *verify:* fused runs are visually distinguishable in the runs list.
 
 ### Phase F6 — Summarizer + onboarding *(optional)*
-Same drop-in: `summarizer.summarize(...)` and `onboarding.analyze(...)` each take
-a `fusion` flag and call `run_brain_json(..., fusion=fusion)`. Lower priority —
-short sessions rarely justify panel cost (§7).
+*Goal: the other two brain calls can use Fusion too (same drop-in).*
+- [ ] **F6.1** ⟂ `summarizer.summarize(..., fusion=False)` → `run_brain_json(..., fusion=fusion)`; thread a flag from its caller. · *verify:* a summary can be produced via a fusion tab.
+- [ ] **F6.2** ⟂ `onboarding.analyze(..., fusion=False)` → `run_brain_json(..., fusion=fusion)`. · *verify:* an onboarding run can use a fusion tab.
 
-### Phase F7 — Enrichment-block mode *(optional, advanced)*
-The existing-plan idea, preserved as a distinct capability. New
-`orchestrator/lib/fusion.py`: `enrich(prompt, project_path) -> FusionResult` runs
-a panel to *reason about* the (already-rewritten) prompt and returns a fenced
-analysis block appended to the executor prompt — it does **not** rewrite the task.
+*(Lower priority — short sessions rarely justify panel cost, §7.)*
+
+### Phase F7 — Enrichment-block mode *(optional, advanced — a separate additive capability)*
+*Goal: optionally append a "multi-model analysis" block to the executor's prompt instead of replacing the rewrite. Build only once F1–F5 are solid.*
+- [ ] **F7.1** New `orchestrator/lib/fusion.py`: `enrich(prompt, project_path) -> FusionResult` (shape below) — calls `run_fusion_json` asking for the analysis JSON, renders the `## Multi-model analysis` block. Cap panel input ~12K chars (à la `embeddings.MAX_INPUT_CHARS`). · *verify:* `enrich(...)` returns an `enrichment_md` block; on any failure it returns the prompt unchanged (never raises).
+- [ ] **F7.2** Wire an enrich path into `_send_in_background` (separate from the rewrite): `fused_prompt = prompt + "\n\n" + enrichment_md`; **a failure here must NOT abort the dispatch**; record a distinct `fusion_ok`/`fusion_skipped` event (its cost is *not* the rewrite's). · *verify:* an enriched dispatch's prompt contains the analysis block; a forced enrich failure still dispatches.
+- [ ] **F7.3** ⟂ Surface the collapsible analysis on the dispatch detail page. · *verify:* the block renders, collapsed by default.
 
 ```python
 @dataclass
-class FusionRun:                      # in fusion.py / fusion_runner.py
+class FusionResult:                   # in fusion.py — NOTE: distinct from ClaudeRun (the drop-in path's return type)
     ok: bool
     analysis: Optional[dict] = None   # {consensus, contradictions, partial_coverage,
                                       #  unique_insights, blind_spots}
@@ -591,13 +585,6 @@ class FusionRun:                      # in fusion.py / fusion_runner.py
     cost_usd: float = 0.0
     error: str = ""
 ```
-
-On success `fused_prompt = prompt + "\n\n" + enrichment_md`; on failure, pass the
-prompt through unchanged (additive — **a fusion failure here must never abort the
-dispatch**, unlike a failed rewrite). Cap the panel input (~12K chars, à la
-`embeddings.MAX_INPUT_CHARS`) so we don't fan a 50KB bundle to 4 paid models.
-Record a separate `fusion_ok`/`fusion_skipped` stage event (this path's cost is
-*not* the rewrite's). Surface the collapsible analysis on the detail page.
 
 ### Phase F8 — Model-selection UI *(optional — the capability already exists)*
 You can already change models **without** this phase: edit `panel`/`judge`/`mode`
