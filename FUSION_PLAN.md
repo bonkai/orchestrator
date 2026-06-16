@@ -10,7 +10,7 @@ toggle is **off**, behavior is byte-for-byte identical to today.
 > HTTPS calls to **OpenRouter's servers**, and the prompt (which includes the
 > project bundle) leaves the laptop. This plan **intentionally relaxes both
 > rules**, but only behind a default-off toggle that falls back to the local
-> path automatically. See [§8](#8-deviation-acknowledgment) — read it before
+> path automatically. See §9 (Deviation acknowledgment) — read it before
 > implementing Phase F1.
 
 ---
@@ -38,7 +38,7 @@ perspectives beat one.
 
 **Overkill for:** routine coding, short rewrites, classification/tagging,
 anything a single Sonnet/Opus call already nails. Paying 4–5× for a one-line
-rewrite is waste (see [§6](#6-cost-model), [§7](#7-what-not-to-run-through-fusion)).
+rewrite is waste (see §5 Cost model and §7 What NOT to run).
 
 ---
 
@@ -108,7 +108,7 @@ routine rewrites directly and fans out only when the panel earns it, so we don't
 pay 5× on every dispatch. Keep both server-tool and plugin paths behind one
 private `_build_fusion_body()` helper so the public signature never changes; the
 **plugin** mode is the natural second step once we want a fixed, auditable budget
-panel.
+panel from the catalog in §6.
 
 > ⚠️ **Verify field names at implementation time.** `openrouter:fusion`,
 > `plugins[].analysis_models`, `judge_model` are the shapes described in the
@@ -119,7 +119,10 @@ panel.
 
 ## 4. Config & secrets
 
-- **`OPENROUTER_API_KEY`** is the secret. Resolution precedence (in `config.py`):
+- **`OPENROUTER_API_KEY`** is the secret — and the *only* one. OpenRouter is a
+  unified gateway: one key reaches **every** provider in §6 (OpenAI, Google,
+  xAI, DeepSeek, Moonshot, Z.ai, MiniMax, Qwen, Anthropic). We do **not** manage
+  nine separate provider keys. Resolution precedence (in `config.py`):
   **`OPENROUTER_API_KEY` env var → `~/.orchestrator/config.json["openrouter_api_key"]` → `None`.**
   Env-var-first lets a user keep the secret out of any file; the file fallback
   lets `install.sh` scaffold it and gives presets a home.
@@ -138,23 +141,115 @@ panel.
 
 Fusion bills as the **sum of every panel completion plus the judge**. A 3-model
 panel + judge ≈ **4–5× the cost of one equivalent call** — you pay for all four
-completions, not one.
+completions, not one. (Exact slugs + prices for every preset below are in §6.)
 
-| Preset | Panel | Judge | Rough cost vs. solo Opus |
-|--------|-------|-------|--------------------------|
-| **budget** ✅ | Gemini Flash + Kimi + DeepSeek | Opus 4.8 | **~0.5×** — matches frontier quality on the DRACO benchmark (per OpenRouter) |
-| **quality** | Opus 4.8 + GPT-latest + Gemini Pro | Opus 4.8 | ~4–5× |
+| Preset | Panel (cross-vendor) | Judge | Rough cost vs. solo Opus |
+|--------|----------------------|-------|--------------------------|
+| **budget** ✅ | DeepSeek V4 Pro + MiniMax M3 + Gemini 3.1 Flash-Lite | Opus 4.8 *(or Gemini 3.1 Pro to go cheaper)* | **~0.4–0.6×** — frontier-class panel for less than one frontier call |
+| **balanced** | DeepSeek V4 Pro + Grok 4.3 + Kimi K2.6 | Gemini 3.1 Pro Preview | ~1–1.5× |
+| **frontier** | GPT-5.5 + Gemini 3.1 Pro + Grok 4.3 | GPT-5.5 Pro *(or Opus 4.8)* | ~4–5× |
 | **server-tool** | escalates only on hard prompts | — | amortized; routine prompts ≈ 1× |
 
-Takeaways: make the **budget preset the default panel** — cheap panel + frontier
-judge reportedly beats a solo frontier call at about half the cost. Reserve
-**quality** for high-stakes rewrites (architecture, irreversible migrations). The
-**server-tool** mode is the cost-safety valve. Surface `run.cost_usd` on the
-`rewrite_ok` stage event (already recorded there) so the premium is visible.
+Takeaways: make the **budget preset the default panel** — with mid-2026 pricing a
+cheap cross-vendor panel + frontier judge beats a solo frontier call at roughly
+half the cost. Reserve **frontier** for high-stakes rewrites (architecture,
+irreversible migrations). The **server-tool** mode is the cost-safety valve.
+Surface `run.cost_usd` on the `rewrite_ok` stage event (already recorded there)
+so the premium is visible.
 
 ---
 
-## 6. What NOT to run through Fusion
+## 6. Model catalog & panel presets
+
+> **Snapshot: 2026-06-16.** Every slug below was verified against its live
+> `openrouter.ai` model page on this date. These labs ship point releases almost
+> weekly and OpenRouter deprecates/renames slugs — **re-verify before wiring**,
+> and prefer the config-driven presets (§4) over hard-coding so a model swap is a
+> config edit, not a code change. Prices are list rates ($/M tokens, input→output)
+> and vary slightly by the sub-provider OpenRouter routes to.
+
+**Why cross-vendor matters.** An ensemble only beats a solo call when panelists
+make *uncorrelated* errors. Build a panel from **different labs**, not three tiers
+of one vendor — and pick a judge from a different family than the panel majority.
+
+### Catalog (verified-live, June 2026)
+
+| Model | OpenRouter slug | Context | $/M (in→out) | Best panel role |
+|-------|-----------------|---------|--------------|-----------------|
+| **OpenAI** |
+| GPT-5.5 Pro | `openai/gpt-5.5-pro` | 1.05M | $30 → $180 | judge / frontier analyst |
+| GPT-5.5 | `openai/gpt-5.5` | 1.05M | $5 → $30 | frontier analyst |
+| GPT-5.4 Nano | `openai/gpt-5.4-nano` | 400K | $0.20 → $1.25 | cheap classify/score |
+| **Google** |
+| Gemini 3.1 Pro Preview | `google/gemini-3.1-pro-preview` | ~1M | $2 → $12 | analyst / judge (multimodal) |
+| Gemini 3.5 Flash | `google/gemini-3.5-flash` | ~1M | $1.50 → $9 | fast, near-Pro quality |
+| Gemini 3.1 Flash-Lite | `google/gemini-3.1-flash-lite` | ~1M | $0.25 → $1.50 | budget analyst (1M ctx) |
+| **xAI** |
+| Grok 4.3 | `x-ai/grok-4.3` | 1M | $1.25 → $2.50 | frontier analyst (newest reasoning) |
+| Grok 4.20 | `x-ai/grok-4.20` | **2M** | $1.25 → $2.50 | long-context judge |
+| Grok 4 Fast | `x-ai/grok-4-fast` | 2M | $0.20 → $0.50 | budget seat |
+| **DeepSeek** |
+| DeepSeek V4 Pro | `deepseek/deepseek-v4-pro` | 1.05M | $0.44 → $0.87 | **best quality/$ analyst** |
+| DeepSeek V4 Flash | `deepseek/deepseek-v4-flash` | 1.05M | $0.09 → $0.18 | ultra-cheap filler |
+| **Moonshot (Kimi)** |
+| Kimi K2.6 | `moonshotai/kimi-k2.6` | 262K | $0.68 → $3.41 | open reasoning/agentic analyst |
+| Kimi K2 Thinking | `moonshotai/kimi-k2-thinking` | 262K | $0.60 → $2.50 | reasoning specialist |
+| Kimi K2.7 Code | `moonshotai/kimi-k2.7-code` | 262K | $0.74 → $3.50 | coding specialist |
+| **Z.ai (GLM)** | *(prefix is `z-ai`, not `zhipu`)* |
+| GLM-5.2 | `z-ai/glm-5.2` | ~1M | $1.40 → $4.40 | agentic/coding analyst |
+| GLM-4.7 Flash | `z-ai/glm-4.7-flash` | 203K | $0.06 → $0.40 | cheapest seat |
+| **MiniMax** |
+| MiniMax M3 | `minimax/minimax-m3` | ~1M | $0.30 → $1.20 | **value analyst (multimodal)** |
+| MiniMax M2.5 | `minimax/minimax-m2.5` | 205K | $0.15 → $0.90 | budget seat |
+| **Alibaba (Qwen)** |
+| Qwen3.7 Max | `qwen/qwen3.7-max` | 1M | $1.25 → $3.75 | flagship analyst |
+| Qwen3.7 Plus | `qwen/qwen3.7-plus` | 1M | $0.32 → $1.28 | value analyst (1M ctx) |
+| **Anthropic** | *(⚠ confirm exact slug — see caveats)* |
+| Claude Opus 4.8 | `anthropic/claude-opus-4-8` ⚠ | — | judge / executor |
+| Claude Sonnet 4.6 | `anthropic/claude-sonnet-4-6` ⚠ | — | balanced analyst |
+| Claude Haiku 4.5 | `anthropic/claude-haiku-4-5` ⚠ | — | cheap seat |
+
+### Recommended presets (drop into `config.json` / the F1 constants)
+
+```jsonc
+// budget — cross-vendor, frontier-class quality, ~0.4–0.6× a solo frontier call
+{ "panel": ["deepseek/deepseek-v4-pro", "minimax/minimax-m3", "google/gemini-3.1-flash-lite"],
+  "judge": "anthropic/claude-opus-4-8" }            // swap → "google/gemini-3.1-pro-preview" to cut cost
+
+// balanced — three strong, maximally-diverse labs
+{ "panel": ["deepseek/deepseek-v4-pro", "x-ai/grok-4.3", "moonshotai/kimi-k2.6"],
+  "judge": "google/gemini-3.1-pro-preview" }
+
+// frontier — max quality, high-stakes only
+{ "panel": ["openai/gpt-5.5", "google/gemini-3.1-pro-preview", "x-ai/grok-4.3"],
+  "judge": "openai/gpt-5.5-pro" }                   // swap → "anthropic/claude-opus-4-8"
+```
+
+### Caveats the implementer must know
+
+- **One key, all providers.** Enabling a provider = referencing its slug; billing
+  and auth are unified through the single OpenRouter key (§4). No per-vendor keys.
+- **Gemini 3.5 Pro is NOT live on OpenRouter yet** (`google/gemini-3.5-pro` 404s as
+  of 2026-06-16 — announced at I/O, GA "slated for June"). Use
+  `google/gemini-3.1-pro-preview` until it resolves.
+- **GLM provider prefix is `z-ai`** (e.g. `z-ai/glm-5.2`), a common gotcha — not
+  `zhipu`/`zhipuai`.
+- **Grok numbering is misleading:** `x-ai/grok-4.3` (Apr 30) is *newer* than
+  `x-ai/grok-4.20` (Mar 31, meme-numbered). Use 4.3 for newest reasoning, 4.20 for
+  the 2M window — same price.
+- **`openai/gpt-5.5-mini` does not exist;** OpenAI's cheap tier is the `gpt-5.4`
+  family (`gpt-5.4-mini`, `gpt-5.4-nano`).
+- **Anthropic slugs are unverified** by this research (the ⚠ rows): confirm the
+  exact OpenRouter form (hyphen vs dot, e.g. `claude-opus-4-8` vs `claude-opus-4.8`)
+  before wiring. Opus 4.8 is also our executor model, so it's a natural judge.
+- **Llama / Mistral omitted:** in mid-2026 the open frontier is Chinese (DeepSeek
+  V4, Kimi K2.6/2.7, GLM-5.2, Qwen3.7, MiniMax M3); Llama 4 and Mistral have fallen
+  behind on coding/agentic benchmarks. Add back only if a future release leads.
+- **Promo pricing:** MiniMax M3's $0.30→$1.20 is a launch promo and may rise.
+
+---
+
+## 7. What NOT to run through Fusion
 
 Keep these on the existing single-`claude` path (or no LLM at all):
 
@@ -175,7 +270,7 @@ from disagreement among models.** Everything routine stays solo.
 
 ---
 
-## 7. Phased rollout
+## 8. Phased rollout
 
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
@@ -187,7 +282,7 @@ from disagreement among models.** Everything routine stays solo.
 | **F5** | Surface + cost | show `fusion`/`rewrite` events; cost in outcomes | ☐ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
-| **F8** (opt) | Config UI & presets | switch budget/quality presets; key stays file-only | ☐ |
+| **F8** (opt) | Config UI & presets | switch budget/balanced/frontier presets; key stays file-only | ☐ |
 
 **F0–F5 deliver a working, shippable Fusion toggle.** F6–F8 are extensions and
 polish. Each phase is independently testable and sized for a single dispatch.
@@ -196,7 +291,7 @@ polish. Each phase is independently testable and sized for a single dispatch.
 New `orchestrator/lib/config.py`: `load_config() -> dict` (reads
 `~/.orchestrator/config.json`, returns `{}` if absent/malformed — never raises),
 `get_openrouter_key() -> str | None` (env → file → None), `fusion_config() -> dict`
-(`{mode, panel, judge, preset, timeout_s}` merged over defaults),
+(`{mode, panel, judge, preset, timeout_s}` merged over the §6 defaults),
 `is_fusion_available() -> bool`. `bin/install.sh` writes a `config.json` template
 **only if absent** (idempotent), all keys present with `openrouter_api_key`
 empty, and prints where to paste the key.
@@ -216,13 +311,16 @@ import urllib.request, urllib.error            # (json, os already imported)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # A "panel" = analysis models; the judge synthesizes their answers.
-FUSION_PANEL_BUDGET   = ["google/gemini-flash-latest",
-                         "moonshotai/kimi-latest",
-                         "deepseek/deepseek-chat"]
-FUSION_PANEL_QUALITY  = ["anthropic/claude-opus-4-8", "openai/gpt-latest",
-                         "google/gemini-pro-latest"]
+# Slugs verified live on OpenRouter 2026-06-16 — see §6 (catalog + 'balanced'
+# preset). Re-verify before relying on them; labs deprecate/rename slugs.
+FUSION_PANEL_BUDGET   = ["deepseek/deepseek-v4-pro",       # frontier quality/$  $0.44→$0.87
+                         "minimax/minimax-m3",             # multimodal value    $0.30→$1.20
+                         "google/gemini-3.1-flash-lite"]   # cheap 1M context    $0.25→$1.50
+FUSION_PANEL_FRONTIER = ["openai/gpt-5.5",                 # $5→$30
+                         "google/gemini-3.1-pro-preview",  # $2→$12
+                         "x-ai/grok-4.3"]                  # $1.25→$2.50
 DEFAULT_FUSION_PANEL     = FUSION_PANEL_BUDGET
-DEFAULT_FUSION_JUDGE     = "anthropic/claude-opus-4-8"
+DEFAULT_FUSION_JUDGE     = "anthropic/claude-opus-4-8"     # strong cross-family synthesizer
 DEFAULT_FUSION_MODE      = "server_tool"        # "alias" | "server_tool" | "plugin"
 DEFAULT_FUSION_TIMEOUT_S = 300
 
@@ -253,7 +351,7 @@ def run_fusion_json(
     """OpenRouter Fusion sibling of run_claude_json. Returns the SAME ClaudeRun so
     the rewriter/summarizer can call either interchangeably. Never raises: returns
     ClaudeRun(ok=False, error=...) on missing key, HTTP/timeout error, or
-    unparseable body. NOTE: calls OpenRouter's servers — see FUSION_PLAN §8."""
+    unparseable body. NOTE: calls OpenRouter's servers — see FUSION_PLAN §9."""
     key = api_key or config.get_openrouter_key()
     if not key:
         return ClaudeRun(ok=False, error="OPENROUTER_API_KEY not set; fusion unavailable")
@@ -314,9 +412,9 @@ Content-Type: application/json
   "messages": [{ "role": "user", "content": "<the rewriter prompt>" }],
   "plugins": [{
     "id": "fusion",
-    "analysis_models": ["google/gemini-flash-latest",
-                        "moonshotai/kimi-latest",
-                        "deepseek/deepseek-chat"],
+    "analysis_models": ["deepseek/deepseek-v4-pro",
+                        "minimax/minimax-m3",
+                        "google/gemini-3.1-flash-lite"],
     "judge_model": "anthropic/claude-opus-4-8"
   }],
   "usage": { "include": true }            // return cost in the usage object
@@ -335,7 +433,7 @@ error="OPENROUTER_API_KEY not set; fusion unavailable"`.
 Everything downstream (`run.ok` / `run.parsed_json` / `run.cost_usd`) is
 unchanged. **The existing auto-retry must NOT re-run Fusion** — force the retry
 through `run_claude_json` directly (a strict-JSON reminder to one model is the
-cheap, reliable fix). Default panel: budget preset.
+cheap, reliable fix). Default panel: budget preset (§6).
 *Acceptance:* with fusion on + key, the rewrite's cost reflects panel spend and
 the prompt is panel-authored; with fusion on + no key, it transparently produces
 the same result as today.
@@ -373,7 +471,7 @@ a ⚡ badge on fused rows in `templates/_runs.html`.
 ### Phase F6 — Summarizer + onboarding *(optional)*
 Same drop-in: `summarizer.summarize(...)` and `onboarding.analyze(...)` each take
 a `fusion` flag and call `run_brain_json(..., fusion=fusion)`. Lower priority —
-short sessions rarely justify panel cost (§6).
+short sessions rarely justify panel cost (§7).
 
 ### Phase F7 — Enrichment-block mode *(optional, advanced)*
 The existing-plan idea, preserved as a distinct capability. New
@@ -402,13 +500,14 @@ Record a separate `fusion_ok`/`fusion_skipped` stage event (this path's cost is
 
 ### Phase F8 — Config UI & presets *(optional polish)*
 A read-only `/settings` view: fusion availability, current panel/judge/mode, and
-preset switch (`budget` / `quality` / `custom`) resolved by `config.fusion_config()`.
-The **key is never editable from the browser**. Append a `Phase 10 — Fusion ✅`
-entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md` once shipped.
+preset switch (`budget` / `balanced` / `frontier` / `custom`) resolved by
+`config.fusion_config()` against the §6 catalog. The **key is never editable from
+the browser**. Append a `Phase 10 — Fusion ✅` entry to `PLAN.md` and a short
+`## Fusion` note to `CLAUDE.md` once shipped.
 
 ---
 
-## 8. Deviation acknowledgment
+## 9. Deviation acknowledgment
 
 The honest version the hard rules demand — no hand-waving that "OpenRouter isn't
 the Anthropic API, so nothing's broken." **Two rules are broken, on purpose,
@@ -444,9 +543,12 @@ config live in `~/.orchestrator/`, never the repo.
 `OPENROUTER_API_KEY` required, no network egress beyond what `claude` already does.
 
 **Data-egress note:** because the bundle can contain project memory and source,
-treat the toggle as *"send this project's context to a third party."* Keep it
-opt-in per send; consider a one-time confirmation the first time it's enabled. Do
-**not** enable Fusion for any project whose contents shouldn't leave the machine.
+treat the toggle as *"send this project's context to a third party."* The panel
+also fans your prompt out to **non-Anthropic** providers (OpenAI, Google, xAI,
+DeepSeek, Moonshot, Z.ai, MiniMax, Qwen — several of them Chinese labs), so the
+data-egress surface is wider than a single vendor. Keep it opt-in per send;
+consider a one-time confirmation the first time it's enabled. Do **not** enable
+Fusion for any project whose contents shouldn't leave the machine.
 
 ---
 
@@ -474,6 +576,8 @@ opt-in per send; consider a one-time confirmation the first time it's enabled. D
   prose-wrapped JSON) — don't re-invent it.
 - Mirror the `rewrite_event` recording pattern for any `fusion_event`
   (`db.record_event(dispatch_id, "stage", …)` after the dispatch row exists).
+- Model slugs (§6) are a 2026-06-16 snapshot — verify live before wiring; prefer
+  config-driven presets so a swap is a config edit, not a code change.
 - **Edits don't take effect until you restart `python -m orchestrator`** (uvicorn
   runs `reload=False` on :7878), and the **auto-push daemon commits within
   seconds** — `git diff` won't show your changes.
