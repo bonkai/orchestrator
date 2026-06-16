@@ -5,18 +5,18 @@ This is a phased implementation plan, not a built feature. When the Fusion
 toggle is **off**, behavior is byte-for-byte identical to today.
 
 > ⚠️ **Hard-rule deviation, stated up front.** CLAUDE.md says *"No Anthropic API
-> calls — all brain work goes through headless `claude` subprocesses"* and
+> calls"* and
 > *"Local only. No remote workers, no hosted services."* Fusion makes outbound
 > HTTPS calls to **OpenRouter's servers**, and the prompt (which includes the
 > project bundle) leaves the laptop. This plan **intentionally relaxes both
 > rules**, but only behind a default-off toggle that falls back to the local
 > path automatically.
 >
-> **On "headless":** the code already moved brain calls from headless subprocesses
-> to **visible iTerm2 tabs** (`run_claude_json`) — so CLAUDE.md's "headless" wording
-> is itself stale, and **Fusion runs in a watchable tab too** (F1). The deviation
-> that actually remains is *external API egress*, not headless-vs-visible. See §9
-> (Deviation acknowledgment) — read it before implementing Phase F1.
+> **On "headless":** brain calls run in **visible iTerm2 tabs** (`run_claude_json`),
+> not headless subprocesses, and CLAUDE.md already says so — **Fusion runs in a
+> watchable tab too** (F1). So the deviation that actually remains is *external API
+> egress*, not headless-vs-visible. See §9 (Deviation acknowledgment) — read it
+> before implementing Phase F1.
 
 ---
 
@@ -609,13 +609,13 @@ The honest version the hard rules demand — no hand-waving that "OpenRouter isn
 the Anthropic API, so nothing's broken." **Two rules are broken, on purpose,
 opt-in only:**
 
-1. *"No Anthropic API calls — all brain work via headless `claude` subprocesses."*
+1. *"No Anthropic API calls"* — brain work runs through the local `claude` CLI (in visible tabs).
    Fusion replaces those subprocess calls with an outbound **OpenRouter HTTPS
    request** (which itself calls Anthropic/OpenAI/Google server-side). The
    *spirit* of the rule — brain work runs as local subprocesses — is relaxed.
-   (Aside: CLAUDE.md's "headless" wording is itself outdated — the code now runs
-   those subprocesses in **visible iTerm2 tabs**, and the Fusion call runs in a
-   watchable tab too. So this deviation is about *API egress*, not headless-vs-visible.)
+   (Those `claude` subprocesses run in **visible iTerm2 tabs**, and the Fusion call
+   runs in a watchable tab too — so this deviation is purely about *API egress*, not
+   headless-vs-visible.)
 2. *"Local only. No remote workers, no hosted services."* Fusion's panel + judge
    run **on OpenRouter's infrastructure**, and the prompt — which includes the
    project bundle (CLAUDE.md, memory, recent tasks, source excerpts) — **leaves
