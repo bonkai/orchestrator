@@ -293,6 +293,44 @@ class TestReaper(unittest.TestCase):
         self.assertEqual(d["final_outcome"], "orphaned")
         self.assertEqual(d["outcome_reason"], "no_pid_record")
 
+    def test_periodic_reaper_skips_young_no_pid(self):
+        """The periodic reaper (min_age_s set) must NOT orphan a just-spawned,
+        no-PID dispatch — it may still be writing its PID file (iTerm latency)."""
+        did = db.create_dispatch(self.project_id, "young-no-pid", wall_clock_cap_s=600)
+        db.mark_started(did, terminal_pid=None, claude_pid=None)  # started_at = now
+        watchdog.reap_orphans(min_age_s=60)
+        d = db.get_dispatch(did)
+        self.assertEqual(d["status"], "running",
+                         "young no-PID dispatch was falsely orphaned by the reaper")
+
+    def test_periodic_reaper_reaps_old_no_pid(self):
+        """Past the grace window, a no-PID dispatch IS reaped."""
+        import sqlite3, time as _time
+        did = db.create_dispatch(self.project_id, "old-no-pid", wall_clock_cap_s=600)
+        db.mark_started(did, terminal_pid=None, claude_pid=None)
+        # Backdate started_at so it's older than the grace window.
+        con = sqlite3.connect(str(db.DB_PATH))
+        con.execute("UPDATE dispatches SET started_at = ? WHERE id = ?",
+                    (int(_time.time()) - 120, did))
+        con.commit(); con.close()
+        watchdog.reap_orphans(min_age_s=60)
+        d = db.get_dispatch(did)
+        self.assertEqual(d["final_outcome"], "orphaned")
+        self.assertEqual(d["outcome_reason"], "no_pid_record")
+
+    def test_periodic_reaper_reaps_young_dead_pid(self):
+        """A genuinely-dead recorded PID is reaped even within the grace window:
+        the age guard only protects the no-PID (still-spawning) case, so a
+        fast-failing claude (e.g. not on PATH) is still caught immediately."""
+        did = db.create_dispatch(self.project_id, "young-dead-pid", wall_clock_cap_s=600)
+        dead_pid = 99999999
+        self.assertFalse(spawn.pid_alive(dead_pid))
+        db.mark_started(did, terminal_pid=None, claude_pid=dead_pid)  # started_at = now
+        watchdog.reap_orphans(min_age_s=60)
+        d = db.get_dispatch(did)
+        self.assertEqual(d["final_outcome"], "orphaned")
+        self.assertEqual(d["outcome_reason"], "process_gone")
+
 
 # ─── Test 4: watchdog wall-clock cap ─────────────────────────────────────
 
