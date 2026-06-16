@@ -27,6 +27,12 @@ _pausing: set[int] = set()
 PAUSE_SESSION_GRACE_S = 8.0
 PAUSE_SESSION_POLL_S = 0.5
 
+# Periodic orphan reaper: how often to scan, and how old a 'running' dispatch
+# with no recorded PID must be before we treat it as failed-to-launch (rather
+# than still-spawning — iTerm can take a moment to write the PID file).
+ORPHAN_REAP_INTERVAL_S = 45
+ORPHAN_REAP_GRACE_S = 60
+
 
 def is_pausing(dispatch_id: int) -> bool:
     """True while a timeout pause is in flight for this dispatch (between
@@ -141,16 +147,30 @@ async def kill_all() -> int:
     return sum(1 for r in results if r is True)
 
 
-def reap_orphans():
+def reap_orphans(min_age_s: int = 0):
     """For each 'running' dispatch, check if its claude PID is still alive.
     If not, mark it as orphaned (process died without Stop hook firing —
-    happens when user Ctrl-D's manually or kills via Activity Monitor, or
-    when orchestrator was down when the Stop hook tried to post)."""
+    happens when user Ctrl-D's manually or kills via Activity Monitor, when
+    `claude` isn't on the tab's PATH so `exec` fails, or when orchestrator was
+    down when the Stop hook tried to post).
+
+    `min_age_s` guards the no-PID branch only: a just-spawned dispatch may not
+    have written its PID file yet (iTerm startup latency), so when reaping
+    periodically we skip no-PID dispatches younger than this to avoid
+    false-orphaning a still-spawning one. Boot reaping passes 0 (nothing is
+    mid-spawn during boot). A *dead* recorded PID is always reaped regardless
+    of age — that's genuinely gone, even seconds after spawn."""
+    now_ts = int(time.time())
     for d in db.running_dispatches():
         pid = d.get("claude_pid") or spawn.read_pid_now(d["id"])
         # No pid recorded AND no pid file → either dispatch never actually
-        # started or its files were cleaned up. Mark orphaned.
+        # started or its files were cleaned up. Mark orphaned, unless it's
+        # young enough to still be writing its PID file.
         if not pid:
+            if min_age_s:
+                started = d.get("started_at") or d.get("created_at") or now_ts
+                if (now_ts - started) < min_age_s:
+                    continue
             db.mark_orphaned(d["id"], reason="no_pid_record")
             spawn.cleanup_dispatch_files(d["id"])
             continue
@@ -159,13 +179,27 @@ def reap_orphans():
             spawn.cleanup_dispatch_files(d["id"])
 
 
+async def run_orphan_reaper(interval_s: int = ORPHAN_REAP_INTERVAL_S):
+    """Background loop: periodically reap dispatches whose claude process died
+    without firing a Stop hook. Without this, such rows sit 'running' until the
+    wall-clock cap (~30 min) or the next restart. reap_orphans() hits the DB and
+    runs `ps`, so offload it to a thread to keep the event loop free. The first
+    scan waits one interval — boot already reaped via resume_watchers_on_boot."""
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await loop.run_in_executor(None, reap_orphans, ORPHAN_REAP_GRACE_S)
+        except Exception as e:
+            log.warning("orphan reaper iteration failed: %s", e)
+
+
 def resume_watchers_on_boot():
     """On orchestrator restart:
       1. Reap any dispatches whose claude is already dead (orphan cleanup).
       2. For dispatches still genuinely running, re-attach a wall-clock
          watchdog with the time they have left on their original cap.
     """
-    import time
     reap_orphans()
     now_ts = int(time.time())
     for d in db.running_dispatches():
