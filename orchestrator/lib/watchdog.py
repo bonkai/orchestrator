@@ -6,6 +6,7 @@ in a later phase; it requires tailing the session JSONL and is not in MVP.
 
 import asyncio
 import logging
+import time
 
 from orchestrator.lib import db, idle_notifier, spawn
 
