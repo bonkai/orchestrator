@@ -10,8 +10,13 @@ toggle is **off**, behavior is byte-for-byte identical to today.
 > HTTPS calls to **OpenRouter's servers**, and the prompt (which includes the
 > project bundle) leaves the laptop. This plan **intentionally relaxes both
 > rules**, but only behind a default-off toggle that falls back to the local
-> path automatically. See §9 (Deviation acknowledgment) — read it before
-> implementing Phase F1.
+> path automatically.
+>
+> **On "headless":** the code already moved brain calls from headless subprocesses
+> to **visible iTerm2 tabs** (`run_claude_json`) — so CLAUDE.md's "headless" wording
+> is itself stale, and **Fusion runs in a watchable tab too** (F1). The deviation
+> that actually remains is *external API egress*, not headless-vs-visible. See §9
+> (Deviation acknowledgment) — read it before implementing Phase F1.
 
 ---
 
@@ -56,7 +61,7 @@ one primary, one optional:
 
 When the toggle is on, the **internal LLM call** inside the rewriter (and,
 optionally, the summarizer / onboarding analyzer) routes through Fusion instead
-of headless `claude`. It produces the *same kind of artifact* (a rewritten
+of the visible-tab `claude` call. It produces the *same kind of artifact* (a rewritten
 prompt, a summary) — just authored by a panel+judge.
 
 This is the cleanest design because `claude_runner.py` is *"the single entry
@@ -66,12 +71,18 @@ the **same `ClaudeRun` dataclass** as `run_claude_json()`, so every existing
 caller works unchanged, and route through one dispatcher so the single-entry
 invariant holds.
 
+And like `run_claude_json`, **`run_fusion_json` runs in its own watchable iTerm2
+tab** — a `spawn_fusion_tab` mirroring the existing `spawn_brain_tab` — so the
+OpenRouter request and the panel/judge response stream where you can see them.
+No hidden in-process HTTP. See F1.
+
 ```
-                  ┌──────────── BRAIN CALL (swappable) ─────────────┐
- task ─▶ bundle ─▶│ run_brain_json(fusion?)                         │─▶ rewritten ─▶ spawn iTerm2 ─▶ claude
-                  │   fusion OFF → run_claude_json  (headless -p)    │                 (EXECUTOR — unchanged)
-                  │   fusion ON  → run_fusion_json  (OpenRouter)     │
-                  └─────────────────────────────────────────────────┘
+                  ┌────── BRAIN CALL (swappable — ALWAYS in a watchable tab) ───────┐
+ task ─▶ bundle ─▶│ run_brain_json(fusion?)                                         │─▶ rewritten ─▶ spawn iTerm2 ─▶ claude
+                  │   fusion OFF → run_claude_json → visible iTerm2 brain  tab       │                 (EXECUTOR — unchanged)
+                  │   fusion ON  → run_fusion_json → visible iTerm2 fusion tab       │
+                  └─────────────────────────────────────────────────────────────────┘
+  Brain, fusion, and executor each run in their own iTerm2 tab you can watch live.
 ```
 
 Bonus: fusion cost rides through the **existing** `rewrite_ok` cost plumbing for
@@ -309,10 +320,14 @@ empty, and prints where to paste the key.
 is `False` clean, `True` once the key is set via either source.
 
 ### Phase F1 — `claude_runner.py` extension *(the core)*
-Add `run_fusion_json()` beside `run_claude_json()`: same `ClaudeRun` return,
-same never-raises contract, same stdlib-only HTTP style as `embeddings.py`
-(`urllib.request`, **no new deps**). Reuse the module's existing `_strip_fences`
-for JSON extraction.
+Add `run_fusion_json()` beside `run_claude_json()`: same `ClaudeRun` return, same
+never-raises contract, and — crucially — the **same visible-tab behavior**.
+`run_claude_json` already runs every brain call in a watchable iTerm2 tab
+(`spawn_brain_tab` + `brain_run.sh`, stream tee'd to a sidecar it parses back);
+`run_fusion_json` mirrors that with `spawn_fusion_tab` + `fusion_run.sh` so the
+OpenRouter call is equally watchable. An in-process `urllib` call (stdlib, **no
+new deps**) is kept as a fallback for when iTerm2 isn't installed. Reuse the
+module's existing `_strip_fences` for JSON extraction.
 
 ```python
 # ── additions to orchestrator/lib/claude_runner.py ───────────────────────────
