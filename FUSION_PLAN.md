@@ -168,6 +168,16 @@ so the premium is visible.
 > config edit, not a code change. Prices are list rates ($/M tokens, input→output)
 > and vary slightly by the sub-provider OpenRouter routes to.
 
+**Models are pass-through, not baked in.** The API functions forward *any* slug at
+*any* level — each panel seat, the judge, and the server-tool outer model are just
+strings handed verbatim to OpenRouter. There is no allowlist, enum, or validation
+against this catalog, so a brand-new version works the instant OpenRouter lists it,
+with **zero code changes**. This table is therefore a *dated reference*, not a fixed
+set; the live source of truth is OpenRouter's own `/api/v1/models` (fetched at
+runtime via `list_openrouter_models()`, surfaced in the F8 picker). Model choice
+resolves **explicit arg → `~/.orchestrator/config.json` → last-resort seed**, so
+"use a different model/version" is a config edit or a UI pick, never a redeploy.
+
 **Why cross-vendor matters.** An ensemble only beats a solo call when panelists
 make *uncorrelated* errors. Build a panel from **different labs**, not three tiers
 of one vendor — and pick a judge from a different family than the panel majority.
@@ -209,7 +219,7 @@ of one vendor — and pick a judge from a different family than the panel majori
 | Claude Sonnet 4.6 | `anthropic/claude-sonnet-4-6` ⚠ | — | balanced analyst |
 | Claude Haiku 4.5 | `anthropic/claude-haiku-4-5` ⚠ | — | cheap seat |
 
-### Recommended presets (drop into `config.json` / the F1 constants)
+### Starting-point presets (store in `config.json`, edit freely — not hard-coded)
 
 ```jsonc
 // budget — cross-vendor, frontier-class quality, ~0.4–0.6× a solo frontier call
@@ -311,8 +321,10 @@ import urllib.request, urllib.error            # (json, os already imported)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # A "panel" = analysis models; the judge synthesizes their answers.
-# Slugs verified live on OpenRouter 2026-06-16 — see §6 (catalog + 'balanced'
-# preset). Re-verify before relying on them; labs deprecate/rename slugs.
+# SEED FALLBACKS ONLY — not an allowlist. Real models resolve per call:
+#   explicit arg → config.fusion_config() (~/.orchestrator/config.json) → these.
+# Nothing validates a slug; any model OpenRouter lists works the moment it ships
+# (§6). The slugs below are a 2026-06-16 snapshot — expect weekly churn.
 FUSION_PANEL_BUDGET   = ["deepseek/deepseek-v4-pro",       # frontier quality/$  $0.44→$0.87
                          "minimax/minimax-m3",             # multimodal value    $0.30→$1.20
                          "google/gemini-3.1-flash-lite"]   # cheap 1M context    $0.25→$1.50
@@ -341,22 +353,30 @@ def _build_fusion_body(prompt, panel, judge, mode, outer_model) -> dict:
 def run_fusion_json(
     prompt: str,
     cwd: str = "",                                  # accepted for parity; unused (no local fs)
-    panel: Optional[list] = None,                   # None → DEFAULT_FUSION_PANEL
-    judge: str = DEFAULT_FUSION_JUDGE,
-    mode: str = DEFAULT_FUSION_MODE,
-    outer_model: str = DEFAULT_FUSION_JUDGE,        # used only in server_tool mode
-    timeout_s: int = DEFAULT_FUSION_TIMEOUT_S,
+    panel: Optional[list] = None,                   # any list of slugs; None → config → seed
+    judge: Optional[str] = None,                    # any slug;          None → config → seed
+    mode: Optional[str] = None,                     # alias|server_tool|plugin; None → config → seed
+    outer_model: Optional[str] = None,              # server_tool outer model;  None → judge
+    timeout_s: Optional[int] = None,                # None → config → seed
     api_key: Optional[str] = None,                  # None → config.get_openrouter_key()
 ) -> ClaudeRun:
     """OpenRouter Fusion sibling of run_claude_json. Returns the SAME ClaudeRun so
     the rewriter/summarizer can call either interchangeably. Never raises: returns
     ClaudeRun(ok=False, error=...) on missing key, HTTP/timeout error, or
-    unparseable body. NOTE: calls OpenRouter's servers — see FUSION_PLAN §9."""
+    unparseable body. Any slug works at any level (panel/judge/outer) — forwarded
+    verbatim to OpenRouter, no allowlist; choice resolves arg → config → seed.
+    NOTE: calls OpenRouter's servers — see FUSION_PLAN §9."""
     key = api_key or config.get_openrouter_key()
     if not key:
         return ClaudeRun(ok=False, error="OPENROUTER_API_KEY not set; fusion unavailable")
 
-    body = _build_fusion_body(prompt, panel or DEFAULT_FUSION_PANEL, judge, mode, outer_model)
+    cfg = config.fusion_config()                        # {} if unset → pure seed fallback
+    panel       = panel       or cfg.get("panel")     or DEFAULT_FUSION_PANEL
+    judge       = judge       or cfg.get("judge")     or DEFAULT_FUSION_JUDGE
+    mode        = mode        or cfg.get("mode")      or DEFAULT_FUSION_MODE
+    outer_model = outer_model or cfg.get("outer")     or judge
+    timeout_s   = timeout_s   or cfg.get("timeout_s") or DEFAULT_FUSION_TIMEOUT_S
+    body = _build_fusion_body(prompt, panel, judge, mode, outer_model)
     req = urllib.request.Request(
         OPENROUTER_URL, data=json.dumps(body).encode(), method="POST",
         headers={"Authorization": f"Bearer {key}",
@@ -399,6 +419,24 @@ def run_brain_json(prompt: str, cwd: str, fusion: bool = False, **kw) -> ClaudeR
             return run
         print(f"[claude_runner] fusion unavailable ({run.error}); falling back to claude")
     return run_claude_json(prompt=prompt, cwd=cwd)
+
+
+def list_openrouter_models(api_key: Optional[str] = None, timeout_s: int = 15) -> list:
+    """GET /api/v1/models — the LIVE catalog OpenRouter serves right now, so the
+    F8 picker can show currently-available models/versions instead of a hard-coded
+    list that goes stale weekly. New releases appear here automatically. Never
+    raises; returns [] on failure. Each item: {id, name, context_length, pricing}."""
+    key = api_key or config.get_openrouter_key()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/models",
+        headers={"Authorization": f"Bearer {key}"} if key else {},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as r:
+            return (json.loads(r.read().decode()) or {}).get("data", [])
+    except Exception as e:
+        print(f"[claude_runner] could not fetch OpenRouter model list: {e}")
+        return []
 ```
 
 **OpenRouter request body** (plugin mode — the most explicit):
