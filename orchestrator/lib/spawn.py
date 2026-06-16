@@ -112,7 +112,7 @@ claude -p "$PROMPT" \
     --output-format stream-json \
     --verbose \
     --dangerously-skip-permissions \
-    --effort "$EFFORT" | tee "$OUT_FILE"
+    --effort "$EFFORT" < /dev/null | tee "$OUT_FILE"
 code=${PIPESTATUS[0]}
 echo "$code" > "$DONE_FILE"
 echo

@@ -586,17 +586,14 @@ class FusionResult:                   # in fusion.py — NOTE: distinct from Cla
     error: str = ""
 ```
 
-### Phase F8 — Model-selection UI *(optional — the capability already exists)*
-You can already change models **without** this phase: edit `panel`/`judge`/`mode`
-in `~/.orchestrator/config.json`, or pass them per call. F8 just makes it clickable.
-A `/settings` (or dispatch-form) picker that (a) lists **currently-available**
-models/versions via `claude_runner.list_openrouter_models()` (live `/api/v1/models`,
-so new releases show up with zero code change), (b) lets you choose a preset
-(`budget`/`balanced`/`frontier`/`custom`) **or** hand-pick each panel seat + judge +
-version, and (c) saves the choice to `config.json` (or threads it per-dispatch like
-`effort`/`model`). The **key is never editable from the browser**. Append a
-`Phase 11 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`
-once shipped.
+### Phase F8 — Model-selection UI *(lets you pick ALL the models — capability already exists in config)*
+*Goal: a UI to select any OpenRouter model(s) for the panel + judge. You can already do this by editing `config.json`; F8 makes it clickable.*
+- [ ] **F8.1** `/settings` read view: show fusion availability + the current `mode`/`panel`/`judge` from `config.fusion_config()`. **Key is never shown or editable in the browser.** · *verify:* the page reflects what's in `config.json`.
+- [ ] **F8.2** Preset switch — pick `budget`/`balanced`/`frontier`/`custom`; write the choice to `config.json`. · *verify:* switching presets changes which models the next fusion call bills.
+- [ ] **F8.3** Live model picker — populate dropdowns from `claude_runner.list_openrouter_models()` so **every model OpenRouter currently offers** is selectable; hand-pick each panel seat + the judge (+ version); save to `config.json`. · *verify:* a brand-new model not in §6 still appears and is selectable. **← this is the "select all possible models" requirement.**
+- [ ] **F8.4** ⟂ *(optional)* per-dispatch override: thread a chosen panel/judge through `/send` like `effort`/`model` for one-off use without changing the saved config. · *verify:* a one-off pick does not persist to `config.json`.
+
+*When shipped:* append a `Phase 11 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`.
 
 ---
 
