@@ -441,8 +441,8 @@ def _run_fusion_headless(body: dict, key: str, timeout_s: int, judge: str) -> Cl
 
 def run_brain_json(prompt: str, cwd: str, fusion: bool = False, **kw) -> ClaudeRun:
     """Single entry point for brain calls. Routes to Fusion when requested AND
-    available; falls back to headless claude automatically when fusion is on but
-    the key is missing or OpenRouter errors — a flaky panel never hard-fails a run."""
+    available; falls back to the standard visible-tab claude call when fusion is on
+    but the key is missing or OpenRouter errors — a flaky panel never hard-fails a run."""
     if fusion:
         run = run_fusion_json(prompt=prompt, **kw)
         if run.ok:
@@ -491,9 +491,42 @@ Content-Type: application/json
 
 Response is OpenAI-shaped: `choices[0].message.content` is the synthesized
 answer; `usage.cost` (with `usage.include=true`) is the summed dollar cost.
+
+**Visible-tab plumbing (mirror the existing brain-tab path).** `run_claude_json`
+already runs brain calls in watchable tabs via `spawn.spawn_brain_tab` +
+`brain_run.sh` (sidecars in `~/.orchestrator/brain/`, `.done`/`.pid` poll loop).
+Fusion reuses that exact shape: add `spawn.spawn_fusion_tab(body, cwd)` + a
+`fusion_run.sh`, sidecars in `~/.orchestrator/fusion/`, and `_run_fusion_in_tab`
+polls `<id>.done`/`<id>.pid` just like the brain loop. The OpenRouter key is read
+**inside the tab** (env → `config.json`) — never passed through AppleScript,
+never written to a temp file.
+
+```bash
+#!/bin/bash
+# ~/.orchestrator/bin/fusion_run.sh — execed in an iTerm2 tab so the OpenRouter
+# panel call is WATCHABLE (same principle as brain_run.sh: no hidden HTTP). A
+# tiny stdlib-python runner POSTs the prepared request, echoes the panel + the
+# synthesized answer to the SCREEN (stderr), and prints ONLY the JSON envelope to
+# stdout — which `tee` captures to <id>.json for the orchestrator to parse.
+ID="$ORCHESTRATOR_FUSION_ID"; DIR="$HOME/.orchestrator/fusion"
+echo $$ > "$DIR/$ID.pid"
+echo "---- orchestrator fusion call: $ID (watching live) ----"
+python3 "$HOME/.orchestrator/bin/fusion_call.py" "$DIR/$ID.request.json" | tee "$DIR/$ID.json"
+echo "${PIPESTATUS[0]}" > "$DIR/$ID.done"
+echo "---- fusion call finished ----"
+```
+
+`fusion_call.py` is ~30 lines of stdlib `urllib` sharing the POST with
+`_run_fusion_headless`: read the request-body sidecar, resolve the key
+(env → `config.json`), POST, echo the answer to stderr for watching, print the
+envelope to stdout for capture. (Add `"stream": true` later if you want tokens to
+appear live — non-streaming still shows the call fire and the response land.)
+
 *Acceptance:* with a key set, `run_fusion_json("Should a single-writer local app
-use SQLite WAL mode?")` returns `ok=True` with cost > 0; with no key, `ok=False,
-error="OPENROUTER_API_KEY not set; fusion unavailable"`.
+use SQLite WAL mode?")` opens a visible iTerm2 tab, and on completion returns
+`ok=True` with cost > 0; with no key, `ok=False, error="OPENROUTER_API_KEY not
+set; fusion unavailable"`; with iTerm2 uninstalled, it still returns a valid
+`ClaudeRun` via the in-process fallback.
 
 ### Phase F2 — Rewriter integration
 `rewriter.rewrite(user_task, project_path, fusion: bool = False)` swaps one line:
