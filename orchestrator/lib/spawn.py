@@ -75,6 +75,12 @@ BRAIN_RUN_SH_CONTENT = """#!/bin/bash
 # mirrors the same stream to a sidecar JSONL that the orchestrator parses to
 # recover the structured result the caller needs.
 #
+# A small python3 pretty-printer sits AFTER tee, so the live tab shows readable
+# [assistant]/[tool]/[done] lines instead of raw JSONL. It formats only the
+# terminal copy of the stream — tee has already written raw JSONL to the
+# sidecar, which the orchestrator parses unchanged. PIPESTATUS[0] still captures
+# claude's exit code (claude is first in the pipe; the formatter is last).
+#
 # Completion signalling for the waiting Python process:
 #   <id>.done  — claude's exit code, written AFTER tee flushes (so when this
 #                file exists, <id>.jsonl is complete).
