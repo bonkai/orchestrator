@@ -67,6 +67,59 @@ exec claude --dangerously-skip-permissions --effort "$EFFORT" ${MODEL:+--model "
 """
 
 
+BRAIN_RUN_SH_CONTENT = """#!/bin/bash
+# Orchestrator brain-call runner — execed inside an iTerm2 tab so the
+# rewriter / summarizer / onboarding calls are WATCHABLE live (the user asked
+# for no hidden headless brain calls). claude runs with --output-format
+# stream-json --verbose so its reasoning + tool use scroll in the tab; `tee`
+# mirrors the same stream to a sidecar JSONL that the orchestrator parses to
+# recover the structured result the caller needs.
+#
+# Completion signalling for the waiting Python process:
+#   <id>.done  — claude's exit code, written AFTER tee flushes (so when this
+#                file exists, <id>.jsonl is complete).
+#   <id>.pid   — this shell's PID; lets Python detect a closed/killed tab
+#                (no .done will ever arrive in that case).
+#
+# ORCHESTRATOR_RUN_ID is deliberately NOT set for brain tabs, so the env-gated
+# Stop hook stays a no-op and these don't post to /api/complete.
+if [ -z "${ORCHESTRATOR_BRAIN_ID:-}" ]; then
+    echo "Orchestrator brain: ORCHESTRATOR_BRAIN_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_BRAIN_ID"
+BRAIN_DIR="$HOME/.orchestrator/brain"
+PROMPT_FILE="$BRAIN_DIR/${ID}.prompt"
+OUT_FILE="$BRAIN_DIR/${ID}.jsonl"
+DONE_FILE="$BRAIN_DIR/${ID}.done"
+PID_FILE="$BRAIN_DIR/${ID}.pid"
+MODEL=$(cat "$BRAIN_DIR/${ID}.model" 2>/dev/null || echo sonnet)
+EFFORT=$(cat "$BRAIN_DIR/${ID}.effort" 2>/dev/null || echo medium)
+MAXTURNS=$(cat "$BRAIN_DIR/${ID}.maxturns" 2>/dev/null || echo 30)
+echo $$ > "$PID_FILE"
+if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Orchestrator brain: missing prompt file $PROMPT_FILE" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+PROMPT=$(cat "$PROMPT_FILE")
+echo "---- orchestrator brain call: $ID ($MODEL / $EFFORT) ----"
+echo "(watching live; the structured result is captured for the orchestrator)"
+echo
+claude -p "$PROMPT" \
+    --model "$MODEL" \
+    --max-turns "$MAXTURNS" \
+    --output-format stream-json \
+    --verbose \
+    --dangerously-skip-permissions \
+    --effort "$EFFORT" | tee "$OUT_FILE"
+code=${PIPESTATUS[0]}
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- brain call finished (exit $code) ----"
+"""
+
+
 def ensure_runner():
     """One-time: create dirs and write the run.sh wrapper."""
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
@@ -74,6 +127,16 @@ def ensure_runner():
     BIN_DIR.mkdir(parents=True, exist_ok=True)
     RUN_SH.write_text(RUN_SH_CONTENT)
     RUN_SH.chmod(0o755)
+
+
+def ensure_brain_runner():
+    """One-time: create the brain sidecar dir and write the brain_run.sh
+    wrapper. Lazy — called on the first brain call, so install.sh needs no
+    change."""
+    BRAIN_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    BRAIN_RUN_SH.write_text(BRAIN_RUN_SH_CONTENT)
+    BRAIN_RUN_SH.chmod(0o755)
 
 
 def _osascript(script: str) -> str:
