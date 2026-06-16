@@ -27,6 +27,9 @@ async def lifespan(app: FastAPI):
     idle_task = asyncio.create_task(idle_notifier.run_idle_checker())
     _background_tasks.add(idle_task)
     idle_task.add_done_callback(_background_tasks.discard)
+    reaper_task = asyncio.create_task(watchdog.run_orphan_reaper())
+    _background_tasks.add(reaper_task)
+    reaper_task.add_done_callback(_background_tasks.discard)
     # Probe embeddings; log clearly if missing so user knows phase 6 is degraded
     if not embeddings.is_available():
         print(f"[orchestrator] WARNING: embedding backend not reachable "
@@ -34,6 +37,7 @@ async def lifespan(app: FastAPI):
               f"Start Ollama and `ollama pull {embeddings.DEFAULT_MODEL}` to enable.")
     yield
     idle_task.cancel()
+    reaper_task.cancel()
     for did in list(watchdog._watchers.keys()):
         watchdog.cancel(did)
     for t in list(_background_tasks):
