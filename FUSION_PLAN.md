@@ -305,8 +305,12 @@ from disagreement among models.** Everything routine stays solo.
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
 | **F8** (opt) | Model-selection UI | pick a preset or hand-select each model/version (live `/api/v1/models` list) | ☐ |
 
-**F0–F5 deliver a working, shippable Fusion toggle.** F6–F8 are extensions and
-polish. Each phase is independently testable and sized for a single dispatch.
+**F0–F5 deliver a working, shippable on/off Fusion toggle; F8 adds the full model
+picker; F6–F7 are extensions.** Each phase below is broken into small,
+independently-buildable tasks (`Fx.y`), each with its own **verify** step. **Build
+strictly in order; don't start a task until the previous one's verify passes.**
+Every task leaves the system working — fusion simply stays off until F3+F4 wire the
+toggle. **⟂** marks tasks whose order doesn't matter.
 
 ### Phase F0 — Config & key management
 New `orchestrator/lib/config.py`: `load_config() -> dict` (reads
