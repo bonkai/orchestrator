@@ -232,16 +232,13 @@ def auto_close_enabled() -> bool:
     )
 
 
-def close_iterm2_tab(dispatch_id: int) -> bool:
-    """Close the iTerm2 tab named `orch #<dispatch_id>` if it still exists.
-
-    Mirrors `select_iterm2_tab`'s walk over windows/tabs. Returns True if a
-    matching tab was found and closed, False otherwise. Silently no-ops if
-    iTerm2 isn't installed (orchestrator may be running on a Mac where the
-    user uninstalled it after dispatches were spawned)."""
+def close_iterm2_tab_by_title(title: str) -> bool:
+    """Close the iTerm2 tab whose session name is exactly `title`, if it still
+    exists. Walks every window's tabs. Returns True if found and closed, False
+    otherwise. Silently no-ops if iTerm2 isn't installed."""
     if not iterm2_installed():
         return False
-    target = f"orch #{dispatch_id}"
+    target = title.replace('"', '\\"')
     script = f'''
 tell application "iTerm"
     set foundIt to false
@@ -263,6 +260,12 @@ end tell
     except Exception:
         return False
     return out.strip().lower() == "true"
+
+
+def close_iterm2_tab(dispatch_id: int) -> bool:
+    """Close the iTerm2 tab named `orch #<dispatch_id>` if it still exists.
+    Thin wrapper over `close_iterm2_tab_by_title`."""
+    return close_iterm2_tab_by_title(f"orch #{dispatch_id}")
 
 
 def close_iterm2_tabs(dispatch_ids: list[int]) -> int:
@@ -523,3 +526,102 @@ def cleanup_dispatch_files(dispatch_id: int):
             close_iterm2_tab(dispatch_id)
         except Exception:
             pass
+
+
+# ─── brain calls (rewriter / summarizer / onboarding) in watchable tabs ──────
+
+def brain_auto_close_enabled() -> bool:
+    """Whether a brain tab auto-closes once its call SUCCEEDS. Defaults on so
+    frequent rewriter calls don't pile tabs up; failed calls stay open
+    regardless (so you can read what broke). Set
+    ORCHESTRATOR_BRAIN_AUTO_CLOSE=false to keep successful tabs around too."""
+    return os.environ.get("ORCHESTRATOR_BRAIN_AUTO_CLOSE", "true").lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _brain_tab_title(brain_id: str, label: str) -> str:
+    """Unique, readable iTerm2 tab title for a brain call: label + id suffix.
+    Uniqueness (the random suffix) lets us close exactly this tab later."""
+    suffix = brain_id.rsplit("-", 1)[-1]
+    return f"orch brain: {label} {suffix}"
+
+
+def _brain_tab_cmd(brain_id: str, cwd: str, title: str) -> str:
+    """The shell command the brain tab runs. Sets ORCHESTRATOR_BRAIN_ID (NOT
+    ORCHESTRATOR_RUN_ID — so the Stop hook stays a no-op), titles the tab, then
+    execs brain_run.sh. Pure/string-only so it's unit-testable."""
+    safe_proj = cwd.replace('"', '\\"')
+    safe_title = title.replace('"', '\\"')
+    return (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_BRAIN_ID={brain_id} && '
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/brain_run.sh"'
+    )
+
+
+def cleanup_brain_files(brain_id: str):
+    """Remove all sidecar files for a brain call. The tab (and its on-screen
+    output) is unaffected — tee already wrote to the terminal."""
+    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort", "maxturns"):
+        try:
+            (BRAIN_DIR / f"{brain_id}.{suf}").unlink()
+        except FileNotFoundError:
+            pass
+
+
+def spawn_brain_tab(brain_id: str, prompt: str, cwd: str,
+                    model: str = "sonnet", effort: str = "medium",
+                    max_turns: int = 30, label: str = "brain") -> None:
+    """Open a new iTerm2 tab and run a brain call in it via brain_run.sh.
+
+    Writes the prompt + config to BRAIN_DIR sidecars (avoids shell-quoting the
+    prompt into AppleScript), then tells iTerm2 to open a tab and exec the
+    runner. The caller polls <brain_id>.done for completion. Raises on spawn
+    failure (so the caller can fall back to headless)."""
+    if not iterm2_installed():
+        raise RuntimeError("iTerm2 not installed")
+    ensure_brain_runner()
+    (BRAIN_DIR / f"{brain_id}.prompt").write_text(prompt, encoding="utf-8")
+    (BRAIN_DIR / f"{brain_id}.model").write_text((model or "sonnet").strip())
+    (BRAIN_DIR / f"{brain_id}.effort").write_text((effort or "medium").strip())
+    (BRAIN_DIR / f"{brain_id}.maxturns").write_text(str(max_turns))
+
+    title = _brain_tab_title(brain_id, label)
+    safe_title = title.replace('"', '\\"')
+    cmd = _brain_tab_cmd(brain_id, cwd, title)
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+
+    script = f'''
+tell application "iTerm"
+    activate
+    if (count of windows) = 0 then
+        create window with default profile
+    end if
+    tell current window
+        set newTab to (create tab with default profile)
+        tell current session of newTab
+            set name to "{safe_title}"
+            write text "{apple_cmd}"
+        end tell
+    end tell
+end tell
+'''
+    try:
+        _osascript(script)
+    except Exception:
+        cleanup_brain_files(brain_id)
+        raise
+
+
+def finish_brain_tab(brain_id: str, label: str = "brain", success: bool = False):
+    """Post-call teardown for a brain tab. Closes the tab when the call
+    succeeded AND auto-close is enabled (failed calls stay open for
+    inspection); always removes the sidecar files. Never raises."""
+    if success and brain_auto_close_enabled():
+        try:
+            close_iterm2_tab_by_title(_brain_tab_title(brain_id, label))
+        except Exception:
+            pass
+    cleanup_brain_files(brain_id)
