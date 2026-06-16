@@ -1442,11 +1442,17 @@ class TestPhase5Hardening(unittest.TestCase):
     def test_summarize_with_deleted_cwd(self):
         """If the project dir was deleted between completion and summarizer
         run, the subprocess gets FileNotFoundError on cwd. Must surface ok=False."""
+        from unittest.mock import patch
+        from orchestrator.lib import claude_runner
         deleted = Path(tempfile.mkdtemp())
         shutil.rmtree(deleted)
         path = self._write_jsonl("t.jsonl", [{"type":"user","message":{"content":"x"}}])
-        # We don't mock here — exercise the real claude_runner with a bad cwd.
-        r = self.summarizer.summarize(path, "x", str(deleted))
+        # We don't mock the claude call itself — exercise the real runner with a
+        # bad cwd. Force the headless path so this is deterministic and fast
+        # regardless of whether iTerm2 is installed on the test machine (the tab
+        # path would instead open a real tab and wait out the startup grace).
+        with patch.object(claude_runner.spawn, "iterm2_installed", return_value=False):
+            r = self.summarizer.summarize(path, "x", str(deleted))
         self.assertFalse(r.ok)
 
 
