@@ -22,6 +22,10 @@ TASKS_DIR = DATA_DIR / "tasks"
 PIDS_DIR = DATA_DIR / "pids"
 BIN_DIR = DATA_DIR / "bin"
 RUN_SH = BIN_DIR / "run.sh"
+# Brain calls (rewriter/summarizer/onboarding) get their own iTerm2 tabs so
+# they're watchable like dispatches; sidecar files live here. See brain_run.sh.
+BRAIN_DIR = DATA_DIR / "brain"
+BRAIN_RUN_SH = BIN_DIR / "brain_run.sh"
 
 RUN_SH_CONTENT = """#!/bin/bash
 # Orchestrator runner — execed inside an iTerm2 tab.
