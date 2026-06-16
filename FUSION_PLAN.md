@@ -608,7 +608,7 @@ so new releases show up with zero code change), (b) lets you choose a preset
 (`budget`/`balanced`/`frontier`/`custom`) **or** hand-pick each panel seat + judge +
 version, and (c) saves the choice to `config.json` (or threads it per-dispatch like
 `effort`/`model`). The **key is never editable from the browser**. Append a
-`Phase 10 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`
+`Phase 11 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`
 once shipped.
 
 ---

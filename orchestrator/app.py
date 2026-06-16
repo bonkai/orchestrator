@@ -507,7 +507,7 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 async def _run_summarizer(dispatch_id: int):
-    """Background task: distill the transcript, ask headless claude for a
+    """Background task: distill the transcript, ask `claude` (visible tab) for a
     structured summary, write it into outcomes. Failures are logged only —
     never propagated, since this runs detached from any request."""
     try:
@@ -935,7 +935,7 @@ async def _run_onboard_job(job_id: str, project_id: int, project_path: str) -> N
 @app.post("/project/{project_id}/onboard", response_class=HTMLResponse)
 async def onboard_project(request: Request, project_id: int):
     """Kick off the onboarding analysis and return a pending page. The
-    analysis (~10-60s headless claude call) runs as a background task held
+    analysis (~10-60s `claude` brain call, visible tab) runs as a background task held
     in the strong-ref set; the page polls /api/job/<id> and reloads itself
     when done. This way the user can switch tabs / navigate away and come
     back to a finished result."""

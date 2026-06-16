@@ -373,7 +373,7 @@ def _coerce_list_of_str(v) -> list[str]:
 
 def analyze(project_path: str, prior_runs_context: str = "",
             last_run_ts: int | None = None) -> OnboardingResult:
-    """Scan + call headless claude + parse → return OnboardingResult.
+    """Scan + call `claude` (visible iTerm2 tab) + parse → return OnboardingResult.
 
     `prior_runs_context` is a rendered summary of recent onboarding rounds.
     `last_run_ts` (Unix epoch) is the timestamp of the most recent prior run;

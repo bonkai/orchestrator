@@ -1,5 +1,5 @@
 """Summarizer — distill a Stop-hook transcript into a structured summary
-via headless claude, then write to the outcomes table.
+via a visible-tab `claude` brain call, then write to the outcomes table.
 
 Runs as a background asyncio task fired from /api/complete. Failures are
 logged but never break the completion flow."""

@@ -1,6 +1,6 @@
 """Tiny in-memory job registry for async work that outlives the HTTP request.
 
-Used by routes whose work (a headless `claude` call) takes long enough that
+Used by routes whose work (a `claude` brain call) takes long enough that
 a browser tab disconnect during the wait would lose the result. The route
 creates a job, kicks off the work as a background asyncio task held in a
 strong-ref set in app.py, then returns immediately with a job_id. The
