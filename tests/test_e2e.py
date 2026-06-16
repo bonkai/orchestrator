@@ -884,20 +884,22 @@ class TestClaudeRunner(unittest.TestCase):
         self.assertEqual(self.cr._strip_fences('   \n{"a":1}\n  '), '{"a":1}')
 
     def test_missing_binary_returns_error(self):
-        """When `claude` isn't on PATH the runner must return ok=False, not raise."""
+        """When `claude` isn't on PATH the headless fallback must return
+        ok=False, not raise."""
         # Replace PATH with somewhere `claude` definitely isn't
         orig = os.environ.get("PATH", "")
         try:
             os.environ["PATH"] = "/nonexistent_dir_xyz"
-            r = self.cr.run_claude_json("hi", cwd="/tmp")
+            r = self.cr.run_claude_headless("hi", cwd="/tmp")
             self.assertFalse(r.ok)
             self.assertIn("not found", r.error.lower())
         finally:
             os.environ["PATH"] = orig
 
     def test_timeout_returns_error(self):
-        """Sub-1s timeout should fire on any real claude call (or fall back
-        to PATH miss). Either way: ok=False, no exception."""
+        """Sub-1s timeout on the headless fallback should fire on any real
+        claude call (or fall back to PATH miss). Either way: ok=False, no
+        exception."""
         orig = os.environ.get("PATH", "")
         try:
             # Force a hang: replace `claude` with a sleep
@@ -907,7 +909,7 @@ class TestClaudeRunner(unittest.TestCase):
             fake.write_text("#!/bin/bash\nsleep 30\n")
             fake.chmod(0o755)
             os.environ["PATH"] = f"{tdir}:{orig}"
-            r = self.cr.run_claude_json("hi", cwd="/tmp", timeout_s=1)
+            r = self.cr.run_claude_headless("hi", cwd="/tmp", timeout_s=1)
             self.assertFalse(r.ok)
             self.assertIn("timed out", r.error.lower())
         finally:
@@ -915,7 +917,10 @@ class TestClaudeRunner(unittest.TestCase):
 
     def test_brain_call_strips_orchestrator_run_id_from_env(self):
         """The Stop hook is env-gated on ORCHESTRATOR_RUN_ID — internal brain
-        calls must NOT carry it, or the hook would post /api/complete spuriously."""
+        calls must NOT carry it, or the hook would post /api/complete spuriously.
+        (The tab path enforces this structurally by never exporting the var —
+        see test_brain_tab_cmd_sets_brain_id_not_run_id; here we cover the
+        headless fallback, which scrubs it from the subprocess env.)"""
         orig = os.environ.get("PATH", "")
         orig_run = os.environ.get("ORCHESTRATOR_RUN_ID")
         try:
@@ -930,7 +935,7 @@ class TestClaudeRunner(unittest.TestCase):
             envprobe.chmod(0o755)
             os.environ["PATH"] = f"{tdir}:{orig}"
             os.environ["ORCHESTRATOR_RUN_ID"] = "999"
-            r = self.cr.run_claude_json("hi", cwd="/tmp", timeout_s=5)
+            r = self.cr.run_claude_headless("hi", cwd="/tmp", timeout_s=5)
             self.assertTrue(r.ok, f"runner failed: {r.error}")
             self.assertEqual(r.text, "saw=", "ORCHESTRATOR_RUN_ID leaked into brain-call env")
         finally:
@@ -939,6 +944,63 @@ class TestClaudeRunner(unittest.TestCase):
                 os.environ.pop("ORCHESTRATOR_RUN_ID", None)
             else:
                 os.environ["ORCHESTRATOR_RUN_ID"] = orig_run
+
+    def test_envelope_from_stream_jsonl_and_build_run(self):
+        """The tab path reconstructs the result envelope from a stream-json
+        transcript: result text from the `result` event, model from `init`."""
+        tdir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tdir, ignore_errors=True)
+        f = tdir / "x.jsonl"
+        f.write_text(
+            '{"type":"system","subtype":"init","model":"claude-sonnet-4-6"}\n'
+            '{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}]}}\n'
+            '{"type":"result","subtype":"success","result":"{\\"a\\":1}",'
+            '"total_cost_usd":0.01,"duration_ms":1200}\n'
+        )
+        env = self.cr._envelope_from_stream_jsonl(f)
+        self.assertIsNotNone(env)
+        self.assertEqual(env["result"], '{"a":1}')
+        self.assertEqual(env["model"], "claude-sonnet-4-6")
+        run = self.cr._build_claude_run(env, "sonnet")
+        self.assertTrue(run.ok)
+        self.assertEqual(run.parsed_json, {"a": 1})
+        self.assertEqual(run.cost_usd, 0.01)
+        # No result event → None (claude crashed mid-stream)
+        g = tdir / "empty.jsonl"
+        g.write_text('{"type":"system","subtype":"init"}\n')
+        self.assertIsNone(self.cr._envelope_from_stream_jsonl(g))
+
+    def test_run_claude_json_falls_back_to_headless_without_iterm2(self):
+        """No iTerm2 installed → the brain call still runs (headless), rather
+        than erroring."""
+        from unittest.mock import patch
+        orig = os.environ.get("PATH", "")
+        try:
+            tdir = Path(tempfile.mkdtemp())
+            self.addCleanup(shutil.rmtree, tdir, ignore_errors=True)
+            fake = tdir / "claude"
+            fake.write_text(
+                '#!/bin/bash\n'
+                'echo "{\\"result\\":\\"hi\\",\\"total_cost_usd\\":0,\\"duration_ms\\":1}"\n'
+            )
+            fake.chmod(0o755)
+            os.environ["PATH"] = f"{tdir}:{orig}"
+            with patch.object(self.cr.spawn, "iterm2_installed", return_value=False):
+                r = self.cr.run_claude_json("hi", cwd="/tmp", timeout_s=5, label="rewriter")
+            self.assertTrue(r.ok, f"runner failed: {r.error}")
+            self.assertEqual(r.text, "hi")
+        finally:
+            os.environ["PATH"] = orig
+
+    def test_brain_tab_cmd_sets_brain_id_not_run_id(self):
+        """The brain tab must export ORCHESTRATOR_BRAIN_ID and NEVER
+        ORCHESTRATOR_RUN_ID (else the Stop hook would fire for brain calls)."""
+        from orchestrator.lib import spawn
+        cmd = spawn._brain_tab_cmd("rewriter-abc12345", "/tmp/proj",
+                                   "orch brain: rewriter abc12345")
+        self.assertIn("ORCHESTRATOR_BRAIN_ID=rewriter-abc12345", cmd)
+        self.assertNotIn("ORCHESTRATOR_RUN_ID", cmd)
+        self.assertIn("brain_run.sh", cmd)
 
 
 # ─── Test 12: rewriter (mocked claude) ───────────────────────────────────
