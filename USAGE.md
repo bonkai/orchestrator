@@ -124,18 +124,18 @@ To start fresh: `rm -rf ~/.orchestrator/` (then re-run `bash bin/install.sh`).
 
 | Operation | Approx cost | Where |
 |---|---|---|
-| Rewrite (per dispatch) | $0.01–0.03 | Headless `claude` |
-| Summarize (per completion) | $0.02–0.05 | Headless `claude` |
-| Onboarding (per project, one-time) | $0.05–0.15 | Headless `claude` |
+| Rewrite (per dispatch) | $0.01–0.03 | `claude` (visible tab) |
+| Summarize (per completion) | $0.02–0.05 | `claude` (visible tab) |
+| Onboarding (per project, one-time) | $0.05–0.15 | `claude` (visible tab) |
 | Semantic retrieval | $0 | Local Ollama (CPU/GPU only) |
 | Dispatched session | Same as your normal `claude` usage | The actual work |
 
-All headless calls use your existing Claude subscription — no separate API key needed.
+All brain calls use your existing Claude subscription — no separate API key needed.
 
 ---
 
 ## Architecture in one sentence
 
-FastAPI + HTMX on `localhost:7878` → headless `claude` for rewrite/summarize/onboarding → AppleScript opens iTerm2 tabs for real dispatches → SQLite + Ollama embeddings + Stop/PreToolUse hooks close the learning loop.
+FastAPI + HTMX on `localhost:7878` → `claude` in visible iTerm2 tabs for rewrite/summarize/onboarding → AppleScript opens more iTerm2 tabs for real dispatches → SQLite + Ollama embeddings + Stop/PreToolUse hooks close the learning loop.
 
 See `PLAN.md` for the per-phase breakdown.

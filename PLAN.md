@@ -4,7 +4,7 @@
 Replace the "10 terminal tabs, 10 manual `claude` sessions" workflow with a single browser UI that:
 1. Lets me open/close project tabs and dispatch tasks.
 2. Pre-enriches every task with project memory + similar past-task context.
-3. Spawns a headless `claude` in iTerm2 with the rewritten prompt.
+3. Spawns a `claude` session in iTerm2 with the rewritten prompt.
 4. Captures outcomes via Stop hook → learns cross-project.
 
 ## Phases
@@ -31,7 +31,7 @@ Replace the "10 terminal tabs, 10 manual `claude` sessions" workflow with a sing
 - UI: dispatch form has "preview rewrite" (primary) and "skip rewrite". Preview page shows original → editable rewritten + rationale + hazards + proposed edits (phase 8) + similar past tasks (phase 6). Separate forms for "dispatch rewritten" vs "dispatch original".
 
 ### Phase 5 — Summarizer (Call B) ✅ done
-- `orchestrator/lib/summarizer.py` distills transcript JSONL (drops noise, caps blocks at 1.5KB, total 30KB) → headless claude with `prompts/SUMMARIZER.md` → `{summary_md, what_worked, what_broke, lessons, tags}`.
+- `orchestrator/lib/summarizer.py` distills transcript JSONL (drops noise, caps blocks at 1.5KB, total 30KB) → a visible-tab `claude` brain call with `prompts/SUMMARIZER.md` → `{summary_md, what_worked, what_broke, lessons, tags}`.
 - Fires as a background asyncio task from `/api/complete` (stored in a strong-ref set so the GC doesn't kill it). Only the race winner fires.
 - `/dispatch/<id>` detail page shows the summary; "raw transcript →" link still works.
 
@@ -49,10 +49,15 @@ Replace the "10 terminal tabs, 10 manual `claude` sessions" workflow with a sing
 ### Phase 9 — Project onboarding ✅ done
 - One-time sweep per project (button on the project pane: "analyze setup →").
 - `orchestrator/lib/onboarding.py` scans for existing rule files (`CLAUDE.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `AGENTS.md`, `.github/copilot-instructions.md`, README), forge layout dirs, tech stack signals (package.json/requirements.txt/Cargo.toml/etc.), and top-level structure.
-- Headless `claude` with `prompts/ONBOARDING.md` produces `{project_summary, strengths, gaps, recommendations, proposed_edits}`. Recommendations are manual (root-level files — `CLAUDE.md`, `.forge.json`, etc.). Proposed edits use phase 8 actions (`append_to_memory`/`append_to_knowledge`/`create_task_file`) with the same validation, applied via the existing `/apply_edits` endpoint.
+- A visible-tab `claude` brain call with `prompts/ONBOARDING.md` produces `{project_summary, strengths, gaps, recommendations, proposed_edits}`. Recommendations are manual (root-level files — `CLAUDE.md`, `.forge.json`, etc.). Proposed edits use phase 8 actions (`append_to_memory`/`append_to_knowledge`/`create_task_file`) with the same validation, applied via the existing `/apply_edits` endpoint.
 - Live test on orchestrator itself: 50s, correctly identified all 4 strengths, all 3 missing-dir gaps, produced 4 useful auto-applicable edits + 1 manual CLAUDE.md addition.
 
 ### Phase 8 — Auto file edits ✅ done
 - `orchestrator/lib/edits.py` validates + applies. Three actions: `append_to_memory`, `append_to_knowledge`, `create_task_file`. Strict rules: must be `.md`, no `..`, no dotfiles, no absolute paths, no symlinks escaping project, parent dir must be in the project's `.forge.json` layout for that action, 50KB content cap, `create_task_file` never overwrites.
 - REWRITER schema extended with optional `proposed_edits[]`.
 - UI: each proposed edit shown as a checkbox with rationale + collapsible content preview. "apply selected →" goes to `/apply_edits` which validates each, shows per-row pass/fail, then offers "dispatch rewritten →".
+
+### Phase 10 — Visible brain calls (no more headless) ✅ done
+- All "brain" calls (rewriter, summarizer, onboarding) now run in their own **watchable iTerm2 tab** instead of a hidden headless subprocess. `claude_runner.run_claude_json` is the primary path: `spawn.spawn_brain_tab` opens a labeled tab running `claude -p --output-format stream-json --verbose | tee <sidecar>`, and the structured result is reconstructed from the teed JSONL (the `type:result` event carries `result`/`total_cost_usd`/`duration_ms`). Default timeout is unlimited (visible work is abortable by closing the tab); tabs auto-close on success, stay open on failure.
+- `run_claude_headless` (captured `claude -p`) is retained **only** as the fallback when iTerm2 isn't installed.
+- Brain tabs set `ORCHESTRATOR_BRAIN_ID` (not `ORCHESTRATOR_RUN_ID`), so the env-gated Stop hook stays a no-op and they don't pollute the dispatch log. Sidecars live in `~/.orchestrator/brain/` (`spawn.spawn_brain_tab`/`brain_run.sh`).
