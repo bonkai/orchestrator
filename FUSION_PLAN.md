@@ -623,6 +623,9 @@ opt-in only:**
    Fusion replaces those subprocess calls with an outbound **OpenRouter HTTPS
    request** (which itself calls Anthropic/OpenAI/Google server-side). The
    *spirit* of the rule — brain work runs as local subprocesses — is relaxed.
+   (Aside: CLAUDE.md's "headless" wording is itself outdated — the code now runs
+   those subprocesses in **visible iTerm2 tabs**, and the Fusion call runs in a
+   watchable tab too. So this deviation is about *API egress*, not headless-vs-visible.)
 2. *"Local only. No remote workers, no hosted services."* Fusion's panel + judge
    run **on OpenRouter's infrastructure**, and the prompt — which includes the
    project bundle (CLAUDE.md, memory, recent tasks, source excerpts) — **leaves
@@ -633,20 +636,22 @@ opt-in only:**
 - **Strictly additive.** `run_claude_json()` and the entire local path are
   untouched; Fusion is a sibling, never a replacement.
 - **Degrades to local automatically.** No key, or OpenRouter down →
-  `run_brain_json()` falls back to headless `claude`. A flaky panel never
-  hard-fails a dispatch.
+  `run_brain_json()` falls back to the visible-tab `claude` call. A flaky panel
+  never hard-fails a dispatch.
 - **The executor stays 100% local.** Only brain/rewrite *text* is sent out; the
   actual file edits and command execution still run in a local iTerm2 `claude`
   session.
 
 **What's still preserved (the true compliance points):** zero new Python deps
-(stdlib `urllib`); the **Stop hook is unaffected** (Fusion makes HTTP calls, not
-`claude` subprocesses, so it never touches `ORCHESTRATOR_RUN_ID`); the key and
-config live in `~/.orchestrator/`, never the repo.
+(stdlib `urllib`); the **Stop hook stays a no-op** (brain and fusion tabs set their
+own `ORCHESTRATOR_BRAIN_ID` / `ORCHESTRATOR_FUSION_ID`, never `ORCHESTRATOR_RUN_ID`,
+so they don't post to `/api/complete`); the key and config live in
+`~/.orchestrator/`, never the repo; and **every call stays watchable in iTerm2**.
 
-**Fallback when fusion is OFF (the default):** identical to today — headless
-`claude -p`, env-scrubbed of `ORCHESTRATOR_RUN_ID`, no OpenRouter dependency, no
-`OPENROUTER_API_KEY` required, no network egress beyond what `claude` already does.
+**Fallback when fusion is OFF (the default):** identical to today — the
+**visible-tab** `claude` call (`run_claude_json`), headless only as a last resort
+if iTerm2 is absent. No OpenRouter dependency, no `OPENROUTER_API_KEY` required, no
+network egress beyond what `claude` already does.
 
 **Data-egress note:** because the bundle can contain project memory and source,
 treat the toggle as *"send this project's context to a third party."* The panel
@@ -666,7 +671,9 @@ Fusion for any project whose contents shouldn't leave the machine.
 
 **Key file targets (absolute):**
 - `/Users/tresmith/Documents/orchestrator/orchestrator/lib/config.py` *(new — F0)*
-- `/Users/tresmith/Documents/orchestrator/orchestrator/lib/claude_runner.py` *(F1 — `run_fusion_json`, `run_brain_json`)*
+- `/Users/tresmith/Documents/orchestrator/orchestrator/lib/claude_runner.py` *(F1 — `run_fusion_json`, `_run_fusion_in_tab`, `run_brain_json`)*
+- `/Users/tresmith/Documents/orchestrator/orchestrator/lib/spawn.py` *(F1 — `spawn_fusion_tab`; mirror `spawn_brain_tab`/`brain_run.sh`)*
+- `~/.orchestrator/bin/fusion_run.sh` + `fusion_call.py` *(F1 — the visible-tab runner, written by an `ensure_fusion_runner()`)*
 - `/Users/tresmith/Documents/orchestrator/orchestrator/lib/rewriter.py` *(F2)*
 - `/Users/tresmith/Documents/orchestrator/orchestrator/lib/fusion.py` *(new — F7, enrichment mode)*
 - `/Users/tresmith/Documents/orchestrator/orchestrator/app.py` *(`/send`, `_send_in_background`, `_view_ctx` — F3/F4/F5)*
@@ -676,14 +683,21 @@ Fusion for any project whose contents shouldn't leave the machine.
 - `~/.orchestrator/config.json` *(runtime data — holds `openrouter_api_key`, never in repo)*
 
 **Reuse / consistency:**
-- Mirror `embeddings.py` for HTTP: stdlib `urllib.request`, never raise, return
-  `ok=False` on any failure, log a warning. **Do not add `httpx`/`requests`.**
+- **Everything visible — no hidden/headless calls.** Brain calls already run in
+  watchable iTerm2 tabs (`run_claude_json` → `spawn_brain_tab` → `brain_run.sh`);
+  the Fusion call mirrors that (`spawn_fusion_tab` → `fusion_run.sh`), reusing the
+  `.done`/`.pid` sidecar poll. In-process HTTP is a fallback only when iTerm2 is absent.
+- Mirror `embeddings.py` for the fallback HTTP: stdlib `urllib.request`, never
+  raise, return `ok=False` on any failure, log a warning. **No `httpx`/`requests`.**
 - Reuse `claude_runner._strip_fences` for judge/panel JSON (battle-tested against
   prose-wrapped JSON) — don't re-invent it.
 - Mirror the `rewrite_event` recording pattern for any `fusion_event`
   (`db.record_event(dispatch_id, "stage", …)` after the dispatch row exists).
 - Model slugs (§6) are a 2026-06-16 snapshot — verify live before wiring; prefer
   config-driven presets so a swap is a config edit, not a code change.
+- **CLAUDE.md is stale on this point:** its hard rule still says brain work goes
+  through *headless* subprocesses, but the code now uses **visible iTerm2 tabs**.
+  Update that wording when Fusion ships (the `## Fusion` note in F8 is a good spot).
 - **Edits don't take effect until you restart `python -m orchestrator`** (uvicorn
   runs `reload=False` on :7878), and the **auto-push daemon commits within
   seconds** — `git diff` won't show your changes.
