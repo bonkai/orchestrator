@@ -10,6 +10,7 @@ Strategy:
 """
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -26,14 +27,18 @@ RUN_SH = BIN_DIR / "run.sh"
 # they're watchable like dispatches; sidecar files live here. See brain_run.sh.
 BRAIN_DIR = DATA_DIR / "brain"
 BRAIN_RUN_SH = BIN_DIR / "brain_run.sh"
-# Fusion (optional, default-off) panel provider scripts. Canonical templates
-# live in the repo at orchestrator/providers/*.py; ensure_fusion_providers()
-# materializes them into the data dir so they run editable per-machine (repo
-# stays clean), the same way brain_run.sh is written into the data dir. The
-# visible fusion-tab runner (fusion_run.sh / fusion_call.py) lands in a later
-# phase — for now the panel fans out in-process (see claude_runner._run_panel).
+# Fusion (optional, default-off) gets its own watchable tab too. The panel
+# fan-out runs in a `fusion` tab (fusion_run.sh → fusion_call.py → the provider
+# scripts); the judge then runs in a normal `brain` tab. Canonical templates
+# live in the repo (orchestrator/providers/*.py + orchestrator/fusion_call.py);
+# ensure_fusion_runner() materializes them into the data dir so they run
+# editable per-machine (repo stays clean), the same way brain_run.sh is written.
+FUSION_DIR = DATA_DIR / "fusion"
+FUSION_RUN_SH = BIN_DIR / "fusion_run.sh"
+FUSION_CALL_PY = BIN_DIR / "fusion_call.py"
 FUSION_PROVIDERS_DIR = BIN_DIR / "providers"
-_REPO_PROVIDERS_DIR = Path(__file__).resolve().parent.parent / "providers"
+_REPO_DIR = Path(__file__).resolve().parent.parent          # the repo's orchestrator/
+_REPO_PROVIDERS_DIR = _REPO_DIR / "providers"
 
 RUN_SH_CONTENT = """#!/bin/bash
 # Orchestrator runner — execed inside an iTerm2 tab.
@@ -160,6 +165,41 @@ code=${PIPESTATUS[0]}
 echo "$code" > "$DONE_FILE"
 echo
 echo "---- brain call finished (exit $code) ----"
+"""
+
+
+FUSION_RUN_SH_CONTENT = """#!/bin/bash
+# Orchestrator fusion-panel runner — execed inside an iTerm2 tab so the panel
+# fan-out is WATCHABLE live (same principle as brain_run.sh). fusion_call.py runs
+# each panel provider's script in parallel, interleaving their stderr on SCREEN,
+# and prints ONLY the collected answers JSON to stdout — which `tee` captures to
+# <id>.json for the orchestrator to read back. The judge then runs in a brain tab.
+#
+# ORCHESTRATOR_FUSION_ID (never ORCHESTRATOR_RUN_ID) so the env-gated Stop hook
+# stays a no-op for fusion tabs.
+if [ -z "${ORCHESTRATOR_FUSION_ID:-}" ]; then
+    echo "Orchestrator fusion: ORCHESTRATOR_FUSION_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_FUSION_ID"
+DIR="$HOME/.orchestrator/fusion"
+REQ="$DIR/${ID}.request.json"
+PID_FILE="$DIR/${ID}.pid"
+OUT_FILE="$DIR/${ID}.json"
+DONE_FILE="$DIR/${ID}.done"
+echo $$ > "$PID_FILE"
+if [ ! -f "$REQ" ]; then
+    echo "Orchestrator fusion: missing request file $REQ" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+echo "---- orchestrator fusion panel: $ID (watching live) ----"
+echo
+python3 "$HOME/.orchestrator/bin/fusion_call.py" "$REQ" | tee "$OUT_FILE"
+code=${PIPESTATUS[0]}
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- fusion panel finished (exit $code; judge runs next in a brain tab) ----"
 """
 
 
