@@ -326,6 +326,25 @@ disagreement among models.** Everything routine stays solo.
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
 tasks.
 
+### Pre-build checklist *(verified against the live code 2026-06-17 — read before F0)*
+- **Get ≥1 provider key before F1** (DeepSeek is cheapest). F0 needs no network, but
+  every F1 verify makes a **real paid call**. A **2nd key** is needed to exercise
+  `is_fusion_available()` (≥2 active) and the F4 multiselect — so grab two.
+- **Confirmed reusable (no surprises):** `ClaudeRun` is a plain **mutable** `@dataclass`
+  with `ok/text/parsed_json/cost_usd/duration_s/model/error/raw` (so `run_fusion_json`
+  setting `judge.cost_usd`/`judge.raw` is safe); `spawn.iterm2_installed`/`pid_alive` and
+  `db.DATA_DIR` exist; the **brain-tab block in `spawn.py` is a clean template to mirror**
+  (`BRAIN_DIR`, lazy `ensure_brain_runner()`, `spawn_brain_tab`, `finish_brain_tab`,
+  `cleanup_brain_files`, `.done`/`.pid`/`.jsonl` sidecars, `_brain_tab_cmd` setting
+  `ORCHESTRATOR_BRAIN_ID`); `db.record_event`, `_view_ctx`, and `_send_in_background`
+  (which **already emits `rewrite_ok`/`rewrite_skipped`**) and the outcomes `cost_usd`
+  column all exist where F3–F5 expect them.
+- **Two gotchas now baked into the tasks:** (1) `run_claude_json` **defaults to Sonnet**
+  (`DEFAULT_MODEL="sonnet"`), so the Opus judge model MUST be passed explicitly (F1.5).
+  (2) the rewriter's existing **auto-retry already calls `run_claude_json` directly**
+  (rewriter.py), so F2.2 ("never re-fan-out on retry") is essentially already true — just
+  keep the retry off `run_brain_json`.
+
 ### Phase F0 — Config & key management
 *Goal: a `config.py` that resolves per-provider keys + the registry/presets, and an installer that scaffolds the config file.*
 - [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_provider_key(name)` (env `key_env` → file `api_key` → None) + `active_providers()` (provider names whose key resolves **and** `enabled != false`, each with its `model` id) + `is_fusion_available()` (≥2 active providers). · *verify:* `is_fusion_available()` → `False` clean, `True` once two providers' keys are set; `active_providers()` lists exactly the keyed+enabled ones.
@@ -341,7 +360,8 @@ watchable `brain` tab). **No new Python deps** (stdlib `urllib`, `subprocess`,
 `concurrent.futures`). Reuse `_strip_fences` for the judge's JSON.
 
 - [ ] **F1.1** Define the **normalized provider-script contract** (above) and write the first script, `providers/deepseek.py` (stdlib `urllib`): read `<request.json>` (`{prompt, model, timeout_s}`), resolve the key (env → `config.json`), POST to DeepSeek, echo progress + answer to **stderr**, print normalized JSON to **stdout**; never raise. · *verify:* `python3 providers/deepseek.py req.json` prints normalized JSON with `ok=true`, token counts, and you SEE the answer on stderr; missing key → `ok=false`, no traceback.
-- [ ] **F1.2** ⟂ Write the remaining seed scripts — `xai.py`, `glm.py` (copy deepseek, swap base URL + key env), `gemini.py`, `qwen.py`, and `minimax.py` (its own native body/parse). Each independently runnable, each emits the same normalized JSON. · *verify:* each script run by hand returns normalized JSON; `minimax.py` works despite its non-OpenAI shape.
+- [ ] **F1.2** ⟂ Write the **OpenAI-shaped** seed scripts by copying `deepseek.py` and swapping base URL + key env: `xai.py`, `glm.py`, `gemini.py` (its `/openai` path), `qwen.py` (DashScope `compatible-mode`). Each independently runnable, each emits the same normalized JSON. · *verify:* each script run by hand returns normalized JSON with token counts.
+- [ ] **F1.2b** ⟂ *(spike — do this one FIRST; it's the only real unknown)* `minimax.py` — MiniMax is **not** OpenAI-shaped. Confirm its live request/response (`/v1/text/chatcompletion_v2` or current), then map it to the **same normalized stdout**. **Timebox it**; if the API fights back, ship F1 without MiniMax (just drop it from the registry) and add it later — nothing else depends on it. · *verify:* `minimax.py` returns normalized JSON despite the native shape.
 - [ ] **F1.3** `claude_runner._panel_answer(name, prov, prompt, timeout)` — run `prov["script"]` as a subprocess with the request, parse the normalized JSON, compute `cost = (in×price_in + out×price_out)/1e6` from the registry. Never raises. · *verify:* returns `{ok, text, cost, …}` for one provider; a script that errors → `ok=False`, no raise.
 - [ ] **F1.4** `_run_panel(prompt, panel, providers, timeout)` — run the preset's subset **in parallel** (`ThreadPoolExecutor` over `_panel_answer`). · *verify:* a 3-seat preset returns 3 answers; wall-clock ≈ slowest seat, not the sum.
 - [ ] **F1.5** `_judge_prompt(orig, answers)` (embeds the N panel answers + asks `claude` to synthesize the required artifact) **+** `run_fusion_json(...)` that resolves preset/panel/timeout (arg → `config.fusion_config()` → seed), runs the panel, then calls `run_claude_json(synthesis, cwd)` as the judge, sets `cost_usd = Σ panel cost`. · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, `cost>0`; editing a registry `model` changes which models are billed. *(In-process subprocess fan-out for now; F1.7 puts the visible tab in front.)*
