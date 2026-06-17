@@ -30,6 +30,50 @@ mkdir -p "$ORCH_HOME" "$ORCH_BIN" "$ORCH_HOME/transcripts" \
          "$ORCH_HOME/tasks" "$ORCH_HOME/pids"
 echo "✓ Created $ORCH_HOME and subdirs"
 
+# 1b. Fusion config registry (optional multi-model brain; default-off) ---
+# Writes the config.json template ONLY IF ABSENT — re-running never clobbers
+# keys you've pasted. The block is self-contained (depends only on $ORCH_HOME)
+# so tests/test_fusion_config.py can extract and run it in isolation.
+# >>> FUSION_CONFIG_BLOCK
+CONFIG_DEST="$ORCH_HOME/config.json"
+if [ ! -f "$CONFIG_DEST" ]; then
+    cat > "$CONFIG_DEST" <<'JSON'
+{
+  "fusion": {
+    "preset": "budget",
+    "timeout_s": 300,
+    "providers": {
+      "deepseek": { "script": "providers/deepseek.py", "key_env": "DEEPSEEK_API_KEY", "api_key": "", "model": "deepseek-chat",    "price_in": 0.44, "price_out": 0.87 },
+      "xai":      { "script": "providers/xai.py",       "key_env": "XAI_API_KEY",       "api_key": "", "model": "grok-4",           "price_in": 1.25, "price_out": 2.50 },
+      "gemini":   { "script": "providers/gemini.py",    "key_env": "GEMINI_API_KEY",    "api_key": "", "model": "gemini-2.5-flash", "price_in": 0.30, "price_out": 1.50 },
+      "minimax":  { "script": "providers/minimax.py",   "key_env": "MINIMAX_API_KEY",   "api_key": "", "model": "MiniMax-Text-01",  "price_in": 0.30, "price_out": 1.20 },
+      "glm":      { "script": "providers/glm.py",       "key_env": "ZAI_API_KEY",       "api_key": "", "model": "glm-4.6",          "price_in": 1.40, "price_out": 4.40 },
+      "qwen":     { "script": "providers/qwen.py",      "key_env": "DASHSCOPE_API_KEY", "api_key": "", "model": "qwen-max",         "price_in": 1.25, "price_out": 3.75 }
+    },
+    "presets": {
+      "budget":   ["deepseek", "minimax", "gemini"],
+      "balanced": ["deepseek", "xai", "qwen"],
+      "max":      ["deepseek", "xai", "gemini", "minimax", "glm", "qwen"]
+    }
+  }
+}
+JSON
+    chmod 600 "$CONFIG_DEST"
+    echo "✓ Wrote Fusion config template → $CONFIG_DEST (chmod 600)"
+else
+    echo "✓ config.json already exists — leaving it (and any pasted keys) untouched"
+fi
+echo "  Fusion is OPT-IN and default-off; enable it by adding >= 2 provider keys."
+echo "  Paste each key into $CONFIG_DEST (the \"api_key\" field), or export its"
+echo "  env var (which takes precedence). Where to get each key:"
+echo "    deepseek → DEEPSEEK_API_KEY    https://platform.deepseek.com/api_keys"
+echo "    xai      → XAI_API_KEY         https://console.x.ai"
+echo "    gemini   → GEMINI_API_KEY      https://aistudio.google.com/apikey"
+echo "    minimax  → MINIMAX_API_KEY     https://www.minimax.io/platform"
+echo "    glm      → ZAI_API_KEY         https://z.ai"
+echo "    qwen     → DASHSCOPE_API_KEY   https://modelstudio.console.alibabacloud.com"
+# <<< FUSION_CONFIG_BLOCK
+
 # 2. Hook payload --------------------------------------------------------
 cp "$NOTIFY_SRC" "$NOTIFY_DEST"
 chmod +x "$NOTIFY_DEST"
