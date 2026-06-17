@@ -364,9 +364,10 @@ watchable `brain` tab). **No new Python deps** (stdlib `urllib`, `subprocess`,
 - [ ] **F1.2b** ⟂ *(spike — do this one FIRST; it's the only real unknown)* `minimax.py` — MiniMax is **not** OpenAI-shaped. Confirm its live request/response (`/v1/text/chatcompletion_v2` or current), then map it to the **same normalized stdout**. **Timebox it**; if the API fights back, ship F1 without MiniMax (just drop it from the registry) and add it later — nothing else depends on it. · *verify:* `minimax.py` returns normalized JSON despite the native shape.
 - [ ] **F1.3** `claude_runner._panel_answer(name, prov, prompt, timeout)` — run `prov["script"]` as a subprocess with the request, parse the normalized JSON, compute `cost = (in×price_in + out×price_out)/1e6` from the registry. Never raises. · *verify:* returns `{ok, text, cost, …}` for one provider; a script that errors → `ok=False`, no raise.
 - [ ] **F1.4** `_run_panel(prompt, panel, providers, timeout)` — run the preset's subset **in parallel** (`ThreadPoolExecutor` over `_panel_answer`). · *verify:* a 3-seat preset returns 3 answers; wall-clock ≈ slowest seat, not the sum.
-- [ ] **F1.5** `_judge_prompt(orig, answers)` (embeds the N panel answers + asks `claude` to synthesize the required artifact) **+** `run_fusion_json(...)` that resolves preset/panel/timeout (arg → `config.fusion_config()` → seed), runs the panel, then calls `run_claude_json(synthesis, cwd)` as the judge, sets `cost_usd = Σ panel cost`. · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, `cost>0`; editing a registry `model` changes which models are billed. *(In-process subprocess fan-out for now; F1.7 puts the visible tab in front.)*
+- [ ] **F1.5** `_judge_prompt(orig, answers)` — **reuse the original prompt verbatim** (so its output JSON schema travels with it), then append the N panel answers + *"synthesize the single best response, in the exact same format."* **+** `run_fusion_json(..., judge_model="opus", judge_effort="high")` resolves preset/panel/timeout, runs the panel, then calls `run_claude_json(synthesis, cwd, model=judge_model, effort=judge_effort, label="fusion-judge")` — ⚠ **the model MUST be passed explicitly** (`run_claude_json` defaults to *sonnet*); sets `cost_usd = Σ panel cost`. · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, `cost>0`, judge tab runs **Opus**; editing a registry `model` changes which models are billed. *(In-process subprocess fan-out for now; F1.7b puts the visible tab in front.)*
 - [ ] **F1.6** ⟂ `fusion_call.py` (standalone, **must NOT import the orchestrator package**): read `<id>.request.json` (`{prompt, panel, providers, timeout}`), run each panel provider's script as a parallel subprocess, **interleave their stderr** to the screen (watchable), collect the normalized outputs, print the collected JSON to stdout. · *verify:* run by hand → you SEE each provider answer stream; `<id>.json` holds all collected answers.
-- [ ] **F1.7** `spawn.spawn_fusion_tab(fusion_id, body, cwd)` (mirror `spawn_brain_tab`) + `ensure_fusion_runner()` (writes `fusion_run.sh`, `fusion_call.py`, **and** materializes `providers/*.py` from the repo templates) **+** rewire `run_fusion_json` to run the panel in the tab (`<id>.done`/`.pid` poll, copied from `run_claude_json`), falling back to the in-process subprocess fan-out only when `spawn.iterm2_installed()` is false. The tab sets `ORCHESTRATOR_FUSION_ID` (never `ORCHESTRATOR_RUN_ID`). · *verify:* `run_fusion_json(...)` opens a visible fusion tab (panel) + a brain tab (judge); faked-no-iTerm2 still returns a valid `ClaudeRun`.
+- [ ] **F1.7a** `spawn.py` — mirror the brain-tab block (it's a clean template): `FUSION_DIR`, lazy `ensure_fusion_runner()` (writes `fusion_run.sh` + `fusion_call.py` + materializes `providers/*.py`), `spawn_fusion_tab(fusion_id, body, cwd)` (writes `<id>.request.json`, sets `ORCHESTRATOR_FUSION_ID` — never `ORCHESTRATOR_RUN_ID`, execs `fusion_run.sh`), `finish_fusion_tab` + `cleanup_fusion_files`. · *verify:* `spawn_fusion_tab` with a test id opens a visible tab that writes `.pid`/`.json`/`.done`.
+- [ ] **F1.7b** `claude_runner._run_fusion_in_tab(body, cwd, timeout)` — poll `<id>.done`/`.pid` (copy `run_claude_json`'s loop; **simpler** — `<id>.json` is already the final collected answers, so no stream-jsonl reconstruction) **+** rewire `run_fusion_json` to prefer the tab, falling back to the in-process `_run_panel` only when `spawn.iterm2_installed()` is false or the tab fails. · *verify:* `run_fusion_json(...)` opens a visible fusion tab (panel) + a brain tab (judge); faked-no-iTerm2 still returns a valid `ClaudeRun` via fallback.
 - [ ] **F1.8** `run_brain_json(prompt, cwd, fusion=False, **kw)` dispatcher (fusion→`run_fusion_json`; else, or on failure→`run_claude_json`). · *verify:* `fusion=True` with <2 keys falls back to the normal visible-tab claude call, no hard error.
 
 *Code reference for F1 — target shapes (not extra work):*
@@ -429,11 +430,13 @@ def _run_panel(prompt: str, panel: list, providers: dict, timeout_s: int) -> lis
 
 
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
-                    panel: Optional[list] = None, timeout_s: Optional[int] = None) -> ClaudeRun:
+                    panel: Optional[list] = None, timeout_s: Optional[int] = None,
+                    judge_model: str = "opus", judge_effort: str = "high") -> ClaudeRun:
     """Fusion sibling of run_claude_json. Runs a PANEL of per-provider scripts (parallel,
     visible fusion tab), then synthesizes via the local claude CLI judge (run_claude_json,
     visible brain tab — free on the subscription). cost_usd = Σ panel provider costs.
-    Never raises. See §9."""
+    NOTE: run_claude_json defaults to sonnet, so the judge model is passed EXPLICITLY
+    (default opus/high; a summarizer caller can pass sonnet). Never raises. See §9."""
     cfg       = config.fusion_config()
     providers = {**FUSION_PROVIDERS_SEED, **cfg.get("providers", {})}
     presets   = {**FUSION_PRESETS_SEED,   **cfg.get("presets", {})}
@@ -447,7 +450,8 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
         errs = "; ".join(f"{a['name']}: {a.get('error')}" for a in answers if not a.get("ok"))
         return ClaudeRun(ok=False, error=f"fusion panel: only {len(ok)} provider(s) answered ({errs})")
 
-    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd)   # local claude judge
+    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd,   # local claude judge
+                            model=judge_model, effort=judge_effort, label="fusion-judge")
     judge.cost_usd = sum(a["cost"] for a in ok)        # real out-of-pocket = panel only
     judge.raw = {"panel": answers, "preset": preset}
     return judge
