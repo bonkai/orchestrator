@@ -26,6 +26,14 @@ RUN_SH = BIN_DIR / "run.sh"
 # they're watchable like dispatches; sidecar files live here. See brain_run.sh.
 BRAIN_DIR = DATA_DIR / "brain"
 BRAIN_RUN_SH = BIN_DIR / "brain_run.sh"
+# Fusion (optional, default-off) panel provider scripts. Canonical templates
+# live in the repo at orchestrator/providers/*.py; ensure_fusion_providers()
+# materializes them into the data dir so they run editable per-machine (repo
+# stays clean), the same way brain_run.sh is written into the data dir. The
+# visible fusion-tab runner (fusion_run.sh / fusion_call.py) lands in a later
+# phase — for now the panel fans out in-process (see claude_runner._run_panel).
+FUSION_PROVIDERS_DIR = BIN_DIR / "providers"
+_REPO_PROVIDERS_DIR = Path(__file__).resolve().parent.parent / "providers"
 
 RUN_SH_CONTENT = """#!/bin/bash
 # Orchestrator runner — execed inside an iTerm2 tab.
