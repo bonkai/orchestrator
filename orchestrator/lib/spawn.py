@@ -182,6 +182,22 @@ def ensure_brain_runner():
     BRAIN_RUN_SH.chmod(0o755)
 
 
+def ensure_fusion_providers():
+    """Lazy: copy the repo-canonical Fusion provider scripts
+    (orchestrator/providers/*.py) into ~/.orchestrator/bin/providers/ so the
+    panel fan-out can run them as standalone subprocesses. The repo is the
+    source of truth — always overwritten, exactly like ensure_brain_runner
+    rewrites brain_run.sh. Called on the first fusion call, so install.sh needs
+    no change. Safe no-op if the repo templates dir is missing."""
+    FUSION_PROVIDERS_DIR.mkdir(parents=True, exist_ok=True)
+    if not _REPO_PROVIDERS_DIR.is_dir():
+        return
+    for src in _REPO_PROVIDERS_DIR.glob("*.py"):
+        dst = FUSION_PROVIDERS_DIR / src.name
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        dst.chmod(0o755)
+
+
 def _osascript(script: str) -> str:
     result = subprocess.run(
         ["osascript", "-e", script],

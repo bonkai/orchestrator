@@ -23,6 +23,7 @@ scrubs the var from the subprocess env.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import re
@@ -33,7 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from orchestrator.lib import spawn
+from orchestrator.lib import config, spawn
+from orchestrator.lib.db import DATA_DIR
 
 
 DEFAULT_MODEL = "sonnet"
@@ -49,6 +51,11 @@ _POLL_INTERVAL_S = 0.3
 # (matters because the default timeout is unlimited). Independent of how long
 # the call itself may run.
 _STARTUP_GRACE_S = 60
+
+# Fusion panel scripts run from the data dir (materialized by
+# spawn.ensure_fusion_providers). A registry entry's "script" is the relative
+# path "providers/<name>.py", joined onto this base.
+PROVIDERS_DIR = str(DATA_DIR / "bin")
 
 
 @dataclass
