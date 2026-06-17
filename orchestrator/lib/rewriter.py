@@ -86,7 +86,7 @@ def rewrite(user_task: str, project_path: str) -> RewriteResult:
     })
 
     run = claude_runner.run_claude_json(prompt=prompt, cwd=str(project), label="rewriter",
-                                        model="opus", effort="max")
+                                        model="opus", effort="high")
     if not run.ok:
         return RewriteResult(ok=False, error=run.error,
                              cost_usd=run.cost_usd, model=run.model,
@@ -115,7 +115,7 @@ def rewrite(user_task: str, project_path: str) -> RewriteResult:
             + f"For reference, the start of your previous (rejected) reply was:\n{first_preview}"
         )
         retry = claude_runner.run_claude_json(prompt=retry_prompt, cwd=str(project), label="rewriter",
-                                              model="opus", effort="max")
+                                              model="opus", effort="high")
         retry_cost = retry.cost_usd
         retry_duration = retry.duration_s
         if retry.ok and isinstance(retry.parsed_json, dict):
