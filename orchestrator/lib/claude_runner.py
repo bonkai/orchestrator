@@ -551,18 +551,20 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
 
 def run_brain_json(prompt: str, cwd: str, fusion: bool = False,
                    model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT,
-                   max_turns: int = DEFAULT_MAX_TURNS, **kw) -> ClaudeRun:
+                   max_turns: int = DEFAULT_MAX_TURNS, label: str = "brain",
+                   **kw) -> ClaudeRun:
     """Single entry point for brain calls. Routes through Fusion when requested
     AND available; otherwise — or if the panel comes up short — the standard
     visible-tab claude call, so a flaky panel never hard-fails a dispatch.
 
-    `model`/`effort`/`max_turns` govern the NON-fusion (and fallback) claude
-    call; the fusion judge uses `judge_model`/`judge_effort` (default opus/high)
-    forwarded via **kw alongside preset/panel/timeout_s."""
+    `model`/`effort`/`max_turns`/`label` govern the NON-fusion (and fallback)
+    claude call (`label` titles its tab); the fusion judge uses
+    `judge_model`/`judge_effort` (default opus/high) forwarded via **kw alongside
+    preset/panel/timeout_s."""
     if fusion:
         run = run_fusion_json(prompt=prompt, cwd=cwd, **kw)
         if run.ok:
             return run
         print(f"[claude_runner] fusion unavailable ({run.error}); falling back to claude")
     return run_claude_json(prompt=prompt, cwd=cwd, model=model, effort=effort,
-                           max_turns=max_turns)
+                           max_turns=max_turns, label=label)

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from orchestrator.lib import bundle as bundle_mod
 from orchestrator.lib import claude_runner, edits as edits_mod, retrieval
@@ -60,8 +61,15 @@ def _coerce_list_of_str(v) -> list[str]:
     return []
 
 
-def rewrite(user_task: str, project_path: str) -> RewriteResult:
-    """Build the project bundle, ask claude to rewrite the task, return result."""
+def rewrite(user_task: str, project_path: str,
+            fusion: bool = False, panel: Optional[list] = None) -> RewriteResult:
+    """Build the project bundle, ask claude to rewrite the task, return result.
+
+    fusion=False is byte-for-byte the original single-claude path. fusion=True
+    routes the ONE rewrite brain call through run_brain_json (multi-model panel →
+    judge), degrading to the same single-claude call if the panel is unavailable.
+    `panel` (provider names) overrides the configured preset for this call. The
+    auto-retry below always stays single-model — it never re-fans-out the panel."""
     user_task = (user_task or "").strip()
     if not user_task:
         return RewriteResult(ok=False, error="empty task")
