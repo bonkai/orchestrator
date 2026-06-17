@@ -406,6 +406,105 @@ def _judge_prompt(orig: str, answers: list) -> str:
     return "".join(blocks)
 
 
+def _price_tab_answers(raw: list, providers: dict) -> list:
+    """Turn fusion_call.py's collected outputs (normalized JSON + a `name`) into
+    the SAME priced shape _panel_answer returns, so run_fusion_json treats tab
+    and in-process answers identically. Cost is computed here from the registry —
+    the standalone fusion_call.py never sees prices."""
+    out = []
+    for a in raw:
+        if not isinstance(a, dict):
+            continue
+        name = a.get("name")
+        prov = providers.get(name, {})
+        if a.get("ok"):
+            in_tok = a.get("prompt_tokens", 0) or 0
+            out_tok = a.get("completion_tokens", 0) or 0
+            cost = (in_tok * prov.get("price_in", 0)
+                    + out_tok * prov.get("price_out", 0)) / 1e6
+            out.append({"name": name, "model": a.get("model", prov.get("model", "")),
+                        "text": a.get("text", ""), "cost": cost,
+                        "prompt_tokens": in_tok, "completion_tokens": out_tok, "ok": True})
+        else:
+            out.append({"name": name, "ok": False, "error": a.get("error", "unknown")})
+    return out
+
+
+def _run_fusion_in_tab(prompt: str, panel: list, providers: dict,
+                       timeout_s: int, cwd: str = "") -> Optional[list]:
+    """Run the panel in a WATCHABLE iTerm2 fusion tab: write the request, spawn
+    the tab (fusion_run.sh → fusion_call.py), poll <id>.done/.pid like the brain
+    loop (simpler — <id>.json is already the final collected answers), then price
+    them from the registry. Returns the answers list, or None on any tab failure
+    (→ caller falls back to the in-process panel). Never raises."""
+    fusion_id = f"fusion-{uuid.uuid4().hex[:8]}"
+    # The request carries only what the standalone fusion_call.py needs (it can't
+    # import the package or read the registry): each seat's script + model.
+    body = {"prompt": prompt, "timeout_s": timeout_s, "panel": panel,
+            "providers": {n: {"script": providers[n].get("script", ""),
+                              "model": providers[n].get("model", "")} for n in panel}}
+    try:
+        spawn.spawn_fusion_tab(fusion_id, body, cwd or os.getcwd())
+    except Exception as e:
+        print(f"[claude_runner] fusion tab spawn failed ({e})")
+        spawn.cleanup_fusion_files(fusion_id)
+        return None
+
+    done_file = spawn.FUSION_DIR / f"{fusion_id}.done"
+    json_file = spawn.FUSION_DIR / f"{fusion_id}.json"
+    pid_file = spawn.FUSION_DIR / f"{fusion_id}.pid"
+    deadline = time.time() + timeout_s + 60      # panel clock; the judge has its own
+    answers: Optional[list] = None
+    success = False
+    pid: Optional[int] = None
+    started_at = time.time()
+    try:
+        while True:
+            if done_file.is_file():
+                try:
+                    code = int((done_file.read_text().strip() or "1"))
+                except (ValueError, OSError):
+                    code = 1
+                if code == 0 and json_file.is_file():
+                    try:
+                        raw = json.loads(json_file.read_text() or "[]")
+                    except (ValueError, OSError):
+                        raw = None
+                    if isinstance(raw, list):
+                        answers = _price_tab_answers(raw, providers)
+                        success = True
+                break
+
+            if pid is None:
+                pid = _read_pid(pid_file)
+                if pid is None and (time.time() - started_at) > _STARTUP_GRACE_S:
+                    break                          # tab never started its runner
+            elif not spawn.pid_alive(pid):
+                if done_file.is_file():
+                    continue                       # race: .done just landed
+                break                              # tab closed before completion
+
+            if time.time() > deadline:
+                break
+            time.sleep(_POLL_INTERVAL_S)
+    finally:
+        spawn.finish_fusion_tab(fusion_id, success=success)
+    return answers
+
+
+def _panel_answers(prompt: str, panel: list, providers: dict,
+                   timeout_s: int, cwd: str = "") -> list:
+    """Get the panel's answers. PREFERS the watchable iTerm2 fusion tab; falls
+    back to the in-process subprocess fan-out only when iTerm2 is absent or the
+    tab fails — so a panel is never hidden when iTerm2 is available."""
+    if spawn.iterm2_installed():
+        tab = _run_fusion_in_tab(prompt, panel, providers, timeout_s, cwd=cwd)
+        if tab is not None:
+            return tab
+        print("[claude_runner] fusion tab unavailable; in-process panel fallback")
+    return _run_panel(prompt, panel, providers, timeout_s)
+
+
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
                     judge_model: str = "opus", judge_effort: str = "high") -> ClaudeRun:
@@ -434,7 +533,8 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                          error=f"fusion: need >=2 active panel providers, have {len(panel)}")
 
     spawn.ensure_fusion_providers()                    # materialize scripts (lazy)
-    answers = _run_panel(prompt, panel, providers, timeout_s)
+    # Prefer the watchable fusion tab; in-process is the no-iTerm2 fallback.
+    answers = _panel_answers(prompt, panel, providers, timeout_s, cwd=cwd or os.getcwd())
     ok = [a for a in answers if a.get("ok")]
     if len(ok) < 2:
         errs = "; ".join(f"{a.get('name')}: {a.get('error')}"
