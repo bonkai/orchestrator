@@ -347,9 +347,9 @@ tasks.
 
 ### Phase F0 — Config & key management
 *Goal: a `config.py` that resolves per-provider keys + the registry/presets, and an installer that scaffolds the config file.*
-- [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_provider_key(name)` (env `key_env` → file `api_key` → None) + `active_providers()` (provider names whose key resolves **and** `enabled != false`, each with its `model` id) + `is_fusion_available()` (≥2 active providers). · *verify:* `is_fusion_available()` → `False` clean, `True` once two providers' keys are set; `active_providers()` lists exactly the keyed+enabled ones.
-- [ ] **F0.2** `config.py`: `fusion_config()` → `{preset, timeout_s, providers, presets}` merged over the §4/§6 seed defaults. · *verify:* returns seeds with no file; returns your values when `config.json` sets them.
-- [ ] **F0.3** `install.sh`: write the `config.json` template **only if absent** (idempotent) — full registry with empty `api_key`s + presets — and print where to paste each key. · *verify:* run twice; the 2nd run is a no-op and never clobbers existing keys.
+- [x] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_provider_key(name)` (env `key_env` → file `api_key` → None) + `active_providers()` (provider names whose key resolves **and** `enabled != false`, each with its `model` id) + `is_fusion_available()` (≥2 active providers). · *verify:* `is_fusion_available()` → `False` clean, `True` once two providers' keys are set; `active_providers()` lists exactly the keyed+enabled ones.
+- [x] **F0.2** `config.py`: `fusion_config()` → `{preset, timeout_s, providers, presets}` merged over the §4/§6 seed defaults. · *verify:* returns seeds with no file; returns your values when `config.json` sets them.
+- [x] **F0.3** `install.sh`: write the `config.json` template **only if absent** (idempotent) — full registry with empty `api_key`s + presets — and print where to paste each key. · *verify:* run twice; the 2nd run is a no-op and never clobbers existing keys.
 
 ### Phase F1 — Provider scripts + `claude_runner.py` extension *(the core)*
 The new unit is **one standalone provider script per model**; the orchestrator just
