@@ -238,6 +238,22 @@ def ensure_fusion_providers():
         dst.chmod(0o755)
 
 
+def ensure_fusion_runner():
+    """One-time (lazy): create the fusion sidecar dir, write fusion_run.sh, copy
+    the standalone fusion_call.py into the data dir, and materialize the provider
+    scripts. Mirrors ensure_brain_runner; called before spawning a fusion tab, so
+    install.sh needs no change. The repo is the source of truth (always rewritten)."""
+    FUSION_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    FUSION_RUN_SH.write_text(FUSION_RUN_SH_CONTENT)
+    FUSION_RUN_SH.chmod(0o755)
+    src = _REPO_DIR / "fusion_call.py"
+    if src.is_file():
+        FUSION_CALL_PY.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        FUSION_CALL_PY.chmod(0o755)
+    ensure_fusion_providers()
+
+
 def _osascript(script: str) -> str:
     result = subprocess.run(
         ["osascript", "-e", script],
@@ -724,3 +740,89 @@ def finish_brain_tab(brain_id: str, label: str = "brain", success: bool = False)
         except Exception:
             pass
     cleanup_brain_files(brain_id)
+
+
+# ─── fusion panel fan-out in a watchable tab (mirrors the brain-tab block) ────
+
+def _fusion_tab_title(fusion_id: str) -> str:
+    """Unique, readable iTerm2 tab title for a fusion panel; the random suffix
+    lets us close exactly this tab later."""
+    suffix = fusion_id.rsplit("-", 1)[-1]
+    return f"orch fusion: panel {suffix}"
+
+
+def _fusion_tab_cmd(fusion_id: str, cwd: str, title: str) -> str:
+    """Shell command the fusion tab runs. Sets ORCHESTRATOR_FUSION_ID (NOT
+    ORCHESTRATOR_RUN_ID — so the Stop hook stays a no-op), titles the tab, then
+    execs fusion_run.sh. Pure/string-only so it's unit-testable."""
+    safe_proj = cwd.replace('"', '\\"')
+    safe_title = title.replace('"', '\\"')
+    return (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_FUSION_ID={fusion_id} && '
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/fusion_run.sh"'
+    )
+
+
+def cleanup_fusion_files(fusion_id: str):
+    """Remove all sidecar files for a fusion panel. The tab (and its on-screen
+    output) is unaffected."""
+    for suf in ("request.json", "json", "done", "pid"):
+        try:
+            (FUSION_DIR / f"{fusion_id}.{suf}").unlink()
+        except FileNotFoundError:
+            pass
+
+
+def spawn_fusion_tab(fusion_id: str, body: dict, cwd: str) -> None:
+    """Open a new iTerm2 tab and run the fusion panel in it via fusion_run.sh.
+
+    Writes the request body to <fusion_id>.request.json (avoids shell-quoting the
+    prompt into AppleScript), then tells iTerm2 to open a tab and exec the runner.
+    The caller polls <fusion_id>.done for completion and reads <fusion_id>.json
+    for the collected answers. Raises on spawn failure (caller falls back to the
+    in-process panel)."""
+    if not iterm2_installed():
+        raise RuntimeError("iTerm2 not installed")
+    ensure_fusion_runner()
+    (FUSION_DIR / f"{fusion_id}.request.json").write_text(
+        json.dumps(body), encoding="utf-8")
+
+    title = _fusion_tab_title(fusion_id)
+    safe_title = title.replace('"', '\\"')
+    cmd = _fusion_tab_cmd(fusion_id, cwd, title)
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+
+    script = f'''
+tell application "iTerm"
+    activate
+    if (count of windows) = 0 then
+        create window with default profile
+    end if
+    tell current window
+        set newTab to (create tab with default profile)
+        tell current session of newTab
+            set name to "{safe_title}"
+            write text "{apple_cmd}"
+        end tell
+    end tell
+end tell
+'''
+    try:
+        _osascript(script)
+    except Exception:
+        cleanup_fusion_files(fusion_id)
+        raise
+
+
+def finish_fusion_tab(fusion_id: str, success: bool = False):
+    """Post-panel teardown for a fusion tab. Closes the tab when the panel
+    SUCCEEDED and auto-close is enabled (failed panels stay open for
+    inspection); always removes the sidecar files. Never raises."""
+    if success and brain_auto_close_enabled():
+        try:
+            close_iterm2_tab_by_title(_fusion_tab_title(fusion_id))
+        except Exception:
+            pass
+    cleanup_fusion_files(fusion_id)
