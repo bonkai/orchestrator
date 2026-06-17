@@ -522,13 +522,15 @@ uninstalled, it still returns a valid `ClaudeRun` via the in-process subprocess 
 - [ ] **F2.2** Make the existing auto-retry force `run_claude_json` directly (a strict-JSON reminder to one model) so a flaky panel never re-fans-out. · *verify:* trigger a retry → it does **not** open a second fusion panel.
 
 ### Phase F3 — Pipeline wiring *(the on/off toggle, server side)*
-- [ ] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")`, parse `do_fusion = fusion.lower() in ("1","true","yes","on")`, thread into `_send_in_background(... do_fusion=...)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true` → a temporary log shows `do_fusion=True`.
-- [ ] **F3.2** `_send_in_background`: pass `fusion=do_fusion` into `rewriter.rewrite(...)` and record `do_fusion` on the `rewrite_ok` stage event. · *verify:* a `fusion=true` send produces a panel-authored rewrite whose summed cost shows on the timeline; `fusion=true` + <2 keys still dispatches via fallback.
+- [ ] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")` **+ `fusion_panel: str = Form("")`** (comma-separated provider names), parse `do_fusion = fusion.lower() in ("1","true","yes","on")` and `panel = [p for p in fusion_panel.split(",") if p in config.active_providers()]` (silently drops any model without an active key), thread both into `_send_in_background(... do_fusion=..., panel=panel)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true&fusion_panel=deepseek,minimax` → a temporary log shows `do_fusion=True` and the validated panel; an unkeyed name in the list is dropped.
+- [ ] **F3.2** `_send_in_background`: pass `fusion=do_fusion` **and `panel=panel`** into `rewriter.rewrite(...)`; record `do_fusion` + the chosen panel on the `rewrite_ok` stage event. An empty `panel` falls back to the configured preset. · *verify:* a `fusion=true` send with a 2-model panel bills exactly those two; `fusion=true` + empty panel uses the preset; `fusion=true` + <2 keys still dispatches via fallback.
 
-### Phase F4 — Dispatch-form toggle *(the on/off toggle, UI side)*
+### Phase F4 — Dispatch-form toggle + model picker *(on/off + which-models, UI side)*
+*Goal: the two things the toggle UX must have — a checkbox to turn Fusion on, and a key-gated list to pick which models go in the panel.*
 - [ ] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects. Label `fusion (multi-model) ⚡` + muted hint `multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes`. Persist in `localStorage`; **default OFF**. · *verify:* toggling + reloading keeps state.
-- [ ] **F4.2** In `send(rewrite)` append `fd.append('fusion', chkFusion.checked ? 'true':'false')` next to `effort`/`model`/`rewrite`; works with **both** buttons. · *verify:* the `/send` payload includes `fusion`.
-- [ ] **F4.3** Disabled state: extend `_view_ctx()` to pass `fusion_available = config.is_fusion_available()`; when false, render the checkbox **disabled** with *"Configure ≥2 providers' keys in ~/.orchestrator/config.json to enable."* When on, the in-flight banner reads `rewriting (multi-model) then dispatching (~15–40s).` · *verify:* <2 keys → disabled w/ note; ≥2 keys → enabled. **End-to-end toggle now works (F3 + F4).**
+- [ ] **F4.2** **Model multiselect (key-gated).** Extend `_view_ctx()` to pass `fusion_providers = config.active_providers()` (each with its `model` id) **plus** the inactive ones for display. Render a checklist beneath the checkbox — one row per provider showing its model id; **active** providers are checkable, **inactive** ones (no key / disabled) are greyed with *"no API key set."* Persist the checked set in `localStorage`, seeded from the current preset's active members. Reveal the list only when the Fusion checkbox is on. · *verify:* only keyed providers are checkable; an unkeyed one is greyed; the checked set survives reload.
+- [ ] **F4.3** In `send(rewrite)` append `fd.append('fusion', chkFusion.checked ? 'true':'false')` **and `fd.append('fusion_panel', checkedProviders.join(','))`** next to `effort`/`model`/`rewrite`; works with **both** buttons. · *verify:* the `/send` payload includes `fusion` + the chosen `fusion_panel`.
+- [ ] **F4.4** Disabled state: when `config.is_fusion_available()` is false (<2 active providers), render the checkbox **disabled** with *"Configure ≥2 providers' keys in ~/.orchestrator/config.json to enable."* When on, the in-flight banner reads `rewriting (multi-model) then dispatching (~15–40s).` · *verify:* <2 keys → disabled w/ note; ≥2 keys → enabled. **End-to-end toggle + model selection now works (F3 + F4).**
 
 ### Phase F5 — Surface + cost accounting
 - [ ] **F5.1** `/dispatch/{id}` (`templates/dispatch.html`): render the `rewrite_ok`/`rewrite_skipped` stage events, including the **per-seat panel breakdown** (`run.raw["panel"]`) + summed cost. · *verify:* a fused dispatch's detail page shows each model + the total.
@@ -559,12 +561,12 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
     error: str = ""
 ```
 
-### Phase F8 — Model-selection UI *(edit the registry from the browser)*
-*Goal: a UI to register providers + pick each panel seat's model/version. You can already do this by editing `config.json`; F8 makes it clickable.*
+### Phase F8 — Settings UI *(advanced registry management — basic selection already ships in F4)*
+*Goal: the browser-side **registry editor** — add/remove providers, change a model slug, manage presets globally, see which providers are active. The per-dispatch "which active models" picker already ships in **F4.2**; F8 is the advanced, persistent settings surface for editing the registry itself.*
 - [ ] **F8.1** `/settings` read view: show fusion availability + the current `preset`/`presets`/`providers` from `config.fusion_config()`. **Keys are never shown or editable in the browser.** · *verify:* the page reflects `config.json`.
 - [ ] **F8.2** Preset switch — pick `budget`/`balanced`/`max`/`custom`; write to `config.json`. · *verify:* switching presets changes which providers the next fusion call bills.
 - [ ] **F8.3** Registry editor — add/remove a provider (script, key_env, model, prices) and edit each seat's **model id** (free text — a live cross-provider model list would be N different endpoints, so editing the slug is simpler and sufficient); save to `config.json`. **Key fields stay file-only.** · *verify:* a brand-new provider/model appears and is selectable once its script exists.
-- [ ] **F8.4** ⟂ *(optional)* per-dispatch override: thread a chosen preset/panel through `/send` like `effort`/`model` for one-off use without changing saved config. · *verify:* a one-off pick does not persist.
+- [ ] **F8.4** ⟂ *(optional)* per-seat **lens prompts** (the §5 refinement): let each provider carry a prompt prefix ("find the risks" / "find the simplest path"), edited here and stored in the registry. *(The per-dispatch model pick is already delivered by F4 — no separate override task needed.)* · *verify:* a seat's lens prefix is applied on the next fusion call.
 
 *When shipped:* append a `Phase 11 — Fusion ✅` entry to `PLAN.md` and a short `## Fusion` note to `CLAUDE.md`.
 
