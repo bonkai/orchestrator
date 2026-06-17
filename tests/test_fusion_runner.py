@@ -11,6 +11,7 @@ Usage:
     python tests/test_fusion_runner.py
 """
 
+import contextlib
 import json
 import shutil
 import sys
@@ -87,7 +88,7 @@ class TestRunPanel(unittest.TestCase):
 
 class TestJudgePrompt(unittest.TestCase):
     def test_contains_original_answers_and_instruction(self):
-        orig = "Answer in JSON: {\"x\": 1}"
+        orig = 'Answer in JSON: {"x": 1}'
         answers = [{"name": "gemini", "model": "g", "text": "AAA"},
                    {"name": "gemini2", "model": "g", "text": "BBB"}]
         jp = claude_runner._judge_prompt(orig, answers)
@@ -104,43 +105,47 @@ class TestRunFusionJson(unittest.TestCase):
     PROVIDERS = {"gemini": dict(PROV), "gemini2": dict(PROV)}
     PRESETS = {"budget": ["gemini", "gemini2"]}
 
-    def _patch_cfg(self, active):
-        """Patch config so run_fusion_json sees `active` as the active set."""
+    @contextlib.contextmanager
+    def _env(self, active, judge=None, panel=None):
+        """Patch config + spawn + (optionally) _run_panel / run_claude_json.
+        Yields (run_panel_mock, run_claude_json_mock) for assertions."""
         cfg = {"preset": "budget", "timeout_s": 42,
                "providers": self.PROVIDERS, "presets": self.PRESETS}
-        return [
-            mock.patch.object(claude_runner.config, "fusion_config", return_value=cfg),
-            mock.patch.object(claude_runner.config, "active_providers", return_value=active),
-            mock.patch.object(claude_runner.spawn, "ensure_fusion_providers"),
-        ]
+        with contextlib.ExitStack() as es:
+            es.enter_context(mock.patch.object(
+                claude_runner.config, "fusion_config", return_value=cfg))
+            es.enter_context(mock.patch.object(
+                claude_runner.config, "active_providers", return_value=active))
+            es.enter_context(mock.patch.object(
+                claude_runner.spawn, "ensure_fusion_providers"))
+            rp = es.enter_context(mock.patch.object(claude_runner, "_run_panel"))
+            if panel is not None:
+                rp.return_value = panel
+            rcj = es.enter_context(mock.patch.object(claude_runner, "run_claude_json"))
+            if judge is not None:
+                rcj.return_value = judge
+            yield rp, rcj
 
-    def test_happy_path_judges_and_sums_cost(self):
+    def test_happy_path_judges_on_opus_and_sums_cost(self):
         active = {"gemini": dict(PROV), "gemini2": dict(PROV)}
         panel = [{"name": "gemini", "text": "A", "cost": 0.001, "ok": True},
                  {"name": "gemini2", "text": "B", "cost": 0.002, "ok": True}]
-        fake_judge = ClaudeRun(ok=True, text="SYNTH", model="opus")
-        patches = self._patch_cfg(active) + [
-            mock.patch.object(claude_runner, "_run_panel", return_value=panel),
-            mock.patch.object(claude_runner, "run_claude_json", return_value=fake_judge),
-        ]
-        with patches[0], patches[1], patches[2], patches[3], \
-                mock.patch.object(claude_runner, "run_claude_json",
-                                  return_value=fake_judge) as rcj:
+        judge = ClaudeRun(ok=True, text="SYNTH", model="opus")
+        with self._env(active, judge=judge, panel=panel) as (rp, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp")
         self.assertTrue(run.ok)
         self.assertEqual(run.text, "SYNTH")
-        self.assertAlmostEqual(run.cost_usd, 0.003, places=9)   # Σ panel cost
+        self.assertAlmostEqual(run.cost_usd, 0.003, places=9)      # Σ panel cost
         self.assertEqual([a["name"] for a in run.raw["panel"]], ["gemini", "gemini2"])
-        # Judge ran on Opus explicitly (run_claude_json defaults to sonnet).
+        rp.assert_called_once()
+        # Judge ran on Opus EXPLICITLY (run_claude_json defaults to sonnet).
         self.assertEqual(rcj.call_args.kwargs.get("model"), "opus")
         self.assertEqual(rcj.call_args.kwargs.get("effort"), "high")
+        self.assertEqual(rcj.call_args.kwargs.get("label"), "fusion-judge")
 
-    def test_under_two_active_returns_not_ok_without_judging(self):
-        active = {"gemini": dict(PROV)}    # only 1 keyed
-        with self._patch_cfg(active)[0], self._patch_cfg(active)[1], \
-                self._patch_cfg(active)[2], \
-                mock.patch.object(claude_runner, "_run_panel") as rp, \
-                mock.patch.object(claude_runner, "run_claude_json") as rcj:
+    def test_under_two_active_returns_not_ok_without_running(self):
+        active = {"gemini": dict(PROV)}    # only 1 keyed seat
+        with self._env(active) as (rp, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp")
         self.assertFalse(run.ok)
         self.assertIn(">=2", run.error)
@@ -151,15 +156,25 @@ class TestRunFusionJson(unittest.TestCase):
         active = {"gemini": dict(PROV), "gemini2": dict(PROV)}
         panel = [{"name": "gemini", "text": "A", "cost": 0.001, "ok": True},
                  {"name": "gemini2", "ok": False, "error": "boom"}]
-        with self._patch_cfg(active)[0], self._patch_cfg(active)[1], \
-                self._patch_cfg(active)[2], \
-                mock.patch.object(claude_runner, "_run_panel", return_value=panel), \
-                mock.patch.object(claude_runner, "run_claude_json") as rcj:
+        with self._env(active, panel=panel) as (rp, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp")
         self.assertFalse(run.ok)
         self.assertIn("only 1 provider", run.error)
         self.assertIn("boom", run.error)
         rcj.assert_not_called()
+
+    def test_explicit_panel_filtered_to_active(self):
+        # Caller asks for deepseek too, but only the two geminis are keyed.
+        active = {"gemini": dict(PROV), "gemini2": dict(PROV)}
+        panel = [{"name": "gemini", "text": "A", "cost": 0.001, "ok": True},
+                 {"name": "gemini2", "text": "B", "cost": 0.001, "ok": True}]
+        judge = ClaudeRun(ok=True, text="S")
+        with self._env(active, judge=judge, panel=panel) as (rp, rcj):
+            claude_runner.run_fusion_json("q", cwd="/tmp",
+                                          panel=["gemini", "gemini2", "deepseek"])
+        # _run_panel received the filtered panel (deepseek dropped — no key).
+        called_panel = rp.call_args.args[1]
+        self.assertEqual(called_panel, ["gemini", "gemini2"])
 
 
 # ───────────────────────────── F1.8: run_brain_json ────────────────────────
@@ -195,13 +210,22 @@ class TestRunBrainJson(unittest.TestCase):
         self.assertEqual(run.text, "local")    # degraded to the visible-tab claude call
         rcj.assert_called_once()
 
+    def test_panel_kw_forwarded_to_fusion_not_to_claude(self):
+        fused = ClaudeRun(ok=True, text="fused")
+        with mock.patch.object(claude_runner, "run_fusion_json", return_value=fused) as rfj, \
+                mock.patch.object(claude_runner, "run_claude_json"):
+            claude_runner.run_brain_json("q", cwd="/tmp", fusion=True,
+                                         panel=["gemini", "gemini2"])
+        self.assertEqual(rfj.call_args.kwargs.get("panel"), ["gemini", "gemini2"])
+
 
 # ─────────────────── F1.7a subset: ensure_fusion_providers ──────────────────
 
 class TestEnsureFusionProviders(unittest.TestCase):
     def test_materializes_repo_scripts_executable(self):
         repo = Path(tempfile.mkdtemp(prefix="repo_prov_"))
-        dest = Path(tempfile.mkdtemp(prefix="data_prov_")) / "providers"
+        dest_parent = Path(tempfile.mkdtemp(prefix="data_prov_"))
+        dest = dest_parent / "providers"
         try:
             (repo / "gemini.py").write_text("print('x')\n")
             with mock.patch.object(spawn, "_REPO_PROVIDERS_DIR", repo), \
@@ -213,7 +237,7 @@ class TestEnsureFusionProviders(unittest.TestCase):
             self.assertTrue(copied.stat().st_mode & 0o100)   # owner-executable
         finally:
             shutil.rmtree(repo, ignore_errors=True)
-            shutil.rmtree(dest.parent, ignore_errors=True)
+            shutil.rmtree(dest_parent, ignore_errors=True)
 
 
 if __name__ == "__main__":
