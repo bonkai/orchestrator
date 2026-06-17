@@ -85,7 +85,8 @@ def rewrite(user_task: str, project_path: str) -> RewriteResult:
         "similar_tasks": similar_md,
     })
 
-    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(project), label="rewriter")
+    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(project), label="rewriter",
+                                        model="opus", effort="max")
     if not run.ok:
         return RewriteResult(ok=False, error=run.error,
                              cost_usd=run.cost_usd, model=run.model,
@@ -113,7 +114,8 @@ def rewrite(user_task: str, project_path: str) -> RewriteResult:
             + "response MUST be `{` and the last MUST be `}`.\n\n"
             + f"For reference, the start of your previous (rejected) reply was:\n{first_preview}"
         )
-        retry = claude_runner.run_claude_json(prompt=retry_prompt, cwd=str(project), label="rewriter")
+        retry = claude_runner.run_claude_json(prompt=retry_prompt, cwd=str(project), label="rewriter",
+                                              model="opus", effort="max")
         retry_cost = retry.cost_usd
         retry_duration = retry.duration_s
         if retry.ok and isinstance(retry.parsed_json, dict):
