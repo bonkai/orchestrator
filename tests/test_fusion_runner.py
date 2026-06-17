@@ -118,7 +118,9 @@ class TestRunFusionJson(unittest.TestCase):
                 claude_runner.config, "active_providers", return_value=active))
             es.enter_context(mock.patch.object(
                 claude_runner.spawn, "ensure_fusion_providers"))
-            rp = es.enter_context(mock.patch.object(claude_runner, "_run_panel"))
+            # Mock at the panel SEAM (_panel_answers) — run_fusion_json calls it,
+            # not _run_panel directly, and it would otherwise hit the real tab path.
+            rp = es.enter_context(mock.patch.object(claude_runner, "_panel_answers"))
             if panel is not None:
                 rp.return_value = panel
             rcj = es.enter_context(mock.patch.object(claude_runner, "run_claude_json"))
