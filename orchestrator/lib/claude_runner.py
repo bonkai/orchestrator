@@ -340,3 +340,129 @@ def run_claude_json(
 
     return result if result is not None else ClaudeRun(
         ok=False, error="brain call ended unexpectedly")
+
+
+# ─────────────────────────── Fusion (optional, opt-in) ─────────────────────
+# A panel of per-provider scripts (run in parallel) answers the SAME prompt;
+# the local `claude` CLI then JUDGES them into one synthesis. The judge is free
+# (subscription) and runs in a visible brain tab, so "No Anthropic API calls"
+# stays intact. cost_usd = Σ panel provider token costs (the only out-of-pocket
+# spend). Everything degrades to the plain claude path when <2 providers answer.
+#
+# This is the IN-PROCESS fan-out: the panel runs as captured subprocesses here.
+# A later phase puts the panel in a watchable iTerm2 "fusion" tab in front of
+# this same logic (the judge is already a visible brain tab via run_claude_json).
+
+
+def _panel_answer(name: str, prov: dict, prompt: str, timeout_s: int) -> dict:
+    """Run ONE provider's script as a subprocess → normalized dict + computed
+    cost. NEVER raises — a spawn/timeout/parse failure or an ok=false script
+    both come back as {"ok": False, ...}. The script owns the lab's native API;
+    we only read its normalized stdout and price its tokens from the registry."""
+    req = json.dumps({"prompt": prompt, "model": prov.get("model", ""),
+                      "timeout_s": timeout_s})
+    script_path = os.path.join(PROVIDERS_DIR, prov["script"])
+    try:
+        p = subprocess.run(["python3", script_path], input=req,
+                           capture_output=True, text=True, timeout=timeout_s + 15)
+        out = json.loads(p.stdout or "{}")
+    except Exception as e:                       # spawn / timeout / bad JSON
+        return {"name": name, "ok": False, "error": str(e)}
+    if not out.get("ok"):
+        return {"name": name, "ok": False, "error": out.get("error", "unknown")}
+    in_tok = out.get("prompt_tokens", 0) or 0
+    out_tok = out.get("completion_tokens", 0) or 0
+    cost = (in_tok * prov.get("price_in", 0) + out_tok * prov.get("price_out", 0)) / 1e6
+    return {"name": name, "model": out.get("model", prov.get("model", "")),
+            "text": out.get("text", ""), "cost": cost,
+            "prompt_tokens": in_tok, "completion_tokens": out_tok, "ok": True}
+
+
+def _run_panel(prompt: str, panel: list, providers: dict, timeout_s: int) -> list:
+    """Fan out to the panel's providers IN PARALLEL (wall-clock ≈ slowest seat,
+    not the sum). Order of the returned answers matches `panel`."""
+    if not panel:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(panel))) as ex:
+        return list(ex.map(
+            lambda n: _panel_answer(n, providers[n], prompt, timeout_s), panel))
+
+
+def _judge_prompt(orig: str, answers: list) -> str:
+    """Reuse the ORIGINAL prompt verbatim (so any output-format/JSON-schema
+    instructions travel with it), append the N panel answers, then ask the
+    judge to synthesize the single best response in that same format."""
+    blocks = [orig.strip(),
+              f"\n\n---\nA panel of {len(answers)} independent models each "
+              "answered the task above. Their answers:\n"]
+    for i, a in enumerate(answers, 1):
+        blocks.append(f"\n### Panel answer {i} — {a.get('name', '?')} "
+                      f"({a.get('model', '?')})\n{a.get('text', '')}\n")
+    blocks.append("\n---\nYou are the judge. Synthesize the single best response "
+                  "to the original task: resolve disagreements, keep what is "
+                  "correct, discard what is wrong. Respond in the EXACT same "
+                  "format the task requested — output only that, with no preamble "
+                  "and no mention of the panel.")
+    return "".join(blocks)
+
+
+def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
+                    panel: Optional[list] = None, timeout_s: Optional[int] = None,
+                    judge_model: str = "opus", judge_effort: str = "high") -> ClaudeRun:
+    """Fusion sibling of run_claude_json. Runs a PANEL of per-provider scripts
+    (parallel), then synthesizes via the local `claude` CLI judge
+    (run_claude_json — a visible brain tab, free on the subscription). Returns
+    the SAME ClaudeRun the brain callers expect, with cost_usd = Σ panel cost.
+    NEVER raises — any shortfall returns ok=False so run_brain_json can fall
+    back to the plain claude call.
+
+    ⚠ run_claude_json defaults to sonnet, so the judge model is passed
+    EXPLICITLY (default opus/high; a summarizer caller can pass sonnet)."""
+    cfg = config.fusion_config()
+    providers = cfg["providers"]
+    presets = cfg["presets"]
+    preset = preset or cfg.get("preset") or config.DEFAULT_FUSION_PRESET
+    panel = panel or presets.get(preset) or config.FUSION_PRESETS_SEED["budget"]
+    timeout_s = timeout_s or cfg.get("timeout_s") or config.DEFAULT_FUSION_TIMEOUT_S
+
+    # Keep only seats that are usable right now (key resolves AND enabled). This
+    # is what makes "fusion on but <2 keys" fall back instead of erroring.
+    active = config.active_providers()
+    panel = [n for n in panel if n in active]
+    if len(panel) < 2:
+        return ClaudeRun(ok=False,
+                         error=f"fusion: need >=2 active panel providers, have {len(panel)}")
+
+    spawn.ensure_fusion_providers()                    # materialize scripts (lazy)
+    answers = _run_panel(prompt, panel, providers, timeout_s)
+    ok = [a for a in answers if a.get("ok")]
+    if len(ok) < 2:
+        errs = "; ".join(f"{a.get('name')}: {a.get('error')}"
+                         for a in answers if not a.get("ok"))
+        return ClaudeRun(ok=False,
+                         error=f"fusion panel: only {len(ok)} provider(s) answered ({errs})")
+
+    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd or os.getcwd(),
+                            model=judge_model, effort=judge_effort, label="fusion-judge")
+    judge.cost_usd = sum(a["cost"] for a in ok)        # real out-of-pocket = panel only
+    judge.raw = {"panel": answers, "preset": preset, "panel_names": panel}
+    return judge
+
+
+def run_brain_json(prompt: str, cwd: str, fusion: bool = False,
+                   model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT,
+                   max_turns: int = DEFAULT_MAX_TURNS, **kw) -> ClaudeRun:
+    """Single entry point for brain calls. Routes through Fusion when requested
+    AND available; otherwise — or if the panel comes up short — the standard
+    visible-tab claude call, so a flaky panel never hard-fails a dispatch.
+
+    `model`/`effort`/`max_turns` govern the NON-fusion (and fallback) claude
+    call; the fusion judge uses `judge_model`/`judge_effort` (default opus/high)
+    forwarded via **kw alongside preset/panel/timeout_s."""
+    if fusion:
+        run = run_fusion_json(prompt=prompt, cwd=cwd, **kw)
+        if run.ok:
+            return run
+        print(f"[claude_runner] fusion unavailable ({run.error}); falling back to claude")
+    return run_claude_json(prompt=prompt, cwd=cwd, model=model, effort=effort,
+                           max_turns=max_turns)
