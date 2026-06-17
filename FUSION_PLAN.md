@@ -202,6 +202,11 @@ than the drop-in (you don't trust the panel to author the final artifact).
 - **Env-var-first** keeps secrets out of files; the `api_key` field is the fallback so
   `install.sh` can scaffold it.
 - **Never committed, never browser-editable** (edit the file directly).
+- **Active providers drive the UI.** Each entry may carry `"enabled": true|false`
+  (default `true`) so you can deactivate a provider without deleting its key. A provider
+  is **active** when its key resolves *and* it's enabled; `config.active_providers()`
+  returns that list, and the dispatch form lists exactly those as selectable panel models
+  (F4). Inactive providers (no key, or disabled) are shown greyed-out.
 - A script MAY read an optional `base_url`/`region` override from its registry entry for
   region switching (Qwen / Z.ai international-vs-China hosts) — but the default host
   lives in the script.
@@ -232,6 +237,11 @@ synthesize. The six registered labs span DeepSeek (CN), xAI (US), Google (US), M
 
 Presets are config — edit freely, add your own (e.g. a `coding` preset). Adding a lab
 is a **new script + a registry line**, never a change to the core orchestrator.
+
+**Per-dispatch selection.** Presets are the quick-pick, but the dispatch form also lets
+you hand-check **which active-key models** go in the panel for a given send (F4). The
+effective panel is "the models you ticked, intersected with the ones whose key is
+active" — so you can only ever select models you actually have a key for.
 
 **Optional refinement (owning the orchestration buys this):** give each seat a different
 *lens* instead of the identical prompt — e.g. "find the risks," "find the simplest
@@ -306,11 +316,11 @@ disagreement among models.** Everything routine stays solo.
 | **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ☐ |
 | **F2** | Rewriter integration | rewriter routes through fusion when toggled | ☐ |
 | **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ☐ |
-| **F4** | Dispatch-form toggle | checkbox, localStorage, disabled-when-<2-providers, cost hint | ☐ |
+| **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ☐ |
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ☐ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
-| **F8** (opt) | Model-selection UI | edit the registry + pick each seat's model/version from the browser | ☐ |
+| **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
 
 **F0–F5 deliver a working, shippable on/off Fusion toggle.** Build strictly in order;
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
@@ -318,7 +328,7 @@ tasks.
 
 ### Phase F0 — Config & key management
 *Goal: a `config.py` that resolves per-provider keys + the registry/presets, and an installer that scaffolds the config file.*
-- [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_provider_key(name)` (env `key_env` → file `api_key` → None) + `is_fusion_available()` (≥2 panel providers resolve a key). · *verify:* `is_fusion_available()` → `False` clean, `True` once two providers' keys are set via env **or** file.
+- [ ] **F0.1** `config.py`: `load_config()` (reads `~/.orchestrator/config.json`; `{}` if absent/malformed; never raises) + `get_provider_key(name)` (env `key_env` → file `api_key` → None) + `active_providers()` (provider names whose key resolves **and** `enabled != false`, each with its `model` id) + `is_fusion_available()` (≥2 active providers). · *verify:* `is_fusion_available()` → `False` clean, `True` once two providers' keys are set; `active_providers()` lists exactly the keyed+enabled ones.
 - [ ] **F0.2** `config.py`: `fusion_config()` → `{preset, timeout_s, providers, presets}` merged over the §4/§6 seed defaults. · *verify:* returns seeds with no file; returns your values when `config.json` sets them.
 - [ ] **F0.3** `install.sh`: write the `config.json` template **only if absent** (idempotent) — full registry with empty `api_key`s + presets — and print where to paste each key. · *verify:* run twice; the 2nd run is a no-op and never clobbers existing keys.
 
@@ -508,7 +518,7 @@ uninstalled, it still returns a valid `ClaudeRun` via the in-process subprocess 
 
 ### Phase F2 — Rewriter integration
 *Goal: the rewriter can route its one brain call through Fusion.*
-- [ ] **F2.1** Add `fusion: bool = False` to `rewriter.rewrite(...)` and swap the brain call to `run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion)`. Downstream (`run.ok`/`run.parsed_json`/`run.cost_usd`) unchanged. · *verify:* `fusion=False` behaves exactly as today; `fusion=True` opens a fusion panel + judge and returns a rewrite.
+- [ ] **F2.1** Add `fusion: bool = False` **and `panel: Optional[list] = None`** to `rewriter.rewrite(...)` and swap the brain call to `run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion, panel=panel)` (`run_brain_json`'s `**kw` already forwards `panel` to `run_fusion_json`). Downstream (`run.ok`/`run.parsed_json`/`run.cost_usd`) unchanged. · *verify:* `fusion=False` behaves exactly as today; `fusion=True` opens a fusion panel + judge; `panel=["deepseek","gemini"]` bills exactly those two.
 - [ ] **F2.2** Make the existing auto-retry force `run_claude_json` directly (a strict-JSON reminder to one model) so a flaky panel never re-fans-out. · *verify:* trigger a retry → it does **not** open a second fusion panel.
 
 ### Phase F3 — Pipeline wiring *(the on/off toggle, server side)*
