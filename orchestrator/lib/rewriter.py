@@ -93,8 +93,9 @@ def rewrite(user_task: str, project_path: str,
         "similar_tasks": similar_md,
     })
 
-    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(project), label="rewriter",
-                                        model="opus", effort="high")
+    run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion,
+                                       panel=panel, model="opus", effort="high",
+                                       label="rewriter")
     if not run.ok:
         return RewriteResult(ok=False, error=run.error,
                              cost_usd=run.cost_usd, model=run.model,
@@ -122,6 +123,8 @@ def rewrite(user_task: str, project_path: str,
             + "response MUST be `{` and the last MUST be `}`.\n\n"
             + f"For reference, the start of your previous (rejected) reply was:\n{first_preview}"
         )
+        # F2.2: the retry is ALWAYS a single model (run_claude_json directly),
+        # never the panel — a flaky/parse-failing fusion call must not re-fan-out.
         retry = claude_runner.run_claude_json(prompt=retry_prompt, cwd=str(project), label="rewriter",
                                               model="opus", effort="high")
         retry_cost = retry.cost_usd
