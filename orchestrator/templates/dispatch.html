@@ -27,6 +27,69 @@
       <pre>{{ d.user_task }}</pre>
     </div>
 
+    {% if rewrite %}
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">
+        rewrite
+        {% if rewrite.fused %}<span title="multi-model fusion panel authored this rewrite"
+              style="font-size:13px;">⚡ fusion</span>{% endif %}
+        {% if rewrite.stage == 'rewrite_skipped' %}
+          <span class="badge badge-failed" style="font-size:10px;">not used</span>
+        {% endif %}
+      </h3>
+      <p class="muted" style="font-size:12px; margin:0 0 0.6rem;">
+        model <code>{{ rewrite.model or '?' }}</code>
+        · ${{ '%.4f'|format(rewrite.cost_usd or 0) }}
+        {% if rewrite.fused %}<span title="out-of-pocket panel spend (Claude seats are $0)">(panel)</span>{% endif %}
+        · {{ '%.1f'|format(rewrite.duration_s or 0) }}s
+        {% if rewrite.bundle_chars %}· bundle {{ rewrite.bundle_chars }} chars{% endif %}
+        {% if rewrite.fusion_preset %}· preset <code>{{ rewrite.fusion_preset }}</code>{% endif %}
+      </p>
+      {% if rewrite.stage == 'rewrite_skipped' %}
+        <p style="color:#f0676f; font-size:12px; margin:0 0 0.6rem;">
+          rewrite not used: {{ rewrite.reason }}</p>
+        {% if rewrite.raw_preview %}
+          <pre style="white-space:pre-wrap; font-size:11px; max-height:160px; overflow:auto;">{{ rewrite.raw_preview }}</pre>
+        {% endif %}
+      {% endif %}
+
+      {% if rewrite.panel_breakdown %}
+        <table style="font-size:12px; width:100%;">
+          <thead><tr>
+            <th style="text-align:left;">seat</th><th style="text-align:left;">model</th>
+            <th style="text-align:right;">in</th><th style="text-align:right;">out</th>
+            <th style="text-align:right;">cost</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% for s in rewrite.panel_breakdown %}
+            <tr>
+              <td>{{ s.name }}</td>
+              <td><code>{{ s.model or '—' }}</code></td>
+              <td style="text-align:right;" class="muted">{{ s.prompt_tokens }}</td>
+              <td style="text-align:right;" class="muted">{{ s.completion_tokens }}</td>
+              <td style="text-align:right;">
+                {% if s.subscription %}<span class="muted" title="Claude Code seat — subscription, no API charge">$0 (sub)</span>
+                {% else %}${{ '%.5f'|format(s.cost or 0) }}{% endif %}
+              </td>
+              <td>{% if s.ok %}<span style="color:#5ed39a;">ok</span>
+                  {% else %}<span style="color:#f0676f;" title="{{ s.error }}">failed</span>{% endif %}</td>
+            </tr>
+            {% if s.ok and s.preview %}
+            <tr><td colspan="6" class="muted"
+                style="font-size:11px; padding:0 0 6px 8px; white-space:pre-wrap;">{{ s.preview }}{% if s.preview|length >= 600 %}…{% endif %}</td></tr>
+            {% elif not s.ok and s.error %}
+            <tr><td colspan="6" style="font-size:11px; color:#8a93a1; padding:0 0 6px 8px;">{{ s.error }}</td></tr>
+            {% endif %}
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted" style="font-size:11px; margin-top:0.4rem;">
+          total panel spend ${{ '%.4f'|format(rewrite.cost_usd or 0) }} — judge runs free on the local <code>claude</code> CLI.
+        </p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div class="pane reveal">
       <h3>live activity
         <span class="muted" style="font-weight: normal; font-size: 12px;">

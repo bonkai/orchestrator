@@ -10,6 +10,7 @@
           <tr class="status-{{ r.status }}">
             <td>{{ r.id }}</td>
             <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+              {% if r.fused %}<small title="multi-model fusion rewrite{% if r.cost_usd %} · ${{ '%.4f'|format(r.cost_usd) }}{% endif %}">⚡</small>{% endif %}
               {% if r.outcome_reason %}<small>({{ r.outcome_reason }})</small>{% endif %}
               {% if r.tool_calls and r.tool_calls > 0 %}
                 <small class="muted" title="tool calls so far">· {{ r.tool_calls }}t</small>
