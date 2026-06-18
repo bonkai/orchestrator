@@ -168,3 +168,105 @@ def is_fusion_available() -> bool:
     present (you can always add >=2 free Claude Code seats — no key needed), OR
     >=2 external providers are active. Below that the Fusion toggle is disabled."""
     return claude_cli_available() or len(active_providers()) >= 2
+
+
+# ── F8: registry/preset writes (the browser Settings UI) ────────────────────
+# These MUTATE config.json. Two invariants the whole settings surface depends on:
+#   1. api_keys are FILE-ONLY — never read from a browser request, never returned
+#      to one, and ALWAYS preserved across a save (a save merges into the on-disk
+#      object, which still carries the keys).
+#   2. a MALFORMED config.json is never overwritten — that would silently destroy
+#      the user's pasted keys. _read_config_for_write() raises on a corrupt file
+#      so the save aborts and the UI shows an error instead.
+
+class ConfigWriteError(Exception):
+    """Raised when config.json can't be safely written (e.g. it exists but is
+    malformed, so overwriting would clobber the user's keys)."""
+
+
+def _read_config_for_write() -> dict:
+    """Like load_config() but DISTINGUISHES absent (→ {}) from malformed (→
+    raise). Used only by the write helpers: a write must never clobber a file it
+    couldn't parse, because that file may hold api_keys."""
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise ConfigWriteError(f"config.json is unreadable/malformed ({e}); "
+                               "refusing to overwrite (it may hold your keys)")
+    if not isinstance(data, dict):
+        raise ConfigWriteError("config.json is not a JSON object; refusing to overwrite")
+    return data
+
+
+def save_config(cfg: dict) -> None:
+    """Atomically write the FULL config dict to config.json (chmod 600). The
+    caller MUST have merged over the on-disk object so api_keys are preserved.
+    Atomic via write-tmp-then-rename so a crash can't leave a half-written file."""
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, CONFIG_PATH)
+
+
+def set_preset(preset: str) -> dict:
+    """Set fusion.preset (merge-preserving everything else, incl. api_keys).
+    Returns the new fusion_config(). Raises ConfigWriteError on a corrupt file."""
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {})["preset"] = str(preset)
+    save_config(cfg)
+    return fusion_config()
+
+
+def upsert_provider(name: str, *, script: str, key_env: str, model: str,
+                    price_in: float, price_out: float, enabled: bool = True) -> dict:
+    """Add or edit one registry provider in config.json. The api_key is NEVER
+    set from here — an existing key is preserved, a new provider gets an empty
+    one (the user pastes keys into the file directly). Raises ConfigWriteError on
+    a corrupt file or a blank name."""
+    name = (name or "").strip()
+    if not name:
+        raise ConfigWriteError("provider name is required")
+    cfg = _read_config_for_write()
+    provs = cfg.setdefault("fusion", {}).setdefault("providers", {})
+    entry = dict(provs.get(name) or {})
+    existing_key = entry.get("api_key", "")          # file-only — preserved verbatim
+    entry.update({"script": str(script), "key_env": str(key_env), "model": str(model),
+                  "price_in": float(price_in), "price_out": float(price_out),
+                  "enabled": bool(enabled), "api_key": existing_key})
+    provs[name] = entry
+    save_config(cfg)
+    return fusion_config()
+
+
+def set_provider_enabled(name: str, enabled: bool) -> dict:
+    """Flip one provider's `enabled` flag without touching anything else.
+    A provider present only as a SEED (not yet in config.json) is materialized
+    from its merged entry first (sans api_key), so toggling it persists."""
+    cfg = _read_config_for_write()
+    provs = cfg.setdefault("fusion", {}).setdefault("providers", {})
+    if name not in provs:
+        merged = fusion_config()["providers"].get(name)
+        if not isinstance(merged, dict):
+            raise ConfigWriteError(f"unknown provider: {name}")
+        provs[name] = {k: v for k, v in merged.items() if k != "api_key"}
+    provs[name]["enabled"] = bool(enabled)
+    save_config(cfg)
+    return fusion_config()
+
+
+def remove_provider(name: str) -> dict:
+    """Remove a provider's config.json override. (A canonical SEED name still
+    reappears from the seeds, but keyless → inactive; a custom name disappears
+    entirely.) Raises ConfigWriteError on a corrupt file."""
+    cfg = _read_config_for_write()
+    provs = cfg.setdefault("fusion", {}).setdefault("providers", {})
+    provs.pop(name, None)
+    save_config(cfg)
+    return fusion_config()
