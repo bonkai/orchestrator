@@ -156,10 +156,18 @@
           for (var k in p) {
             if (k === 'stage') continue;
             var v = p[k];
-            if (typeof v === 'object') v = JSON.stringify(v);
+            // Skip bulky array/object payloads (e.g. the fusion panel_breakdown)
+            // — they get a compact summary below + the full table server-side.
+            if (typeof v === 'object') continue;
             extras.push(esc(k) + '=' + esc(v));
           }
           if (extras.length) line += '<span class="muted">' + extras.join(' ') + '</span>';
+          if (p.fused && p.panel_breakdown) {
+            var paid = 0, n = p.panel_breakdown.length;
+            for (var i = 0; i < n; i++) { paid += (p.panel_breakdown[i].cost || 0); }
+            line += '<div style="margin-left:60px; color:#22d3ee; font-size:11px;">⚡ ' +
+                    n + ' seats · $' + paid.toFixed(4) + ' panel — see breakdown above</div>';
+          }
         } else {
           line += badge(ev.kind, '#8a93a1');
         }

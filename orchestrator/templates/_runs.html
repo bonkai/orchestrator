@@ -58,7 +58,8 @@
           <tr class="status-{{ r.status }}">
             <td>{{ r.id }}</td>
             <td>{{ r.project_slug }}</td>
-            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+              {% if r.fused %}<small title="multi-model fusion rewrite">⚡</small>{% endif %}</td>
             <td class="task-cell">{{ r.user_task[:80] }}{% if r.user_task|length > 80 %}…{% endif %}</td>
             <td>{{ fmt_duration(r.duration_s) }}</td>
           </tr>
