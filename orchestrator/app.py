@@ -588,8 +588,15 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
         )
         loop = asyncio.get_running_loop()
         try:
+            # F3.2: route the rewrite's ONE brain call through Fusion when the
+            # send asked for it. fusion/panel are passed positionally
+            # (run_in_executor takes *args, not kwargs) — rewriter.rewrite's
+            # signature is (user_task, project_path, fusion, panel). With
+            # do_fusion=False this is byte-for-byte the original single-claude
+            # path (panel is inert downstream when fusion is off).
             result = await loop.run_in_executor(
-                None, rewriter.rewrite, task_for_rewriter, proj["path"]
+                None, rewriter.rewrite, task_for_rewriter, proj["path"],
+                do_fusion, panel,
             )
             if result.ok and result.rewritten_prompt:
                 final_task = result.rewritten_prompt
@@ -599,6 +606,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                     "duration_s": round(result.duration_s, 1),
                     "model": result.model,
                     "bundle_chars": result.bundle_chars,
+                    "fusion": do_fusion,
+                    "panel": panel,
                 }
             else:
                 reason = result.error or "rewrite returned empty prompt"
@@ -657,6 +666,8 @@ async def send(
     rewrite: str = Form("false"),
     effort: str = Form("max"),
     model: str = Form(""),
+    fusion: str = Form("false"),
+    fusion_panel: str = Form(""),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
@@ -673,9 +684,24 @@ async def send(
     wall_cap_s = max(60, min(21600, int(wall_cap_s)))  # ceiling: 6h (see _run_dispatch)
     do_rewrite = rewrite.lower() in ("1", "true", "yes", "on")
 
+    # F3.1: optional multi-model Fusion for the rewrite brain call. Validate the
+    # requested panel against providers whose key actually resolves right now,
+    # silently dropping any unkeyed/unknown name — so a stale UI selection can
+    # never force a provider we can't call. active_providers() reads config
+    # once; an empty panel lets run_fusion_json fall back to the configured
+    # preset. Threaded into _send_in_background; _run_dispatch needs no change.
+    do_fusion = fusion.lower() in ("1", "true", "yes", "on")
+    active = config.active_providers()
+    panel = [p for p in fusion_panel.split(",") if p in active]
+    if do_fusion:
+        print(f"[orchestrator] /send fusion=on, panel={panel or '(preset)'}")
+
     # Strong-ref the task so Python's GC can't drop the rewrite+dispatch
     # mid-run when the browser tab disconnects after the immediate response.
-    task = asyncio.create_task(_send_in_background(project_id, task, wall_cap_s, do_rewrite, effort, model))
+    task = asyncio.create_task(_send_in_background(
+        project_id, task, wall_cap_s, do_rewrite, effort, model,
+        do_fusion=do_fusion, panel=panel,
+    ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return JSONResponse({"ok": True, "rewrite": do_rewrite})
