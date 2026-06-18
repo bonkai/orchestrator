@@ -320,7 +320,7 @@ disagreement among models.** Everything routine stays solo.
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ✅ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ✅ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ✅ |
-| **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
+| **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ✅ *(F8.4 lens prompts deferred)* |
 | **F9** (opt) | Claude Code panel seats | per-dispatch picker seats (model+effort, duplicates) via local `claude` CLI — **no API, $0, no egress** | ✅ *(implemented)* |
 
 **F0–F5 deliver a working, shippable on/off Fusion toggle.** Build strictly in order;
@@ -618,12 +618,12 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
     error: str = ""
 ```
 
-### Phase F8 — Settings UI *(advanced registry management — basic selection already ships in F4)*
-*Goal: the browser-side **registry editor** — add/remove providers, change a model slug, manage presets globally, see which providers are active. The per-dispatch "which active models" picker already ships in **F4.2**; F8 is the advanced, persistent settings surface for editing the registry itself.*
-- [ ] **F8.1** `/settings` read view: show fusion availability + the current `preset`/`presets`/`providers` from `config.fusion_config()`. **Keys are never shown or editable in the browser.** · *verify:* the page reflects `config.json`.
-- [ ] **F8.2** Preset switch — pick `budget`/`balanced`/`max`/`custom`; write to `config.json`. · *verify:* switching presets changes which providers the next fusion call bills.
-- [ ] **F8.3** Registry editor — add/remove a provider (script, key_env, model, prices) and edit each seat's **model id** (free text — a live cross-provider model list would be N different endpoints, so editing the slug is simpler and sufficient); save to `config.json`. **Key fields stay file-only.** · *verify:* a brand-new provider/model appears and is selectable once its script exists.
-- [ ] **F8.4** ⟂ *(optional)* per-seat **lens prompts** (the §5 refinement): let each provider carry a prompt prefix ("find the risks" / "find the simplest path"), edited here and stored in the registry. *(The per-dispatch model pick is already delivered by F4 — no separate override task needed.)* · *verify:* a seat's lens prefix is applied on the next fusion call.
+### Phase F8 — Settings UI *(advanced registry management — basic selection already ships in F4)* ✅ *(2026-06-18; F8.4 deferred)*
+*Goal: the browser-side **registry editor** — add/remove providers, change a model slug, manage presets globally, see which providers are active.*
+- [x] **F8.1** `/settings` read view (`templates/settings.html`, `app._settings_ctx`): shows fusion availability, the current `preset`/`presets`/`providers` from `config.fusion_config()`, and a derived `has_key` ●/— per provider. **Keys are never shown or editable in the browser** (`_settings_ctx` strips `api_key`; a no-leak test guards it). Linked from the dispatch form (⚙). · *verify:* `test_fusion_settings::TestSettingsReadModel`.
+- [x] **F8.2** Preset switch — `POST /settings/preset` → `config.set_preset()` (merge-preserving). · *verify:* settings tests + the switch changes which providers the next fusion call bills.
+- [x] **F8.3** Registry editor — `POST /settings/provider` (upsert: model + prices + enabled), `.../enabled` (toggle), `.../remove`. The write helpers live in `config.py` (`save_config`/`upsert_provider`/`set_provider_enabled`/`remove_provider`) with two hard safety invariants: **api_keys are file-only** (never set from the browser, always preserved) and a **malformed `config.json` is never overwritten** (`ConfigWriteError` aborts the save). All writes are atomic (tmp+rename, chmod 600). · *verify:* `test_fusion_settings` (12 cases incl. key-survives-edits + corruption-guard).
+- [ ] **F8.4** ⟂ *(deferred)* per-seat **lens prompts** (§5 refinement). Not built — it needs the panel fan-out (`_panel_answer`/`fusion_call.py`) and `_judge_prompt` to thread a per-seat prompt prefix, which is more surface than the settings CRUD; the registry editor above is the F8 deliverable. · *verify (when built):* a seat's lens prefix is applied on the next fusion call.
 
 ### Phase F9 — Claude Code panel seats *(✅ implemented 2026-06-18)*
 
