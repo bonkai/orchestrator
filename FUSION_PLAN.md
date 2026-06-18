@@ -327,6 +327,26 @@ disagreement among models.** Everything routine stays solo.
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
 tasks.
 
+> **📍 Current status (2026-06-18).** Fusion runs end-to-end today: toggle it on, pick a
+> panel (cross-lab providers + Claude Code seats), and the rewriter fans out → judges →
+> dispatches, falling back to the plain `claude` call when <2 seats are usable.
+> **Done:** F0, **F1 *core*** (`run_fusion_json`/`_panel_answer`/`_run_panel`/judge/fusion
+> tab/`run_brain_json`), F2, F3, F4, F9. **NOT done (still roadmap):**
+> - **F1.2 / F1.2b** — only `gemini.py` + `glm.py` provider scripts exist. `deepseek`,
+>   `xai`, `minimax`, `qwen` are registered but **have no script**, so any preset naming
+>   them silently drops those seats. Usable external providers today = **gemini, glm**
+>   (the only two with both a script *and* a key). The default `budget` preset
+>   (`deepseek, minimax, gemini-*`) therefore collapses to 1 real seat → falls back to a
+>   plain rewrite; a custom panel of Claude seats + gemini + glm is the way to get a real
+>   cross-lab panel right now.
+> - **F5** — no durable surface: per-seat panel answers + cost are shown live in the tabs
+>   but **not persisted** (dispatch detail shows nothing; cost doesn't reach `outcomes`),
+>   so a finished fusion run can't be inspected after the fact.
+> - **F6 / F7 / F8** — optional, unbuilt.
+>
+> **Next up:** F1.2/F1.2b (the four missing provider scripts — each also needs a key) and
+> F5 (the observability surface). Until then Fusion is a working MVP, not complete.
+
 ### Pre-build checklist *(verified against the live code 2026-06-17 — read before F0)*
 - **Get ≥1 provider key before F1** (DeepSeek is cheapest). F0 needs no network, but
   every F1 verify makes a **real paid call**. A **2nd key** is needed to exercise
@@ -547,12 +567,19 @@ uninstalled, it still returns a valid `ClaudeRun` via the in-process subprocess 
 - [x] **F2.2** Make the existing auto-retry force `run_claude_json` directly (a strict-JSON reminder to one model) so a flaky panel never re-fans-out. · *verify:* trigger a retry → it does **not** open a second fusion panel.
 
 ### Phase F3 — Pipeline wiring *(the on/off toggle, server side)*
-- [ ] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")` **+ `fusion_panel: str = Form("")`** (comma-separated provider names), parse `do_fusion = fusion.lower() in ("1","true","yes","on")` and `panel = [p for p in fusion_panel.split(",") if p in config.active_providers()]` (silently drops any model without an active key), thread both into `_send_in_background(... do_fusion=..., panel=panel)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true&fusion_panel=deepseek,minimax` → a temporary log shows `do_fusion=True` and the validated panel; an unkeyed name in the list is dropped.
+> ✅ **Shipped via F9 (2026-06-18).** `/send` threads Fusion through end-to-end, but using
+> the richer **`fusion_seats`** JSON (Claude seats + providers) rather than the `fusion_panel`
+> comma-list sketched below (legacy `fusion_panel` is still accepted). F3.1/F3.2 describe the
+> superseded mechanism.
+- [x] **F3.1** `app.py` `/send`: add `fusion: str = Form("false")` **+ `fusion_panel: str = Form("")`** (comma-separated provider names), parse `do_fusion = fusion.lower() in ("1","true","yes","on")` and `panel = [p for p in fusion_panel.split(",") if p in config.active_providers()]` (silently drops any model without an active key), thread both into `_send_in_background(... do_fusion=..., panel=panel)`. `_run_dispatch` needs **no change**. · *verify:* POST `fusion=true&fusion_panel=deepseek,minimax` → a temporary log shows `do_fusion=True` and the validated panel; an unkeyed name in the list is dropped.
 - [ ] **F3.2** `_send_in_background`: pass `fusion=do_fusion` **and `panel=panel`** into `rewriter.rewrite(...)`; record `do_fusion` + the chosen panel on the `rewrite_ok` stage event. An empty `panel` falls back to the configured preset. · *verify:* a `fusion=true` send with a 2-model panel bills exactly those two; `fusion=true` + empty panel uses the preset; `fusion=true` + <2 keys still dispatches via fallback.
 
 ### Phase F4 — Dispatch-form toggle + model picker *(on/off + which-models, UI side)*
 *Goal: the two things the toggle UX must have — a checkbox to turn Fusion on, and a key-gated list to pick which models go in the panel.*
-- [ ] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects. Label `fusion (multi-model) ⚡` + muted hint `multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes`. Persist in `localStorage`; **default OFF**. · *verify:* toggling + reloading keeps state.
+> ✅ **Shipped via F9 (2026-06-18).** The dispatch form has the Fusion toggle + a seat picker
+> (cross-lab providers *and* Claude Code seats), localStorage-persisted, default-OFF. F4.1–F4.4
+> describe the original provider-only multiselect, now subsumed by the F9 picker.
+- [x] **F4.1** Add the **Fusion checkbox** to `index.html` next to the effort/model selects. Label `fusion (multi-model) ⚡` + muted hint `multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes`. Persist in `localStorage`; **default OFF**. · *verify:* toggling + reloading keeps state.
 - [ ] **F4.2** **Model multiselect (key-gated).** Extend `_view_ctx()` to pass `fusion_providers = config.active_providers()` (each with its `model` id) **plus** the inactive ones for display. Render a checklist beneath the checkbox — one row per provider showing its model id; **active** providers are checkable, **inactive** ones (no key / disabled) are greyed with *"no API key set."* Persist the checked set in `localStorage`, seeded from the current preset's active members. Reveal the list only when the Fusion checkbox is on. · *verify:* only keyed providers are checkable; an unkeyed one is greyed; the checked set survives reload.
 - [ ] **F4.3** In `send(rewrite)` append `fd.append('fusion', chkFusion.checked ? 'true':'false')` **and `fd.append('fusion_panel', checkedProviders.join(','))`** next to `effort`/`model`/`rewrite`; works with **both** buttons. · *verify:* the `/send` payload includes `fusion` + the chosen `fusion_panel`.
 - [ ] **F4.4** Disabled state: when `config.is_fusion_available()` is false (<2 active providers), render the checkbox **disabled** with *"Configure ≥2 providers' keys in ~/.orchestrator/config.json to enable."* When on, the in-flight banner reads `rewriting (multi-model) then dispatching (~15–40s).` · *verify:* <2 keys → disabled w/ note; ≥2 keys → enabled. **End-to-end toggle + model selection now works (F3 + F4).**

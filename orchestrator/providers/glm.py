@@ -3,8 +3,8 @@
 
 STANDALONE: imports NOTHING from the orchestrator package — it runs as its own
 subprocess (the in-process panel fan-out today; a visible iTerm2 fusion tab
-later). Stdlib only. Speaks Z.ai's OpenAI-COMPATIBLE API
-(`/api/paas/v4/chat/completions`), resolves its own key (env → config.json),
+later). Stdlib only. Speaks Z.ai's OpenAI-COMPATIBLE API on the GLM Coding Plan
+endpoint (`/api/coding/paas/v4/chat/completions`), resolves its own key (env → config.json),
 streams progress + the answer to STDERR (watchable), and prints exactly one
 line of normalized JSON to STDOUT. NEVER raises.
 
