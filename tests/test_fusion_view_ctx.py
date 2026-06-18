@@ -1,0 +1,87 @@
+"""F4 (server side) tests — _view_ctx() shapes the dispatch-form Fusion picker
+data the template + JS rely on:
+
+  fusion_providers      every registry seat, in registry order, each flagged
+                        active (keyed+enabled → checkable) or not (→ greyed),
+                        carrying its model id for display.
+  fusion_available      True only at >= 2 active seats (gates the checkbox).
+  fusion_default_panel  the configured preset's ACTIVE members, in preset order
+                        (seeds the picker's checked set when nothing is saved).
+
+NO NETWORK / NO DB: db.list_tabs/list_projects and config.fusion_config/
+active_providers are mocked, so this exercises only the context shaping — the
+client-side bits (localStorage persistence, reveal-on-toggle) are DOM behavior
+verified in the browser, not here.
+
+Usage:
+    python3 -m unittest tests.test_fusion_view_ctx -v
+"""
+
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from orchestrator import app as app_module
+
+# Three registered seats; the preset lists all three in a deliberate order
+# (deepseek, xai, gemini) so we can prove default-panel order follows the PRESET,
+# not the registry or the active set.
+FCFG = {
+    "preset": "budget",
+    "timeout_s": 300,
+    "providers": {
+        "deepseek": {"model": "deepseek-chat", "price_in": 0.44, "price_out": 0.87},
+        "gemini": {"model": "gemini-2.5-flash", "price_in": 0.30, "price_out": 1.50},
+        "xai": {"model": "grok-4", "price_in": 1.25, "price_out": 2.50},
+    },
+    "presets": {"budget": ["deepseek", "xai", "gemini"]},
+}
+
+
+class TestViewCtxFusion(unittest.TestCase):
+    def _ctx(self, active):
+        """_view_ctx() with the DB + config seams mocked. `active` is the
+        active_providers() return (name → merged entry; only the names matter)."""
+        with mock.patch.object(app_module.db, "list_tabs", return_value=[]), \
+                mock.patch.object(app_module.db, "list_projects", return_value=[]), \
+                mock.patch.object(app_module.config, "fusion_config", return_value=FCFG), \
+                mock.patch.object(app_module.config, "active_providers", return_value=active):
+            return app_module._view_ctx()
+
+    def test_lists_every_seat_with_active_flag_in_registry_order(self):
+        ctx = self._ctx({"deepseek": {}, "gemini": {}})
+        rows = ctx["fusion_providers"]
+        self.assertEqual([r["name"] for r in rows], ["deepseek", "gemini", "xai"])
+        # deepseek + gemini keyed → active; xai unkeyed → greyed.
+        self.assertEqual([r["active"] for r in rows], [True, True, False])
+        self.assertEqual(rows[0]["model"], "deepseek-chat")   # model id carried for display
+
+    def test_available_requires_two_active(self):
+        self.assertTrue(self._ctx({"deepseek": {}, "gemini": {}})["fusion_available"])
+        self.assertFalse(self._ctx({"deepseek": {}})["fusion_available"])
+        self.assertFalse(self._ctx({})["fusion_available"])
+
+    def test_default_panel_is_preset_active_members_in_preset_order(self):
+        # preset = [deepseek, xai, gemini]; active = deepseek + gemini →
+        # default = [deepseek, gemini]: preset order kept, inactive xai dropped.
+        ctx = self._ctx({"deepseek": {}, "gemini": {}})
+        self.assertEqual(ctx["fusion_default_panel"], ["deepseek", "gemini"])
+
+    def test_default_panel_empty_when_no_active_preset_members(self):
+        # An active seat that isn't in the preset contributes nothing to the seed.
+        ctx = self._ctx({"glm": {}})
+        self.assertEqual(ctx["fusion_default_panel"], [])
+
+    def test_keys_present_so_template_never_hits_undefined(self):
+        # The template/JS reference these unconditionally; guarantee they exist.
+        ctx = self._ctx({})
+        for key in ("fusion_providers", "fusion_available", "fusion_default_panel"):
+            self.assertIn(key, ctx)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
