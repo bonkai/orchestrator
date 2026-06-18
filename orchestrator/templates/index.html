@@ -93,6 +93,10 @@
             <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
             fusion (multi-model) ⚡
           </label>
+          <label class="fusion-toggle" title="enrich: run the same panel to ANALYZE the task and append a 'Multi-model analysis' block to the executor's prompt (it does not replace the rewrite). Works with both buttons.">
+            <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
+            enrich ⚡
+          </label>
           <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
           <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
           <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
