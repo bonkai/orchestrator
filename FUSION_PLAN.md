@@ -317,7 +317,7 @@ disagreement among models.** Everything routine stays solo.
 | **F2** | Rewriter integration | rewriter routes through fusion when toggled | ✅ |
 | **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ✅ *(via F9 — `fusion_seats`)* |
 | **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ✅ *(via F9 — seat picker)* |
-| **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ☐ |
+| **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ✅ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
 | **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
