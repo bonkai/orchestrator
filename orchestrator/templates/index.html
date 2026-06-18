@@ -245,6 +245,59 @@
           if (savedDraft && !textarea.value) textarea.value = savedDraft;
         } catch (e) {}
 
+        // ── Fusion (multi-model) toggle + key-gated panel (F4.1/F4.2) ───────
+        // Persist the on/off checkbox + the checked provider set in localStorage
+        // (GLOBAL keys — provider availability is global config, not per-project).
+        // Default OFF. The picker reveals only when the toggle is on, and only
+        // KEYED providers are checkable (unkeyed rows render disabled server-side).
+        var fusionCheckbox = document.getElementById('fusion-checkbox');
+        var fusionPanel = document.getElementById('fusion-panel');
+        var fusionAvailable = {{ 'true' if fusion_available else 'false' }};
+        var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
+        var FUSION_ON_KEY = 'orch_fusion_on';
+        var FUSION_PANEL_KEY = 'orch_fusion_panel';
+
+        function fusionProvCbs() {
+          return fusionPanel
+            ? Array.prototype.slice.call(fusionPanel.querySelectorAll('.fusion-prov-cb'))
+            : [];
+        }
+        function checkedProviders() {
+          // Only active (non-disabled) seats can be checked, so this is already
+          // the validated panel; the server re-validates against live keys too.
+          return fusionProvCbs()
+            .filter(function(cb) { return cb.checked && !cb.disabled; })
+            .map(function(cb) { return cb.value; });
+        }
+        function syncFusionPanel() {
+          if (fusionPanel && fusionCheckbox) {
+            fusionPanel.style.display = fusionCheckbox.checked ? '' : 'none';
+          }
+        }
+        // Only wire persistence when Fusion is actually available (≥2 keys). When
+        // it isn't, the checkbox is disabled and we leave it OFF — never restore a
+        // stale "on" the user can't act on.
+        if (fusionCheckbox && fusionAvailable) {
+          var savedPanel = null;
+          try { savedPanel = JSON.parse(localStorage.getItem(FUSION_PANEL_KEY)); } catch (e) {}
+          var wanted = Array.isArray(savedPanel) ? savedPanel : fusionDefaultPanel;
+          fusionProvCbs().forEach(function(cb) {
+            if (!cb.disabled) cb.checked = wanted.indexOf(cb.value) !== -1;
+          });
+          try { fusionCheckbox.checked = localStorage.getItem(FUSION_ON_KEY) === '1'; } catch (e) {}
+          syncFusionPanel();
+
+          fusionCheckbox.addEventListener('change', function() {
+            try { localStorage.setItem(FUSION_ON_KEY, fusionCheckbox.checked ? '1' : '0'); } catch (e) {}
+            syncFusionPanel();
+          });
+          fusionProvCbs().forEach(function(cb) {
+            cb.addEventListener('change', function() {
+              try { localStorage.setItem(FUSION_PANEL_KEY, JSON.stringify(checkedProviders())); } catch (e) {}
+            });
+          });
+        }
+
         function flashStatus(msg, isError) {
           if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
           statusEl.style.display = 'block';
@@ -294,6 +347,13 @@
           fd.append('effort', form.querySelector('select[name=effort]').value);
           fd.append('model', form.querySelector('select[name=model]').value);
           fd.append('rewrite', rewrite ? 'true' : 'false');
+          // F4.3: multi-model Fusion for the rewrite brain call. Only meaningful
+          // when rewrite is on (fusion routes the rewriter's ONE brain call); the
+          // server simply ignores it for skip-rewrite sends. fusion_panel is the
+          // user-checked KEYED providers — empty means "use the configured preset".
+          var fusionOn = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
+          fd.append('fusion', fusionOn ? 'true' : 'false');
+          fd.append('fusion_panel', checkedProviders().join(','));
 
           // /send is fire-and-forget — it returns in ~50ms after scheduling a
           // background task, then the rewriter (5-15s) + dispatch creation
@@ -307,7 +367,8 @@
           // Snapshot the dispatch ids already shown so we can spot the new one.
           var idsBefore = scanProjectRows(runsSection);
 
-          window.orchMarkLoading(activeBtn, rewrite ? 'rewriting…' : 'dispatching…');
+          window.orchMarkLoading(activeBtn,
+            rewrite ? (fusionOn ? 'rewriting (multi-model)…' : 'rewriting…') : 'dispatching…');
           otherBtn.disabled = true;
           if (globalSpinner) globalSpinner.classList.add('visible');
 
