@@ -319,7 +319,7 @@ disagreement among models.** Everything routine stays solo.
 | **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ✅ *(via F9 — seat picker)* |
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ✅ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ✅ |
-| **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
+| **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ✅ |
 | **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
 | **F9** (opt) | Claude Code panel seats | per-dispatch picker seats (model+effort, duplicates) via local `claude` CLI — **no API, $0, no egress** | ✅ *(implemented)* |
 
@@ -599,11 +599,12 @@ uninstalled, it still returns a valid `ClaudeRun` via the in-process subprocess 
 
 *(Capable but default-OFF; no UI toggle wired — short sessions rarely justify panel cost, §7. A caller opts in by passing `fusion=True`.)*
 
-### Phase F7 — Enrichment-block mode *(optional, advanced)*
-*Goal: optionally append a "multi-model analysis" block to the executor's prompt instead of replacing the rewrite. Build only once F1–F5 are solid.*
-- [ ] **F7.1** New `orchestrator/lib/fusion.py`: `enrich(prompt, project_path) -> FusionResult` — calls `run_fusion_json` asking the judge for the analysis JSON, renders the `## Multi-model analysis` block. Cap panel input ~12K chars (à la `embeddings.MAX_INPUT_CHARS`). · *verify:* returns an `enrichment_md` block; on any failure returns the prompt unchanged (never raises).
-- [ ] **F7.2** Wire an enrich path into `_send_in_background` (separate from rewrite): `fused_prompt = prompt + "\n\n" + enrichment_md`; **a failure here must NOT abort the dispatch**; record a distinct `fusion_ok`/`fusion_skipped` event. · *verify:* an enriched dispatch's prompt contains the block; a forced failure still dispatches.
-- [ ] **F7.3** ⟂ Surface the collapsible analysis on the dispatch detail page. · *verify:* the block renders, collapsed by default.
+### Phase F7 — Enrichment-block mode *(optional, advanced)* ✅ *(2026-06-18)*
+*Goal: optionally append a "multi-model analysis" block to the executor's prompt instead of replacing the rewrite.*
+- [x] **F7.1** New `orchestrator/lib/fusion.py`: `enrich(prompt, project_path, panel=, preset=) -> FusionResult` — calls `run_fusion_json` with an ANALYSIS prompt (not a rewrite), parses the judge JSON (`_strip_fences` reused), and `render_block()`s a `## Multi-model analysis` section (empty sub-sections dropped). Input capped at `MAX_INPUT_CHARS = 12_000`. **NEVER raises** — panel-unavailable / unparseable / empty-analysis / crash all return `ok=False`. · *verify:* `test_fusion_enrich` (8 enrich cases + render/coerce).
+- [x] **F7.2** Wired into `_send_in_background` (separate from rewrite, runs on the post-rewrite `final_task`): on success `final_task += "\n\n" + enrichment_md` and cost is added to the dispatch spend; **a failure NEVER aborts** — it dispatches the un-enriched prompt. Records a distinct `fusion_ok`/`fusion_skipped` stage event. Threaded `fusion_enrich` through `/send` (independent of `do_fusion`; works with BOTH buttons). · *verify:* async tests assert block-appended + failure-still-dispatches.
+- [x] **F7.3** ⟂ Collapsible `<details>` "multi-model analysis" pane on the dispatch detail page (open on success, shows skip reason on failure), rendered server-side from the `fusion_ok`/`fusion_skipped` event. Dispatch-form gained an **`enrich ⚡`** checkbox (sibling of the fusion toggle; shares the seat picker; localStorage-persisted, default-OFF). · *verify:* render test asserts the analysis pane shows each section.
+- *Also fixed in passing:* a pre-existing `/send` bug where the seat-parse loop shadowed the `model`/`effort` **Form params** (a Claude seat selection silently rewrote the EXECUTOR's model/effort) — loop locals renamed to `seat_model`/`seat_effort`.
 
 ```python
 @dataclass
