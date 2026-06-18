@@ -587,6 +587,39 @@ async def _run_summarizer(dispatch_id: int):
 
 # ─── fire-and-forget send (rewrite optional) ─────────────────────────────
 
+# F5: how much of each panel seat's answer text to persist on the rewrite event.
+# The full per-seat answers can be several KB each; a preview keeps the
+# dispatch_events row small while still letting you see what each model said.
+_SEAT_PREVIEW_CHARS = 600
+
+
+def _fusion_panel_breakdown(result) -> list[dict]:
+    """Trim rewriter's raw fusion_panel (run.raw['panel']) into a small,
+    persistable per-seat breakdown for the rewrite stage event: identity +
+    cost + tokens + a bounded text/error preview. Claude Code seats report
+    cost 0.0 and carry a `subscription` marker so the UI can label them
+    '$0 (subscription)'. Returns [] for a non-fused rewrite."""
+    out = []
+    for a in result.fusion_panel or []:
+        if not isinstance(a, dict):
+            continue
+        seat = {
+            "name": a.get("name", "?"),
+            "model": a.get("model", ""),
+            "ok": bool(a.get("ok")),
+            "cost": round(float(a.get("cost", 0.0) or 0.0), 6),
+            "prompt_tokens": a.get("prompt_tokens", 0) or 0,
+            "completion_tokens": a.get("completion_tokens", 0) or 0,
+            "subscription": bool(a.get("subscription")),
+        }
+        if a.get("ok"):
+            seat["preview"] = (a.get("text", "") or "")[:_SEAT_PREVIEW_CHARS]
+        else:
+            seat["error"] = (a.get("error", "") or "")[:_SEAT_PREVIEW_CHARS]
+        out.append(seat)
+    return out
+
+
 async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
@@ -606,6 +639,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     rewrite_event: dict | None = None
     rewrite_failed = False
     rewrite_error = ""
+    rewrite_cost = 0.0          # F5: out-of-pocket spend stored on the dispatch row
+    rewrite_fused = False       # F5: a real (>=2 seat) panel authored the rewrite
     if do_rewrite:
         # Include staged attachments in the rewriter input so it can plan
         # around them. They get moved to the dispatch dir inside _run_dispatch.
@@ -628,14 +663,23 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             )
             if result.ok and result.rewritten_prompt:
                 final_task = result.rewritten_prompt
+                rewrite_cost = result.cost_usd
+                rewrite_fused = bool(result.fusion_panel)
                 rewrite_event = {
                     "stage": "rewrite_ok",
                     "cost_usd": round(result.cost_usd, 4),
                     "duration_s": round(result.duration_s, 1),
                     "model": result.model,
                     "bundle_chars": result.bundle_chars,
+                    # F5: `fusion` = the toggle was on; `fused` = a real panel
+                    # actually authored it (vs. silently falling back to plain
+                    # claude). panel_breakdown carries the per-seat cost/tokens.
                     "fusion": do_fusion,
+                    "fused": rewrite_fused,
                     "panel": panel,
+                    "fusion_preset": result.fusion_preset,
+                    "fusion_seats": result.fusion_seats,
+                    "panel_breakdown": _fusion_panel_breakdown(result),
                 }
             else:
                 reason = result.error or "rewrite returned empty prompt"
@@ -644,6 +688,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                 # Without this we only see "model returned non-JSON" with no
                 # clue what it actually said.
                 raw_preview = (result.raw_assistant_text or "")[:600]
+                rewrite_cost = result.cost_usd
+                rewrite_fused = bool(result.fusion_panel)
                 rewrite_event = {
                     "stage": "rewrite_skipped",
                     "reason": reason,
@@ -652,6 +698,13 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                     "model": result.model,
                     "bundle_chars": result.bundle_chars,
                     "raw_preview": raw_preview,
+                    # F5: a fused rewrite that produced bad JSON still SPENT on the
+                    # panel — surface that breakdown so the cost isn't a mystery.
+                    "fusion": do_fusion,
+                    "fused": rewrite_fused,
+                    "fusion_preset": result.fusion_preset,
+                    "fusion_seats": result.fusion_seats,
+                    "panel_breakdown": _fusion_panel_breakdown(result),
                 }
                 rewrite_failed = True
                 rewrite_error = reason
