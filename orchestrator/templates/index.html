@@ -356,8 +356,9 @@
           var c = claudeSeats().length, p = checkedProviders().length, total = c + p;
           fusionCountEl.textContent = 'panel: ' + total + ' seat' + (total === 1 ? '' : 's') +
             ' (' + c + ' Claude · ' + p + ' cross-lab)' + (total < 2 ? ' — need ≥2' : '');
-          fusionCountEl.style.color =
-            (total < 2 && fusionCheckbox && fusionCheckbox.checked) ? '#f0c659' : '';
+          var anyOn = (fusionCheckbox && fusionCheckbox.checked) ||
+                      (enrichCheckbox && enrichCheckbox.checked);
+          fusionCountEl.style.color = (total < 2 && anyOn) ? '#f0c659' : '';
         }
 
         if (fusionCheckbox) {
@@ -482,6 +483,10 @@
             fusionSeats.push({ type: 'provider', name: n });
           });
           fd.append('fusion_seats', JSON.stringify(fusionSeats));
+          // Enrichment is independent of the rewrite — it appends a panel analysis
+          // block to the executor prompt, so it's sent for BOTH buttons.
+          var enrichOn = !!(enrichCheckbox && enrichCheckbox.checked && !enrichCheckbox.disabled);
+          fd.append('fusion_enrich', enrichOn ? 'true' : 'false');
 
           // /send is fire-and-forget — it returns in ~50ms after scheduling a
           // background task, then the rewriter (5-15s) + dispatch creation
