@@ -344,9 +344,9 @@ def complete_dispatch(
         if cur.rowcount == 0:
             return False
         c.execute(
-            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
-            "VALUES (?, ?, ?, ?)",
-            (dispatch_id, outcome, exit_reason, duration),
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s, cost_usd) "
+            f"VALUES (?, ?, ?, ?, {_COST_SUBQ})",
+            (dispatch_id, outcome, exit_reason, duration, dispatch_id),
         )
         return True
 
@@ -367,9 +367,9 @@ def kill_dispatch_record(dispatch_id: int, reason: str):
             (now(), dispatch_id),
         )
         c.execute(
-            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
-            "VALUES (?, 'killed', ?, ?)",
-            (dispatch_id, reason, duration),
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s, cost_usd) "
+            f"VALUES (?, 'killed', ?, ?, {_COST_SUBQ})",
+            (dispatch_id, reason, duration, dispatch_id),
         )
 
 
@@ -395,9 +395,9 @@ def mark_paused(dispatch_id: int, reason: str):
             (now(), dispatch_id),
         )
         c.execute(
-            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
-            "VALUES (?, 'paused', ?, ?)",
-            (dispatch_id, reason, duration),
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s, cost_usd) "
+            f"VALUES (?, 'paused', ?, ?, {_COST_SUBQ})",
+            (dispatch_id, reason, duration, dispatch_id),
         )
 
 
@@ -665,7 +665,7 @@ def mark_orphaned(dispatch_id: int, reason: str = "process_gone"):
             (now(), dispatch_id),
         )
         c.execute(
-            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
-            "VALUES (?, 'orphaned', ?, ?)",
-            (dispatch_id, reason, duration),
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s, cost_usd) "
+            f"VALUES (?, 'orphaned', ?, ?, {_COST_SUBQ})",
+            (dispatch_id, reason, duration, dispatch_id),
         )
