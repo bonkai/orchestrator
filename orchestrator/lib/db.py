@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS dispatches (
     claude_pid        INTEGER,
     transcript_path   TEXT,
     wall_clock_cap_s  INTEGER NOT NULL DEFAULT 1800,
+    -- F5: out-of-pocket spend for this dispatch's brain call (the fused-rewrite
+    -- panel sum; $0 for a plain claude rewrite). `fused` flags that a real
+    -- multi-model panel (>=2 seats) actually authored the rewrite — used for
+    -- the ⚡ badge and copied into the outcome row at completion.
+    cost_usd          REAL NOT NULL DEFAULT 0,
+    fused             INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
@@ -59,6 +65,9 @@ CREATE TABLE IF NOT EXISTS outcomes (
     what_broke      TEXT,
     lessons         TEXT,
     tags_json       TEXT,
+    -- F5: copied from dispatches.cost_usd when the outcome row is created, so
+    -- the learning loop reads per-dispatch out-of-pocket spend from one place.
+    cost_usd        REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE
 );
 
@@ -146,6 +155,25 @@ def conn():
         c.close()
 
 
+def _column_names(c, table: str) -> set[str]:
+    return {r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _migrate(c):
+    """Idempotent additive migrations for columns introduced after a DB already
+    exists (CREATE TABLE IF NOT EXISTS never adds columns to an existing table).
+    Each ALTER is guarded by a column-presence check, so this is a safe no-op on
+    an already-migrated DB and on a freshly-created one. ADD COLUMN with a
+    NOT NULL needs a DEFAULT (we use 0) — SQLite backfills existing rows."""
+    disp_cols = _column_names(c, "dispatches")
+    if "cost_usd" not in disp_cols:
+        c.execute("ALTER TABLE dispatches ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0")
+    if "fused" not in disp_cols:
+        c.execute("ALTER TABLE dispatches ADD COLUMN fused INTEGER NOT NULL DEFAULT 0")
+    if "cost_usd" not in _column_names(c, "outcomes"):
+        c.execute("ALTER TABLE outcomes ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0")
+
+
 def init_db():
     with conn() as c:
         # WAL allows concurrent reads with one writer. NORMAL synchronous is
@@ -153,6 +181,7 @@ def init_db():
         c.execute("PRAGMA journal_mode = WAL")
         c.execute("PRAGMA synchronous = NORMAL")
         c.executescript(SCHEMA)
+        _migrate(c)
 
 
 # ─── projects ─────────────────────────────────────────────────────────────
@@ -249,6 +278,28 @@ def mark_started(dispatch_id: int, terminal_pid: int | None, claude_pid: int | N
         )
 
 
+def set_dispatch_cost(dispatch_id: int, cost_usd: float, fused: bool = False):
+    """F5: record the brain-call out-of-pocket spend (and whether a real fused
+    panel authored the rewrite) on the dispatch row. Set at /send time, after the
+    rewrite; the value is copied into the outcome row when that row is created.
+    Never raises — cost accounting must not break a dispatch."""
+    try:
+        with conn() as c:
+            c.execute(
+                "UPDATE dispatches SET cost_usd = ?, fused = ? WHERE id = ?",
+                (float(cost_usd or 0), 1 if fused else 0, dispatch_id),
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.db").warning("set_dispatch_cost failed: %s", e)
+
+
+# F5: every outcome INSERT carries cost_usd forward from the dispatch row via
+# this subquery, so the per-dispatch spend lands on the outcome the learning loop
+# reads — regardless of how the dispatch terminated (complete/kill/pause/orphan).
+_COST_SUBQ = "COALESCE((SELECT cost_usd FROM dispatches WHERE id = ?), 0)"
+
+
 def mark_failed_to_spawn(dispatch_id: int, reason: str):
     with conn() as c:
         c.execute(
@@ -256,9 +307,9 @@ def mark_failed_to_spawn(dispatch_id: int, reason: str):
             (now(), dispatch_id),
         )
         c.execute(
-            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s) "
-            "VALUES (?, 'failed_to_spawn', ?, 0)",
-            (dispatch_id, reason),
+            "INSERT OR REPLACE INTO outcomes(dispatch_id, outcome, reason, duration_s, cost_usd) "
+            f"VALUES (?, 'failed_to_spawn', ?, 0, {_COST_SUBQ})",
+            (dispatch_id, reason, dispatch_id),
         )
 
 
