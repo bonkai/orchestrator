@@ -30,7 +30,16 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from starlette.testclient import TestClient
+# starlette's TestClient needs httpx, which isn't in this no-extra-deps venv.
+# Guard the import so the MODULE still loads (the async-forwarding tests below
+# don't need TestClient) — only the endpoint class that uses it is skipped.
+try:
+    from starlette.testclient import TestClient
+except Exception as _e:   # RuntimeError("...requires httpx...") or ImportError
+    TestClient = None
+    _TESTCLIENT_ERR = str(_e).splitlines()[0]
+else:
+    _TESTCLIENT_ERR = ""
 
 from orchestrator import app as app_module
 from orchestrator.lib.rewriter import RewriteResult
@@ -46,6 +55,8 @@ ACTIVE = {
 
 # ───────────────────────── F3.1: /send parse + thread ──────────────────────
 
+@unittest.skipIf(TestClient is None,
+                 "starlette TestClient requires httpx (absent in this no-deps venv)")
 class TestSendEndpointFusionParsing(unittest.TestCase):
     """Drive the real /send endpoint; assert what reaches _send_in_background.
 
