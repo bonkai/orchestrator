@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from orchestrator.lib import attachments as attachments_mod
 from orchestrator.lib import bundle as bundle_mod
-from orchestrator.lib import db, edits as edits_mod, embeddings, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
+from orchestrator.lib import config, db, edits as edits_mod, embeddings, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
 
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -559,7 +559,7 @@ async def _run_summarizer(dispatch_id: int):
 
 # ─── fire-and-forget send (rewrite optional) ─────────────────────────────
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = ""):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
