@@ -20,7 +20,9 @@ import os
 import sys
 import urllib.request
 
-BASE_URL = "https://api.z.ai/api/paas/v4"
+# Coding-plan endpoint — billed against the GLM Coding Plan subscription, NOT the
+# prepaid pay-per-token API balance (`/api/paas/v4`, which 1113s without a top-up).
+BASE_URL = "https://api.z.ai/api/coding/paas/v4"
 KEY_ENV, NAME = "ZAI_API_KEY", "glm"
 
 
