@@ -282,6 +282,55 @@ def iterm2_installed() -> bool:
     return False
 
 
+def _spawn_tab_script(safe_title: str, apple_cmd: str) -> str:
+    """AppleScript to open a new iTerm2 tab that runs `apple_cmd`, titled
+    `safe_title`, WITHOUT stealing focus from whatever the user is working in.
+    Both args must already be AppleScript-escaped by the caller.
+
+    Focus handling:
+      * No `activate` — when iTerm already has a window (the common case) we just
+        add a tab to it; `create tab`/`write text` don't bring iTerm forward on
+        their own, so the user's foreground app is left untouched.
+      * The one focus-stealing action is `create window`, needed only when iTerm
+        has zero windows. We capture the frontmost app first (via System Events)
+        and, only if we had to create a window, restore it afterward. Both System
+        Events steps are wrapped in `try`, so a missing Accessibility permission
+        degrades to "tab still opens, focus not restored" rather than failing the
+        spawn.
+
+    (Do NOT add `activate` here — select_iterm2_tab is the one place that
+    intentionally brings a tab to the front.)"""
+    return f'''
+set frontApp to ""
+try
+    tell application "System Events"
+        set frontApp to name of first application process whose frontmost is true
+    end tell
+end try
+set didCreateWindow to false
+tell application "iTerm"
+    if (count of windows) = 0 then
+        create window with default profile
+        set didCreateWindow to true
+    end if
+    tell current window
+        set newTab to (create tab with default profile)
+        tell current session of newTab
+            set name to "{safe_title}"
+            write text "{apple_cmd}"
+        end tell
+    end tell
+end tell
+if didCreateWindow and frontApp is not "" then
+    try
+        tell application "System Events"
+            tell process frontApp to set frontmost to true
+        end tell
+    end try
+end if
+'''
+
+
 def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str | None = None, effort: str = "max", model: str = "") -> None:
     """Open a new iTerm2 tab and start the runner for this dispatch.
 
@@ -311,21 +360,7 @@ def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str 
     )
     apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
 
-    script = f"""
-tell application "iTerm"
-    activate
-    if (count of windows) = 0 then
-        create window with default profile
-    end if
-    tell current window
-        set newTab to (create tab with default profile)
-        tell current session of newTab
-            set name to "{safe_title}"
-            write text "{apple_cmd}"
-        end tell
-    end tell
-end tell
-"""
+    script = _spawn_tab_script(safe_title, apple_cmd)
     try:
         _osascript(script)
     except Exception:
@@ -488,21 +523,7 @@ def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, ef
         f'exec "$HOME/.orchestrator/bin/run.sh"'
     )
     apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
-    script = f'''
-tell application "iTerm"
-    activate
-    if (count of windows) = 0 then
-        create window with default profile
-    end if
-    tell current window
-        set newTab to (create tab with default profile)
-        tell current session of newTab
-            set name to "{safe_title}"
-            write text "{apple_cmd}"
-        end tell
-    end tell
-end tell
-'''
+    script = _spawn_tab_script(safe_title, apple_cmd)
     try:
         _osascript(script)
     except Exception:
@@ -708,21 +729,7 @@ def spawn_brain_tab(brain_id: str, prompt: str, cwd: str,
     cmd = _brain_tab_cmd(brain_id, cwd, title)
     apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
 
-    script = f'''
-tell application "iTerm"
-    activate
-    if (count of windows) = 0 then
-        create window with default profile
-    end if
-    tell current window
-        set newTab to (create tab with default profile)
-        tell current session of newTab
-            set name to "{safe_title}"
-            write text "{apple_cmd}"
-        end tell
-    end tell
-end tell
-'''
+    script = _spawn_tab_script(safe_title, apple_cmd)
     try:
         _osascript(script)
     except Exception:
@@ -794,21 +801,7 @@ def spawn_fusion_tab(fusion_id: str, body: dict, cwd: str) -> None:
     cmd = _fusion_tab_cmd(fusion_id, cwd, title)
     apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
 
-    script = f'''
-tell application "iTerm"
-    activate
-    if (count of windows) = 0 then
-        create window with default profile
-    end if
-    tell current window
-        set newTab to (create tab with default profile)
-        tell current session of newTab
-            set name to "{safe_title}"
-            write text "{apple_cmd}"
-        end tell
-    end tell
-end tell
-'''
+    script = _spawn_tab_script(safe_title, apple_cmd)
     try:
         _osascript(script)
     except Exception:
