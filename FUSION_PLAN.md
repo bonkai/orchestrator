@@ -615,8 +615,13 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
 >    training, and blind spots; effort only changes *how long it thinks*, not *what it knows*.
 >    Diversity is **non-zero but weak** versus the cross-lab seats. Tradeoff table in F9.e.
 >
-> **Nothing below is built.** This is the design to green-light; implementation waits on your
-> confirmation of findings 1–3.
+> **✅ Built (2026-06-18).** Findings 1–3 confirmed by the user; the feature shipped as a
+> **per-dispatch picker** (richer than the registry sketch in F9.b/c below): the dispatch form
+> lets you add any number of Claude Code seats — each its own **model (opus/sonnet/haiku) +
+> effort** dropdown, **duplicates allowed** — alongside the key-gated cross-lab providers, and
+> sends the whole panel as a JSON seat list. No `config.json` registry entries or presets are
+> needed for Claude seats. See **F9 — what shipped** below; F9.a/d/e (CLI capabilities,
+> compliance, the correlation caveat) all still hold.
 
 #### F9.a — What the CLI actually exposes (verified `claude --help`, 2026-06-18)
 
@@ -748,33 +753,35 @@ all of them share. Recommendations:
   **slowest-seat-bound** on the heaviest effort. Keep heavy Anthropic panels for high-stakes,
   fire-and-forget `/send` (§7), not the live preview path.
 
-#### F9 task checklist *(do NOT start until findings 1–3 are confirmed)*
-- [ ] **F9.1** `config.py`: support `kind: "claude_cli"` entries — `active_providers()` marks
-  them active via `_claude_cli_available()` (no key), with `script`/`key_env`/`api_key`
-  optional; seed `opus-high` + `opus-medium` and the `anthropic-local`/`hybrid` presets.
-  · *verify:* with **zero** external keys, `is_fusion_available()` → `True` from the two Opus
-  seats; `active_providers()` lists them with no key.
-- [ ] **F9.2** `claude_runner.py`: add `_anthropic_seat_answer` and branch the fan-out by
-  `kind`; a pure-Anthropic panel skips the fusion tab and `ensure_fusion_providers()`.
-  · *verify:* `run_fusion_json(preset="anthropic-local")` opens 2 seat tabs + 1 judge tab,
-  `cost == 0`, each seat tab runs **Opus** at its configured effort.
-- [ ] **F9.3** Judge-effort guidance for same-family panels (judge effort > the max seat
-  effort), threaded through `run_fusion_json`. · *verify:* `anthropic-local` runs the judge at
-  `xhigh`/`max` while seats are `high`/`medium`.
-- [ ] **F9.4** ⟂ Surface in F4/F5 like any other seat — the picker is key-gated, so CLI seats
-  render as always-available at $0 (no "no API key" greying). · *verify:* the picker lists
-  `opus-high`/`opus-medium`; the F5 breakdown shows them at $0.
+#### F9 — what shipped *(✅ 2026-06-18 — the picker form, not the registry sketch above)*
+- **`config.py`** — `claude_cli_available()` (a Claude seat needs no key, only the CLI on PATH,
+  via `shutil.which`); `is_fusion_available()` is now true when the CLI is present **OR** ≥2
+  external providers are active. No registry `kind:claude_cli` entries — seats are picker-driven.
+- **`claude_runner.py`** — `_anthropic_seat_answer()` runs one seat as `run_claude_json(model,
+  effort)` (visible brain tab, $0, model passed **explicitly** so it can't downgrade to sonnet).
+  `run_fusion_json()` now takes a **mixed `panel`** (a `str` = external provider; a dict
+  `{kind:claude_cli,model,effort}` = Claude seat), splits it, fans **both groups out in
+  parallel** (providers via the fusion tab; each Claude seat its own brain tab), and bills only
+  the external seats (`cost_usd = Σ external`; Claude seats are $0). Duplicate Claude seats are
+  kept; usable seats must total ≥2 or it returns `ok=False` (→ `run_brain_json` falls back).
+- **`spawn.py`** — a module-level **`_TAB_SPAWN_LOCK`** serializes iTerm2 tab *creation* (the
+  osascript moment) across every spawn path, so N concurrent seats can't race AppleScript while
+  the per-tab polling still overlaps. *(Resolves the "concurrent brain-tab spawns" open question.)*
+- **`app.py`** — `/send` accepts **`fusion_seats`** (a JSON list of `{type:"claude",model,
+  effort}` / `{type:"provider",name}`), validating Claude seats against the model/effort
+  whitelist (`CLAUDE_SEAT_MODELS`/`CLAUDE_SEAT_EFFORTS`) and provider seats against active keys;
+  legacy comma `fusion_panel` is still accepted. `_view_ctx` passes the seat models/efforts to
+  the form.
+- **`index.html`** — the Fusion picker gained a **"Claude Code seats"** section (add/remove
+  rows, each a model + effort `<select>`, defaulting to 2 Opus seats at high+medium) above the
+  cross-lab providers, a live seat counter, and JSON-encoded submit. State persists in
+  `localStorage`; the toggle stays **default-OFF**.
 
-#### Open questions to confirm before coding
-1. **Concurrent brain-tab spawns.** Today only **one** brain tab opens at a time (the judge).
-   N Anthropic seats in parallel = **N concurrent AppleScript tab spawns**, which the code has
-   never done — may need a spawn lock (serialize tab *creation*, then poll in parallel) or a
-   small stagger. This is the main implementation unknown.
-2. **Per-seat naming.** Names like `opus-high` break the current "one registry entry per lab"
-   assumption — confirm that shape is acceptable (vs. e.g. a sub-list of efforts under one
-   `anthropic` entry).
-3. **Default-off, as ever.** Ship `anthropic-local`/`hybrid` as *available* presets but keep
-   the global Fusion toggle default-OFF (F4); no behavior change unless explicitly selected.
+**Still open / deferred:** judge-effort-above-seats for same-family panels (the judge stays
+opus/high by default for now); the F5 per-seat cost breakdown should label Claude seats as
+`$0 (subscription)`. The **same-model correlation caveat (F9.e) stands** — prefer a *hybrid*
+panel (Claude seats + a cross-lab seat) for real error diversity; a pure-Opus panel trades
+diversity for zero egress + zero cost.
 
 ---
 
