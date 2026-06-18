@@ -160,6 +160,7 @@ class TestSpawnFusionHelpers(unittest.TestCase):
         self.assertIn("ORCHESTRATOR_FUSION_ID=fusion-abc123", cmd)
         self.assertNotIn("ORCHESTRATOR_RUN_ID", cmd)   # Stop hook stays a no-op
         self.assertIn("fusion_run.sh", cmd)
+        self.assertIn("SetUserVar=orch_fusion=", cmd)  # close-by-var survives title rewrite
 
     def test_spawn_fusion_tab_raises_without_iterm2(self):
         with mock.patch.object(spawn, "iterm2_installed", return_value=False):

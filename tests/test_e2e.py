@@ -1039,6 +1039,8 @@ class TestClaudeRunner(unittest.TestCase):
         self.assertIn("ORCHESTRATOR_BRAIN_ID=rewriter-abc12345", cmd)
         self.assertNotIn("ORCHESTRATOR_RUN_ID", cmd)
         self.assertIn("brain_run.sh", cmd)
+        # Tagged with a user var so close-by-id works after claude rewrites the title.
+        self.assertIn("SetUserVar=orch_brain=", cmd)
 
 
 # ─── Test 12: rewriter (mocked claude) ───────────────────────────────────
