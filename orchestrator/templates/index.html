@@ -269,11 +269,13 @@
         // localStorage (GLOBAL keys — availability is global config, not
         // per-project). Default OFF. The picker reveals only when the toggle's on.
         var fusionCheckbox = document.getElementById('fusion-checkbox');
+        var enrichCheckbox = document.getElementById('enrich-checkbox');
         var fusionPanel = document.getElementById('fusion-panel');
         var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
         var CLAUDE_MODELS = {{ claude_seat_models | tojson }};
         var CLAUDE_EFFORTS = {{ claude_seat_efforts | tojson }};
         var FUSION_ON_KEY = 'orch_fusion_on';
+        var FUSION_ENRICH_KEY = 'orch_fusion_enrich';
         var FUSION_PANEL_KEY = 'orch_fusion_panel';
         var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
         var claudeSeatsEl = document.getElementById('claude-seats');
@@ -293,8 +295,12 @@
             .map(function(cb) { return cb.value; });
         }
         function syncFusionPanel() {
-          if (fusionPanel && fusionCheckbox) {
-            fusionPanel.style.display = fusionCheckbox.checked ? '' : 'none';
+          // The seat picker is shared by BOTH modes (fusion rewrite + enrich), so
+          // reveal it when either toggle is on.
+          if (fusionPanel) {
+            var on = (fusionCheckbox && fusionCheckbox.checked) ||
+                     (enrichCheckbox && enrichCheckbox.checked);
+            fusionPanel.style.display = on ? '' : 'none';
           }
         }
 
@@ -373,6 +379,9 @@
             addClaudeSeatRow('opus', 'medium');
           }
           try { fusionCheckbox.checked = localStorage.getItem(FUSION_ON_KEY) === '1'; } catch (e) {}
+          if (enrichCheckbox) {
+            try { enrichCheckbox.checked = localStorage.getItem(FUSION_ENRICH_KEY) === '1'; } catch (e) {}
+          }
           syncFusionPanel();
 
           fusionCheckbox.addEventListener('change', function() {
@@ -380,6 +389,13 @@
             syncFusionPanel();
             updateFusionCount();
           });
+          if (enrichCheckbox) {
+            enrichCheckbox.addEventListener('change', function() {
+              try { localStorage.setItem(FUSION_ENRICH_KEY, enrichCheckbox.checked ? '1' : '0'); } catch (e) {}
+              syncFusionPanel();
+              updateFusionCount();
+            });
+          }
           fusionProvCbs().forEach(function(cb) {
             cb.addEventListener('change', function() {
               try { localStorage.setItem(FUSION_PANEL_KEY, JSON.stringify(checkedProviders())); } catch (e) {}
