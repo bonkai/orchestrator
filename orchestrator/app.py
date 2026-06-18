@@ -843,14 +843,19 @@ async def send(
                     panel.append(name)
     else:
         panel = [p for p in fusion_panel.split(",") if p in active]
-    if do_fusion:
-        print(f"[orchestrator] /send fusion=on, panel={panel or '(preset)'}")
+    # F7: enrichment mode — analyze the task with a panel and APPEND the analysis
+    # to the executor prompt (separate from the rewrite). Reuses the same panel
+    # selection; needs the panel to be usable (>=2 seats) or it self-skips.
+    do_enrich = fusion_enrich.lower() in ("1", "true", "yes", "on")
+    if do_fusion or do_enrich:
+        print(f"[orchestrator] /send fusion={'on' if do_fusion else 'off'} "
+              f"enrich={'on' if do_enrich else 'off'}, panel={panel or '(preset)'}")
 
     # Strong-ref the task so Python's GC can't drop the rewrite+dispatch
     # mid-run when the browser tab disconnects after the immediate response.
     task = asyncio.create_task(_send_in_background(
         project_id, task, wall_cap_s, do_rewrite, effort, model,
-        do_fusion=do_fusion, panel=panel,
+        do_fusion=do_fusion, panel=panel, do_enrich=do_enrich,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -1348,12 +1353,18 @@ async def view_dispatch(request: Request, dispatch_id: int):
     # inspectable AFTER the run (the live timeline scrolls it away). Newest match
     # wins (a re-send reuses the row only on resume, but be safe).
     rewrite = None
+    enrichment = None     # F7: the multi-model analysis block (fusion_ok event)
     for ev in db.get_events(dispatch_id, since_id=0, limit=200):
-        if ev["kind"] == "stage" and ev["payload"].get("stage") in ("rewrite_ok", "rewrite_skipped"):
+        if ev["kind"] != "stage":
+            continue
+        st = ev["payload"].get("stage")
+        if st in ("rewrite_ok", "rewrite_skipped"):
             rewrite = ev["payload"]
+        elif st in ("fusion_ok", "fusion_skipped"):
+            enrichment = ev["payload"]
     return templates.TemplateResponse(
         request, "dispatch.html",
-        {"d": d, "tags": tags, "rewrite": rewrite,
+        {"d": d, "tags": tags, "rewrite": rewrite, "enrichment": enrichment,
          "fmt_duration": _fmt_duration, "fmt_rel": _fmt_rel},
     )
 
