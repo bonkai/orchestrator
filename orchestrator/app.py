@@ -725,6 +725,9 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     # is preserved client-side (localStorage) for a re-submit.
     if do_rewrite and rewrite_failed:
         dispatch_id = db.create_dispatch(project_id, task, wall_clock_cap_s=wall_cap_s)
+        # F5: stamp cost BEFORE mark_failed_to_spawn — it copies cost_usd onto the
+        # outcome row, so a fused rewrite that failed still records what it spent.
+        db.set_dispatch_cost(dispatch_id, rewrite_cost, fused=rewrite_fused)
         db.mark_failed_to_spawn(dispatch_id, f"rewrite failed: {rewrite_error}")
         if rewrite_event:
             db.record_event(dispatch_id, "stage", rewrite_event)
@@ -735,6 +738,10 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     if err:
         print(f"[orchestrator] /send dispatch failed: {err}")
         return
+    # F5: record the rewrite spend on the dispatch row; complete_dispatch (and the
+    # kill/pause/orphan writers) copy it onto the outcome row at completion.
+    if do_rewrite:
+        db.set_dispatch_cost(dispatch_id, rewrite_cost, fused=rewrite_fused)
     if rewrite_event:
         db.record_event(dispatch_id, "stage", rewrite_event)
 
@@ -1299,9 +1306,17 @@ async def view_dispatch(request: Request, dispatch_id: int):
             tags = _json.loads(d["tags_json"])
         except (_json.JSONDecodeError, TypeError):
             pass
+    # F5: pull the rewrite stage event so the fusion panel breakdown + cost are
+    # inspectable AFTER the run (the live timeline scrolls it away). Newest match
+    # wins (a re-send reuses the row only on resume, but be safe).
+    rewrite = None
+    for ev in db.get_events(dispatch_id, since_id=0, limit=200):
+        if ev["kind"] == "stage" and ev["payload"].get("stage") in ("rewrite_ok", "rewrite_skipped"):
+            rewrite = ev["payload"]
     return templates.TemplateResponse(
         request, "dispatch.html",
-        {"d": d, "tags": tags, "fmt_duration": _fmt_duration, "fmt_rel": _fmt_rel},
+        {"d": d, "tags": tags, "rewrite": rewrite,
+         "fmt_duration": _fmt_duration, "fmt_rel": _fmt_rel},
     )
 
 
