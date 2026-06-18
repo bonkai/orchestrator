@@ -258,17 +258,23 @@
           if (savedDraft && !textarea.value) textarea.value = savedDraft;
         } catch (e) {}
 
-        // ── Fusion (multi-model) toggle + key-gated panel (F4.1/F4.2) ───────
-        // Persist the on/off checkbox + the checked provider set in localStorage
-        // (GLOBAL keys — provider availability is global config, not per-project).
-        // Default OFF. The picker reveals only when the toggle is on, and only
-        // KEYED providers are checkable (unkeyed rows render disabled server-side).
+        // ── Fusion (multi-model) toggle + panel picker ─────────────────────
+        // Panel = Claude Code seats (local `claude` CLI, effort-differentiated,
+        // $0, NO Anthropic API) + optional cross-lab providers (key-gated). The
+        // on/off checkbox, the picked seats, and the checked providers persist in
+        // localStorage (GLOBAL keys — availability is global config, not
+        // per-project). Default OFF. The picker reveals only when the toggle's on.
         var fusionCheckbox = document.getElementById('fusion-checkbox');
         var fusionPanel = document.getElementById('fusion-panel');
-        var fusionAvailable = {{ 'true' if fusion_available else 'false' }};
         var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
+        var CLAUDE_MODELS = {{ claude_seat_models | tojson }};
+        var CLAUDE_EFFORTS = {{ claude_seat_efforts | tojson }};
         var FUSION_ON_KEY = 'orch_fusion_on';
         var FUSION_PANEL_KEY = 'orch_fusion_panel';
+        var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
+        var claudeSeatsEl = document.getElementById('claude-seats');
+        var addClaudeSeatBtn = document.getElementById('add-claude-seat');
+        var fusionCountEl = document.getElementById('fusion-count');
 
         function fusionProvCbs() {
           return fusionPanel
@@ -276,8 +282,8 @@
             : [];
         }
         function checkedProviders() {
-          // Only active (non-disabled) seats can be checked, so this is already
-          // the validated panel; the server re-validates against live keys too.
+          // Only active (non-disabled) provider rows can be checked, so this is
+          // already validated; the server re-validates against live keys too.
           return fusionProvCbs()
             .filter(function(cb) { return cb.checked && !cb.disabled; })
             .map(function(cb) { return cb.value; });
@@ -287,28 +293,101 @@
             fusionPanel.style.display = fusionCheckbox.checked ? '' : 'none';
           }
         }
-        // Only wire persistence when Fusion is actually available (≥2 keys). When
-        // it isn't, the checkbox is disabled and we leave it OFF — never restore a
-        // stale "on" the user can't act on.
-        if (fusionCheckbox && fusionAvailable) {
+
+        // -- Claude Code seats: model + effort rows; duplicates allowed ---------
+        function makeSeatSelect(opts, val, cls) {
+          var sel = document.createElement('select');
+          sel.className = cls;
+          sel.style.fontSize = '11px';
+          opts.forEach(function(o) {
+            var op = document.createElement('option');
+            op.value = o; op.textContent = o;
+            if (o === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          return sel;
+        }
+        function addClaudeSeatRow(model, effort) {
+          if (!claudeSeatsEl) return;
+          var row = document.createElement('div');
+          row.className = 'claude-seat-row';
+          row.style.cssText = 'display:flex; align-items:center; gap:0.35rem; padding:2px 0; font-size:12px;';
+          var mSel = makeSeatSelect(CLAUDE_MODELS, model || 'opus', 'claude-seat-model');
+          var eSel = makeSeatSelect(CLAUDE_EFFORTS, effort || 'high', 'claude-seat-effort');
+          var rm = document.createElement('button');
+          rm.type = 'button'; rm.className = 'link claude-seat-rm';
+          rm.textContent = '×'; rm.title = 'remove this seat';
+          rm.style.cssText = 'margin-left:0.25rem; padding:0 6px;';
+          rm.addEventListener('click', function() { row.remove(); saveClaudeSeats(); });
+          mSel.addEventListener('change', saveClaudeSeats);
+          eSel.addEventListener('change', saveClaudeSeats);
+          row.appendChild(document.createTextNode('claude '));
+          row.appendChild(mSel);
+          row.appendChild(document.createTextNode(' · effort '));
+          row.appendChild(eSel);
+          row.appendChild(rm);
+          claudeSeatsEl.appendChild(row);
+        }
+        function claudeSeats() {
+          if (!claudeSeatsEl) return [];
+          return Array.prototype.slice.call(
+            claudeSeatsEl.querySelectorAll('.claude-seat-row')
+          ).map(function(r) {
+            return { model: r.querySelector('.claude-seat-model').value,
+                     effort: r.querySelector('.claude-seat-effort').value };
+          });
+        }
+        function saveClaudeSeats() {
+          try { localStorage.setItem(CLAUDE_SEATS_KEY, JSON.stringify(claudeSeats())); } catch (e) {}
+          updateFusionCount();
+        }
+        function updateFusionCount() {
+          if (!fusionCountEl) return;
+          var c = claudeSeats().length, p = checkedProviders().length, total = c + p;
+          fusionCountEl.textContent = 'panel: ' + total + ' seat' + (total === 1 ? '' : 's') +
+            ' (' + c + ' Claude · ' + p + ' cross-lab)' + (total < 2 ? ' — need ≥2' : '');
+          fusionCountEl.style.color =
+            (total < 2 && fusionCheckbox && fusionCheckbox.checked) ? '#f0c659' : '';
+        }
+
+        if (fusionCheckbox) {
+          // Restore external-provider checks (saved set, else preset default).
           var savedPanel = null;
           try { savedPanel = JSON.parse(localStorage.getItem(FUSION_PANEL_KEY)); } catch (e) {}
           var wanted = Array.isArray(savedPanel) ? savedPanel : fusionDefaultPanel;
           fusionProvCbs().forEach(function(cb) {
             if (!cb.disabled) cb.checked = wanted.indexOf(cb.value) !== -1;
           });
+          // Restore Claude seats (saved set, else two Opus seats at high+medium —
+          // a valid $0 panel out of the box).
+          var savedSeats = null;
+          try { savedSeats = JSON.parse(localStorage.getItem(CLAUDE_SEATS_KEY)); } catch (e) {}
+          if (Array.isArray(savedSeats) && savedSeats.length) {
+            savedSeats.forEach(function(s) { addClaudeSeatRow(s.model, s.effort); });
+          } else {
+            addClaudeSeatRow('opus', 'high');
+            addClaudeSeatRow('opus', 'medium');
+          }
           try { fusionCheckbox.checked = localStorage.getItem(FUSION_ON_KEY) === '1'; } catch (e) {}
           syncFusionPanel();
 
           fusionCheckbox.addEventListener('change', function() {
             try { localStorage.setItem(FUSION_ON_KEY, fusionCheckbox.checked ? '1' : '0'); } catch (e) {}
             syncFusionPanel();
+            updateFusionCount();
           });
           fusionProvCbs().forEach(function(cb) {
             cb.addEventListener('change', function() {
               try { localStorage.setItem(FUSION_PANEL_KEY, JSON.stringify(checkedProviders())); } catch (e) {}
+              updateFusionCount();
             });
           });
+          if (addClaudeSeatBtn) {
+            addClaudeSeatBtn.addEventListener('click', function() {
+              addClaudeSeatRow('opus', 'high'); saveClaudeSeats();
+            });
+          }
+          updateFusionCount();
         }
 
         function flashStatus(msg, isError) {
@@ -350,6 +429,14 @@
         function send(rewrite) {
           var task = (textarea.value || '').trim();
           if (!task) { flashStatus('empty task', true); return; }
+          // Fusion needs ≥2 seats; warn instead of silently falling back to a
+          // single-model rewrite. (Only the rewrite path uses fusion.)
+          var fusionWanted = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
+          if (rewrite && fusionWanted &&
+              (claudeSeats().length + checkedProviders().length) < 2) {
+            flashStatus('fusion needs ≥2 seats — add another Claude seat or tick a provider', true);
+            return;
+          }
           // Persist the draft BEFORE dispatching so it survives any failure on
           // the path to a live dispatch. Cleared only on confirmed success.
           try { localStorage.setItem(draftKey, task); } catch (e) {}
@@ -360,13 +447,21 @@
           fd.append('effort', form.querySelector('select[name=effort]').value);
           fd.append('model', form.querySelector('select[name=model]').value);
           fd.append('rewrite', rewrite ? 'true' : 'false');
-          // F4.3: multi-model Fusion for the rewrite brain call. Only meaningful
-          // when rewrite is on (fusion routes the rewriter's ONE brain call); the
-          // server simply ignores it for skip-rewrite sends. fusion_panel is the
-          // user-checked KEYED providers — empty means "use the configured preset".
+          // Multi-model Fusion for the rewrite brain call. Only meaningful when
+          // rewrite is on (fusion routes the rewriter's ONE brain call); the
+          // server ignores it for skip-rewrite sends. The panel is encoded as
+          // JSON: Claude Code seats (model+effort, $0, no API) + checked cross-lab
+          // providers. Duplicate / effort-tagged Claude seats are preserved.
           var fusionOn = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
           fd.append('fusion', fusionOn ? 'true' : 'false');
-          fd.append('fusion_panel', checkedProviders().join(','));
+          var fusionSeats = [];
+          claudeSeats().forEach(function(s) {
+            fusionSeats.push({ type: 'claude', model: s.model, effort: s.effort });
+          });
+          checkedProviders().forEach(function(n) {
+            fusionSeats.push({ type: 'provider', name: n });
+          });
+          fd.append('fusion_seats', JSON.stringify(fusionSeats));
 
           // /send is fire-and-forget — it returns in ~50ms after scheduling a
           // background task, then the rewriter (5-15s) + dispatch creation
