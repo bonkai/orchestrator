@@ -424,22 +424,27 @@ end tell
     return out.strip().lower() == "true"
 
 
-def close_iterm2_session_by_orch_id(orch_id: str) -> bool:
-    """Close the iTerm2 tab tagged with session variable `user.orch_id` ==
-    `orch_id`. This is the reliable handle: unlike the tab title (which the
-    running claude overwrites via its own OSC escape), the user variable set at
-    spawn persists for the session's life. Returns True if found and closed,
-    False otherwise. Silently no-ops if iTerm2 isn't installed."""
+def close_iterm2_session_by_var(var_name: str, value: str) -> bool:
+    """Close the iTerm2 tab whose session variable `user.<var_name>` == `value`.
+    The reliable handle for a tab whose TITLE the running program (claude)
+    overwrites via its own OSC escape: the user variable set at spawn persists
+    for the session's life. Returns True if found and closed, False otherwise;
+    no-ops if iTerm2 isn't installed.
+
+    AppleScript note: a session var MUST be read via `tell <session> to
+    (variable named "...")`; the property-of form raises -1723 'Access not
+    allowed'."""
     if not iterm2_installed():
         return False
-    target = orch_id.replace('"', '\\"')
+    full_name = f"user.{var_name}".replace('"', '\\"')
+    target = value.replace('"', '\\"')
     script = f'''
 tell application "iTerm"
     set foundIt to false
     repeat with w in windows
         repeat with t in tabs of w
             try
-                tell (current session of t) to set v to (variable named "user.orch_id")
+                tell (current session of t) to set v to (variable named "{full_name}")
                 if v is "{target}" then
                     tell current session of t to close
                     set foundIt to true
@@ -464,7 +469,7 @@ def close_iterm2_tab(dispatch_id: int) -> bool:
     session variable set at spawn (survives claude overwriting the tab title);
     falls back to the legacy `orch #<id>` title for tabs spawned before user-var
     tagging existed, or that died before claude changed the title."""
-    if close_iterm2_session_by_orch_id(str(dispatch_id)):
+    if close_iterm2_session_by_var("orch_id", str(dispatch_id)):
         return True
     return close_iterm2_tab_by_title(f"orch #{dispatch_id}")
 
@@ -764,6 +769,7 @@ def _brain_tab_cmd(brain_id: str, cwd: str, title: str) -> str:
     return (
         f'cd "{safe_proj}" && '
         f'export ORCHESTRATOR_BRAIN_ID={brain_id} && '
+        f'{_setuservar_printf("orch_brain", brain_id)}'
         f'printf "\\033]0;{safe_title}\\007" && '
         f'exec "$HOME/.orchestrator/bin/brain_run.sh"'
     )
@@ -815,7 +821,8 @@ def finish_brain_tab(brain_id: str, label: str = "brain", success: bool = False)
     inspection); always removes the sidecar files. Never raises."""
     if success and brain_auto_close_enabled():
         try:
-            close_iterm2_tab_by_title(_brain_tab_title(brain_id, label))
+            if not close_iterm2_session_by_var("orch_brain", brain_id):
+                close_iterm2_tab_by_title(_brain_tab_title(brain_id, label))
         except Exception:
             pass
     cleanup_brain_files(brain_id)
@@ -839,6 +846,7 @@ def _fusion_tab_cmd(fusion_id: str, cwd: str, title: str) -> str:
     return (
         f'cd "{safe_proj}" && '
         f'export ORCHESTRATOR_FUSION_ID={fusion_id} && '
+        f'{_setuservar_printf("orch_fusion", fusion_id)}'
         f'printf "\\033]0;{safe_title}\\007" && '
         f'exec "$HOME/.orchestrator/bin/fusion_run.sh"'
     )
@@ -887,7 +895,8 @@ def finish_fusion_tab(fusion_id: str, success: bool = False):
     inspection); always removes the sidecar files. Never raises."""
     if success and brain_auto_close_enabled():
         try:
-            close_iterm2_tab_by_title(_fusion_tab_title(fusion_id))
+            if not close_iterm2_session_by_var("orch_fusion", fusion_id):
+                close_iterm2_tab_by_title(_fusion_tab_title(fusion_id))
         except Exception:
             pass
     cleanup_fusion_files(fusion_id)
