@@ -434,10 +434,12 @@ def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str 
 
 
 def auto_close_enabled() -> bool:
-    """Opt-out switch for tab auto-close. Defaults on; set
-    ORCHESTRATOR_AUTO_CLOSE_TABS=false to keep finished tabs around
-    (e.g., to inspect terminal output of a failed session)."""
-    return os.environ.get("ORCHESTRATOR_AUTO_CLOSE_TABS", "true").lower() in (
+    """Opt-IN switch for main-dispatch tab auto-close. Defaults OFF so finished
+    main-task tabs stay open and the user can keep the session going; set
+    ORCHESTRATOR_AUTO_CLOSE_TABS=true to auto-close completed dispatch tabs.
+    (Brain/fusion tabs are governed separately by ORCHESTRATOR_BRAIN_AUTO_CLOSE,
+    which still defaults on — see brain_auto_close_enabled.)"""
+    return os.environ.get("ORCHESTRATOR_AUTO_CLOSE_TABS", "false").lower() in (
         "1", "true", "yes", "on",
     )
 
