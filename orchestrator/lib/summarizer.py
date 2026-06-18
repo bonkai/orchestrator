@@ -161,9 +161,16 @@ def _coerce_list_of_str(v) -> list[str]:
     return []
 
 
-def summarize(transcript_path: str, user_task: str, cwd: str) -> SummaryResult:
+def summarize(transcript_path: str, user_task: str, cwd: str,
+              fusion: bool = False, panel: "list | None" = None) -> SummaryResult:
     """Run the summarizer end-to-end. Never raises — returns a SummaryResult
-    with ok=False on any failure so the caller can log without breaking."""
+    with ok=False on any failure so the caller can log without breaking.
+
+    F6.1: with fusion=False this is byte-for-byte the original single-claude
+    (sonnet/medium) path. fusion=True routes the one brain call through a
+    multi-model panel → judge, degrading to that same single-claude call if the
+    panel is unavailable. The tier stays DELIBERATELY low (sonnet/medium, judge
+    included) — a transcript distillation rarely justifies an Opus panel (§7)."""
     transcript_md = distill_transcript(transcript_path)
     if transcript_md.startswith("[transcript file missing"):
         return SummaryResult(ok=False, error="transcript file missing")
@@ -174,8 +181,10 @@ def summarize(transcript_path: str, user_task: str, cwd: str) -> SummaryResult:
         "user_task": user_task or "(unknown — not recorded)",
     })
 
-    run = claude_runner.run_claude_json(
-        prompt=prompt, cwd=cwd, effort="medium", label="summarizer",
+    run = claude_runner.run_brain_json(
+        prompt=prompt, cwd=cwd, fusion=fusion, panel=panel,
+        model="sonnet", effort="medium", label="summarizer",
+        judge_model="sonnet", judge_effort="medium",
     )
     if not run.ok:
         return SummaryResult(ok=False, error=run.error,
