@@ -313,10 +313,10 @@ disagreement among models.** Everything routine stays solo.
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
 | **F0** | Config & key mgmt | `config.py` (registry + per-provider keys + presets) + idempotent `install.sh` template | ✅ |
-| **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ☐ |
+| **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ◐ *(core+judge+tab done; only `gemini.py`+`glm.py` written — F1.2/F1.2b pending)* |
 | **F2** | Rewriter integration | rewriter routes through fusion when toggled | ✅ |
-| **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ☐ |
-| **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ☐ |
+| **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ✅ *(via F9 — `fusion_seats`)* |
+| **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ✅ *(via F9 — seat picker)* |
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ☐ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
