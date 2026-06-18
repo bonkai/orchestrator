@@ -288,15 +288,14 @@ def _spawn_tab_script(safe_title: str, apple_cmd: str) -> str:
     Both args must already be AppleScript-escaped by the caller.
 
     Focus handling:
-      * No `activate` — when iTerm already has a window (the common case) we just
-        add a tab to it; `create tab`/`write text` don't bring iTerm forward on
-        their own, so the user's foreground app is left untouched.
-      * The one focus-stealing action is `create window`, needed only when iTerm
-        has zero windows. We capture the frontmost app first (via System Events)
-        and, only if we had to create a window, restore it afterward. Both System
-        Events steps are wrapped in `try`, so a missing Accessibility permission
-        degrades to "tab still opens, focus not restored" rather than failing the
-        spawn.
+      * No `activate` — we never explicitly bring iTerm forward on spawn.
+      * We capture whatever app is frontmost BEFORE touching iTerm, then ALWAYS
+        restore it afterward — not only in the `create window` case. Some iTerm2
+        versions raise the window on `create tab` (and `create window` always
+        does), so an unconditional restore is the only reliable way to leave the
+        user's foreground app untouched. Both System Events steps are wrapped in
+        `try`, so a missing Accessibility permission degrades to "tab still
+        opens, focus not restored" rather than failing the spawn.
 
     (Do NOT add `activate` here — select_iterm2_tab is the one place that
     intentionally brings a tab to the front.)"""
@@ -307,11 +306,9 @@ try
         set frontApp to name of first application process whose frontmost is true
     end tell
 end try
-set didCreateWindow to false
 tell application "iTerm"
     if (count of windows) = 0 then
         create window with default profile
-        set didCreateWindow to true
     end if
     tell current window
         set newTab to (create tab with default profile)
@@ -321,7 +318,7 @@ tell application "iTerm"
         end tell
     end tell
 end tell
-if didCreateWindow and frontApp is not "" then
+if frontApp is not "" then
     try
         tell application "System Events"
             tell process frontApp to set frontmost to true
