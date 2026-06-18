@@ -346,8 +346,10 @@ tasks.
 >   so a finished fusion run can't be inspected after the fact.
 > - **F6 / F7 / F8** — optional, unbuilt.
 >
-> **Next up:** F1.2/F1.2b (the four missing provider scripts — each also needs a key) and
-> F5 (the observability surface). Until then Fusion is a working MVP, not complete.
+> **Next up:** add the four provider keys (deepseek/xai/minimax/qwen) to `config.json` and
+> run the one-paid-call-per-script F1.2/F1.2b LIVE verify; then **F5** (the observability
+> surface — the next incomplete *code* phase, needs no keys). Until then Fusion is a working
+> MVP, not complete.
 
 ### Pre-build checklist *(verified against the live code 2026-06-17 — read before F0)*
 - **Get ≥1 provider key before F1** (DeepSeek is cheapest). F0 needs no network, but
