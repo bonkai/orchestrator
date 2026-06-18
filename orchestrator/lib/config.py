@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from typing import Optional
 
 from orchestrator.lib.db import DATA_DIR
@@ -154,7 +155,16 @@ def active_providers() -> dict:
     return out
 
 
+def claude_cli_available() -> bool:
+    """True if the `claude` CLI is on PATH. Claude Code panel seats (Fusion's
+    effort-differentiated LOCAL seats) need no API key — only the CLI — so this
+    is their availability gate, the way _resolve_key gates external providers.
+    Running a seat through the CLI keeps the 'No Anthropic API calls' rule intact."""
+    return shutil.which("claude") is not None
+
+
 def is_fusion_available() -> bool:
-    """True once >= 2 providers are active — the minimum for a real panel.
-    Below that the Fusion toggle is disabled and brain calls stay local."""
-    return len(active_providers()) >= 2
+    """True when a >=2-seat panel is buildable: either the local `claude` CLI is
+    present (you can always add >=2 free Claude Code seats — no key needed), OR
+    >=2 external providers are active. Below that the Fusion toggle is disabled."""
+    return claude_cli_available() or len(active_providers()) >= 2
