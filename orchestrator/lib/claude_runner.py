@@ -505,15 +505,44 @@ def _panel_answers(prompt: str, panel: list, providers: dict,
     return _run_panel(prompt, panel, providers, timeout_s)
 
 
+def _anthropic_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
+    """One Claude Code panel seat: a LOCAL `claude` CLI call (visible brain tab),
+    differentiated from its siblings by --effort. Free ($0 out-of-pocket — it's
+    the subscription) and makes NO Anthropic API call, so a Claude seat keeps the
+    'No Anthropic API calls' rule intact, exactly like the judge.
+
+    Returns the SAME normalized shape _panel_answer returns, so run_fusion_json
+    treats CLI seats and provider seats identically. Never raises —
+    run_claude_json already returns ok=False on any failure. NOTE: model is passed
+    EXPLICITLY (run_claude_json defaults to sonnet, so an Opus seat that didn't
+    would silently downgrade — dispatch #3 lesson)."""
+    model = (seat.get("model") or "opus").strip()
+    effort = (seat.get("effort") or "high").strip()
+    name = seat.get("name") or f"{model}-{effort}"
+    run = run_claude_json(prompt=prompt, cwd=cwd or os.getcwd(), model=model,
+                          effort=effort, label=f"fusion-seat:{name}")
+    if not run.ok:
+        return {"name": name, "ok": False, "error": run.error or "claude seat failed"}
+    return {"name": name, "model": run.model or model, "text": run.text,
+            "cost": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
+            "effort": effort, "subscription": True, "ok": True}
+
+
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
                     judge_model: str = "opus", judge_effort: str = "high") -> ClaudeRun:
-    """Fusion sibling of run_claude_json. Runs a PANEL of per-provider scripts
-    (parallel), then synthesizes via the local `claude` CLI judge
-    (run_claude_json — a visible brain tab, free on the subscription). Returns
-    the SAME ClaudeRun the brain callers expect, with cost_usd = Σ panel cost.
-    NEVER raises — any shortfall returns ok=False so run_brain_json can fall
-    back to the plain claude call.
+    """Fusion sibling of run_claude_json. Runs a PANEL — any mix of external
+    per-provider scripts AND local Claude Code seats (effort-differentiated
+    `claude` CLI calls; $0, NO Anthropic API) — in parallel, then synthesizes via
+    the local `claude` CLI judge (run_claude_json — a visible brain tab, free on
+    the subscription). Returns the SAME ClaudeRun the brain callers expect, with
+    cost_usd = Σ EXTERNAL panel cost (Claude seats are subscription → $0). NEVER
+    raises — any shortfall returns ok=False so run_brain_json can fall back to the
+    plain claude call.
+
+    `panel` is a list whose entries are either a provider NAME (str — an external
+    seat) or a dict {"kind":"claude_cli","model","effort"} (a local Claude seat);
+    duplicate Claude seats (same model+effort) are allowed.
 
     ⚠ run_claude_json defaults to sonnet, so the judge model is passed
     EXPLICITLY (default opus/high; a summarizer caller can pass sonnet)."""
