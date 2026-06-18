@@ -29,6 +29,22 @@ from orchestrator.lib.db import DATA_DIR
 # long part — polling each tab to completion — still runs fully in parallel.
 _TAB_SPAWN_LOCK = threading.Lock()
 
+# Per-osascript wall-clock ceiling. A *single* tab spawn is normally well under a
+# second, but a Fusion burst (panel tab + N Claude seats + the dispatch tab, all
+# spawned back-to-back) saturates iTerm2 — it's still rendering the just-created
+# tabs and launching their `claude` processes — so an individual `write text`
+# call can block far past the old 15s. That timeout failed dispatch #175 outright
+# (a Fusion send). 45s is a genuine-hang ceiling, not a normal wait.
+_OSASCRIPT_TIMEOUT_S = 45.0
+
+# Minimum spacing between consecutive tab spawns, enforced while holding
+# _TAB_SPAWN_LOCK. Spawns are ALREADY fully serialized (each _osascript blocks
+# inside the lock), so this isn't about concurrency — it's a beat for iTerm2 to
+# drain the previous tab's work (render + shell launch) before the next
+# `write text`, which is what actually backed up under the Fusion burst.
+_INTER_SPAWN_GAP_S = 0.5
+_last_spawn_monotonic = 0.0  # guarded by _TAB_SPAWN_LOCK
+
 TASKS_DIR = DATA_DIR / "tasks"
 PIDS_DIR = DATA_DIR / "pids"
 BIN_DIR = DATA_DIR / "bin"
@@ -264,12 +280,12 @@ def ensure_fusion_runner():
     ensure_fusion_providers()
 
 
-def _osascript(script: str) -> str:
+def _osascript(script: str, timeout: float = _OSASCRIPT_TIMEOUT_S) -> str:
     result = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=timeout,
     )
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip()
@@ -281,6 +297,29 @@ def _osascript(script: str) -> str:
             )
         raise RuntimeError(f"osascript failed: {err}")
     return result.stdout.strip()
+
+
+def _spawn_osascript(script: str) -> str:
+    """Run a TAB-SPAWNING osascript serialized behind _TAB_SPAWN_LOCK and spaced
+    so a Fusion burst (panel + N seats + dispatch) doesn't saturate iTerm2 past
+    the timeout. The single choke point all four spawn_* functions share — keeps
+    the lock-hold + inter-spawn beat in one place instead of copy-pasted.
+
+    We DON'T retry a TimeoutExpired here: spawns are serial (the lock), so a
+    45s timeout means genuine saturation a retry won't clear — and a retried
+    dispatch-tab spawn risks a *duplicate* tab (two claude sessions on one run
+    id). Spacing prevents the pile-up; the caller surfaces a failure as a
+    `spawn_failed` event instead."""
+    global _last_spawn_monotonic
+    with _TAB_SPAWN_LOCK:
+        if _last_spawn_monotonic:
+            wait = _INTER_SPAWN_GAP_S - (time.monotonic() - _last_spawn_monotonic)
+            if wait > 0:
+                time.sleep(wait)
+        try:
+            return _osascript(script)
+        finally:
+            _last_spawn_monotonic = time.monotonic()
 
 
 def iterm2_installed() -> bool:
