@@ -795,10 +795,13 @@ async def send(
             if not isinstance(s, dict):
                 continue
             if s.get("type") == "claude":
-                model = str(s.get("model", "")).strip()
-                effort = str(s.get("effort", "")).strip()
-                if model in CLAUDE_SEAT_MODELS and effort in CLAUDE_SEAT_EFFORTS:
-                    panel.append({"kind": "claude_cli", "model": model, "effort": effort})
+                # NB: seat_model/seat_effort — NOT the `model`/`effort` Form params,
+                # which govern the EXECUTOR. Shadowing them here silently rewrote the
+                # dispatched session's model/effort to the last Claude seat's.
+                seat_model = str(s.get("model", "")).strip()
+                seat_effort = str(s.get("effort", "")).strip()
+                if seat_model in CLAUDE_SEAT_MODELS and seat_effort in CLAUDE_SEAT_EFFORTS:
+                    panel.append({"kind": "claude_cli", "model": seat_model, "effort": seat_effort})
             elif s.get("type") == "provider":
                 name = str(s.get("name", "")).strip()
                 if name in active:
