@@ -366,6 +366,7 @@ def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str 
     cmd = (
         f'cd "{safe_proj}" && '
         f'export ORCHESTRATOR_RUN_ID={dispatch_id} && '
+        f'{_setuservar_printf("orch_id", str(dispatch_id))}'
         f'printf "\\033]0;{safe_title}\\007" && '
         f'exec "$HOME/.orchestrator/bin/run.sh"'
     )
@@ -423,9 +424,48 @@ end tell
     return out.strip().lower() == "true"
 
 
+def close_iterm2_session_by_orch_id(orch_id: str) -> bool:
+    """Close the iTerm2 tab tagged with session variable `user.orch_id` ==
+    `orch_id`. This is the reliable handle: unlike the tab title (which the
+    running claude overwrites via its own OSC escape), the user variable set at
+    spawn persists for the session's life. Returns True if found and closed,
+    False otherwise. Silently no-ops if iTerm2 isn't installed."""
+    if not iterm2_installed():
+        return False
+    target = orch_id.replace('"', '\\"')
+    script = f'''
+tell application "iTerm"
+    set foundIt to false
+    repeat with w in windows
+        repeat with t in tabs of w
+            try
+                tell (current session of t) to set v to (variable named "user.orch_id")
+                if v is "{target}" then
+                    tell current session of t to close
+                    set foundIt to true
+                    exit repeat
+                end if
+            end try
+        end repeat
+        if foundIt then exit repeat
+    end repeat
+    return foundIt as string
+end tell
+'''
+    try:
+        out = _osascript(script)
+    except Exception:
+        return False
+    return out.strip().lower() == "true"
+
+
 def close_iterm2_tab(dispatch_id: int) -> bool:
-    """Close the iTerm2 tab named `orch #<dispatch_id>` if it still exists.
-    Thin wrapper over `close_iterm2_tab_by_title`."""
+    """Close the dispatch's iTerm2 tab. Primary match is the `user.orch_id`
+    session variable set at spawn (survives claude overwriting the tab title);
+    falls back to the legacy `orch #<id>` title for tabs spawned before user-var
+    tagging existed, or that died before claude changed the title."""
+    if close_iterm2_session_by_orch_id(str(dispatch_id)):
+        return True
     return close_iterm2_tab_by_title(f"orch #{dispatch_id}")
 
 
@@ -435,22 +475,42 @@ def close_iterm2_tabs(dispatch_ids: list[int]) -> int:
     Returns the count actually closed."""
     if not dispatch_ids or not iterm2_installed():
         return 0
-    # Build AppleScript list literal: {"orch #1", "orch #2", ...}
-    items = ", ".join(f'"orch #{int(d)}"' for d in dispatch_ids)
+    # Match the stable `user.orch_id` session variable first (survives claude
+    # overwriting the tab title), with the legacy `orch #<id>` title as fallback
+    # for tabs spawned before user-var tagging. Two-pass per window (collect then
+    # close) so the tab list is never mutated mid-iteration.
+    id_items = ", ".join(f'"{int(d)}"' for d in dispatch_ids)
+    title_items = ", ".join(f'"orch #{int(d)}"' for d in dispatch_ids)
     script = f'''
 tell application "iTerm"
-    set targets to {{{items}}}
+    set idTargets to {{{id_items}}}
+    set titleTargets to {{{title_items}}}
     set closedCount to 0
     repeat with w in windows
         set toClose to {{}}
         repeat with t in tabs of w
-            set sName to name of current session of t
-            repeat with tgt in targets
-                if sName is (tgt as string) then
-                    set end of toClose to t
-                    exit repeat
-                end if
-            end repeat
+            set matched to false
+            try
+                tell (current session of t) to set v to (variable named "user.orch_id")
+                repeat with tgt in idTargets
+                    if v is (tgt as string) then
+                        set matched to true
+                        exit repeat
+                    end if
+                end repeat
+            end try
+            if not matched then
+                try
+                    set sName to name of current session of t
+                    repeat with tgt in titleTargets
+                        if sName is (tgt as string) then
+                            set matched to true
+                            exit repeat
+                        end if
+                    end repeat
+                end try
+            end if
+            if matched then set end of toClose to t
         end repeat
         repeat with t in toClose
             try
@@ -530,6 +590,7 @@ def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, ef
     cmd = (
         f'cd "{safe_proj}" && '
         f'export ORCHESTRATOR_RUN_ID={dispatch_id} && '
+        f'{_setuservar_printf("orch_id", str(dispatch_id))}'
         f'printf "\\033]0;{safe_title}\\007" && '
         f'exec "$HOME/.orchestrator/bin/run.sh"'
     )
