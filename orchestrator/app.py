@@ -1400,3 +1400,92 @@ async def view_transcript(dispatch_id: int):
         f"{truncated_note}"
         f"<pre style='white-space:pre-wrap'>{safe}</pre></body></html>"
     )
+
+
+# ─── F8: Fusion settings (registry + preset management) ──────────────────────
+
+def _settings_ctx(err: str = "", ok: str = "") -> dict:
+    """Read-model for the Settings page. Surfaces the EFFECTIVE registry
+    (seeds merged with config.json) + presets + availability. Crucially it
+    NEVER exposes an api_key — only a derived `has_key` boolean (whether a key
+    resolves), the way active_providers() does for the dispatch form."""
+    fcfg = config.fusion_config()
+    active = config.active_providers()
+    providers = []
+    for name, prov in fcfg["providers"].items():
+        providers.append({
+            "name": name,
+            "model": prov.get("model", ""),
+            "script": prov.get("script", ""),
+            "key_env": prov.get("key_env", ""),
+            "price_in": prov.get("price_in", 0),
+            "price_out": prov.get("price_out", 0),
+            "enabled": prov.get("enabled", True) is not False,
+            "kind": prov.get("kind", ""),
+            "active": name in active,                         # keyed + enabled
+            "has_key": bool(config.get_provider_key(name)),   # key resolves (never the key)
+        })
+    presets = fcfg["presets"]
+    return {
+        "fusion_available": config.is_fusion_available(),
+        "claude_cli_available": config.claude_cli_available(),
+        "preset": fcfg.get("preset"),
+        "presets": presets,
+        "preset_names": list(presets.keys()),
+        "providers": providers,
+        "active_count": len(active),
+        "err": err, "ok": ok,
+    }
+
+
+def _settings_redirect(ok: str = "", err: str = "") -> RedirectResponse:
+    q = f"?ok={quote(ok)}" if ok else (f"?err={quote(err)}" if err else "")
+    return RedirectResponse(f"/settings{q}", status_code=303)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def view_settings(request: Request, err: str = "", ok: str = ""):
+    return templates.TemplateResponse(request, "settings.html", _settings_ctx(err=err, ok=ok))
+
+
+@app.post("/settings/preset")
+async def settings_set_preset(preset: str = Form(...)):
+    try:
+        config.set_preset(preset)
+        return _settings_redirect(ok=f"preset → {preset}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
+
+
+@app.post("/settings/provider")
+async def settings_upsert_provider(
+    name: str = Form(...), script: str = Form(""), key_env: str = Form(""),
+    model: str = Form(""), price_in: float = Form(0.0), price_out: float = Form(0.0),
+    enabled: str = Form("true"),
+):
+    try:
+        config.upsert_provider(
+            name, script=script, key_env=key_env, model=model,
+            price_in=price_in, price_out=price_out,
+            enabled=enabled.lower() in ("1", "true", "yes", "on"))
+        return _settings_redirect(ok=f"saved {name}")
+    except (config.ConfigWriteError, ValueError) as e:
+        return _settings_redirect(err=str(e))
+
+
+@app.post("/settings/provider/{name}/enabled")
+async def settings_provider_enabled(name: str, enabled: str = Form("true")):
+    try:
+        config.set_provider_enabled(name, enabled.lower() in ("1", "true", "yes", "on"))
+        return _settings_redirect(ok=f"{name} {'enabled' if enabled else 'disabled'}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
+
+
+@app.post("/settings/provider/{name}/remove")
+async def settings_provider_remove(name: str):
+    try:
+        config.remove_provider(name)
+        return _settings_redirect(ok=f"removed {name}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
