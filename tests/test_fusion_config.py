@@ -49,6 +49,13 @@ class _IsolatedConfig(unittest.TestCase):
         config.CONFIG_PATH = self.tmp / "config.json"
         # Snapshot + remove provider key env vars for a deterministic baseline.
         self._env_backup = {k: os.environ.pop(k, None) for k in KEY_ENVS}
+        # The host may have the `claude` CLI installed, which post-F9 ALONE makes
+        # is_fusion_available() true (a pure Claude-seat panel needs no key). These
+        # tests verify the EXTERNAL-provider gating (active_providers + the >=2
+        # rule), so disable the local CLI seat for a host-independent baseline.
+        cli_patch = mock.patch.object(config, "claude_cli_available", return_value=False)
+        cli_patch.start()
+        self.addCleanup(cli_patch.stop)
 
     def tearDown(self):
         config.CONFIG_PATH = self._orig_config_path

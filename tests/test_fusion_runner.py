@@ -161,7 +161,7 @@ class TestRunFusionJson(unittest.TestCase):
         with self._env(active, panel=panel) as (rp, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp")
         self.assertFalse(run.ok)
-        self.assertIn("only 1 provider", run.error)
+        self.assertIn("only 1 seat", run.error)        # F9 wording: "seat(s)", not "provider(s)"
         self.assertIn("boom", run.error)
         rcj.assert_not_called()
 
