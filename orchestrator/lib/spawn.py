@@ -15,10 +15,19 @@ import json
 import os
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 from orchestrator.lib.db import DATA_DIR
+
+# Serializes iTerm2 tab CREATION across threads. Tab spawns go through
+# osascript / Apple Events; firing several at once (e.g. a Fusion panel of N
+# Claude Code seats, each its own brain tab, plus the fusion tab) can race on
+# "current window" and the focus save/restore. The osascript call is fast (well
+# under a second), so serializing only the spawn moment costs ~nothing while the
+# long part — polling each tab to completion — still runs fully in parallel.
+_TAB_SPAWN_LOCK = threading.Lock()
 
 TASKS_DIR = DATA_DIR / "tasks"
 PIDS_DIR = DATA_DIR / "pids"
@@ -374,7 +383,8 @@ def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str 
 
     script = _spawn_tab_script(safe_title, apple_cmd)
     try:
-        _osascript(script)
+        with _TAB_SPAWN_LOCK:
+            _osascript(script)
     except Exception:
         # Clean up the orphan sidecar files so we don't leak files on failure.
         for f in (task_file, effort_file, TASKS_DIR / f"{dispatch_id}.model"):
@@ -602,7 +612,8 @@ def spawn_iterm2_resume(project_path: str, session_id: str, dispatch_id: int, ef
     apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
     script = _spawn_tab_script(safe_title, apple_cmd)
     try:
-        _osascript(script)
+        with _TAB_SPAWN_LOCK:
+            _osascript(script)
     except Exception:
         for f in (resume_file, effort_file, TASKS_DIR / f"{dispatch_id}.model"):
             try:
@@ -809,7 +820,8 @@ def spawn_brain_tab(brain_id: str, prompt: str, cwd: str,
 
     script = _spawn_tab_script(safe_title, apple_cmd)
     try:
-        _osascript(script)
+        with _TAB_SPAWN_LOCK:
+            _osascript(script)
     except Exception:
         cleanup_brain_files(brain_id)
         raise
@@ -883,7 +895,8 @@ def spawn_fusion_tab(fusion_id: str, body: dict, cwd: str) -> None:
 
     script = _spawn_tab_script(safe_title, apple_cmd)
     try:
-        _osascript(script)
+        with _TAB_SPAWN_LOCK:
+            _osascript(script)
     except Exception:
         cleanup_fusion_files(fusion_id)
         raise
