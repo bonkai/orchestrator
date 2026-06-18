@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+  <main style="grid-column: 1 / -1;">
+    <div class="page-head">
+      <a href="/">← back</a>
+      <h2>fusion settings</h2>
+      {% if fusion_available %}
+        <span class="badge badge-completed">available</span>
+      {% else %}
+        <span class="badge badge-failed">unavailable</span>
+      {% endif %}
+      <span class="muted">{{ active_count }} active provider{{ '' if active_count == 1 else 's' }}
+        · claude CLI {{ 'present' if claude_cli_available else 'absent' }}</span>
+    </div>
+
+    {% if ok %}<div class="pane" style="border-color:#5ed39a;"><strong style="color:#5ed39a;">✓</strong> {{ ok }}</div>{% endif %}
+    {% if err %}<div class="pane" style="border-color:#f0676f;"><strong style="color:#f0676f;">✗</strong> {{ err }}</div>{% endif %}
+
+    <div class="pane reveal">
+      <p class="muted" style="margin-top:0; font-size:12px;">
+        Edit the Fusion registry + presets here. <strong>API keys are never shown or edited
+        in the browser</strong> — paste them directly into <code>~/.orchestrator/config.json</code>
+        (chmod 600). Changes here take effect on the next fusion call — no restart needed.
+      </p>
+    </div>
+
+    <!-- ── Preset ─────────────────────────────────────────────────────── -->
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">default preset</h3>
+      <form method="post" action="/settings/preset" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+        <select name="preset">
+          {% for p in preset_names %}
+            <option value="{{ p }}" {% if p == preset %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="primary small">set preset</button>
+        <span class="muted" style="font-size:12px;">fires when a fusion send doesn't pick its own panel</span>
+      </form>
+      <div style="margin-top:0.6rem;">
+        {% for name, seats in presets.items() %}
+          <div style="font-size:12px; margin:0.15rem 0;">
+            <code>{{ name }}</code>
+            {% if name == preset %}<span class="badge badge-pending" style="font-size:9px;">default</span>{% endif %}
+            <span class="muted">→ {{ seats | join(', ') }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ── Registered providers ──────────────────────────────────────── -->
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">registered providers</h3>
+      <table style="font-size:12px; width:100%;">
+        <thead><tr>
+          <th style="text-align:left;">name</th><th style="text-align:left;">model</th>
+          <th style="text-align:right;">$ in/out</th><th>key</th><th>enabled</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for p in providers %}
+          <tr>
+            <td>
+              {{ p.name }}
+              {% if p.active %}<span title="keyed + enabled → usable" style="color:#5ed39a;">●</span>{% endif %}
+            </td>
+            <td>
+              <form method="post" action="/settings/provider" style="display:flex; gap:0.25rem; align-items:center;">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="script" value="{{ p.script }}">
+                <input type="hidden" name="key_env" value="{{ p.key_env }}">
+                <input type="hidden" name="enabled" value="{{ 'true' if p.enabled else 'false' }}">
+                <input type="text" name="model" value="{{ p.model }}" size="18" style="font-size:11px;">
+                <input type="number" step="0.01" name="price_in" value="{{ p.price_in }}" size="4" style="width:54px; font-size:11px;" title="$/M input">
+                <input type="number" step="0.01" name="price_out" value="{{ p.price_out }}" size="4" style="width:54px; font-size:11px;" title="$/M output">
+                <button type="submit" class="secondary small" title="save model + prices">save</button>
+              </form>
+            </td>
+            <td style="text-align:right;" class="muted">{{ p.price_in }}/{{ p.price_out }}</td>
+            <td style="text-align:center;">
+              {% if p.kind == 'claude_cli' %}<span class="muted" title="local CLI seat — no key">n/a</span>
+              {% elif p.has_key %}<span style="color:#5ed39a;" title="a key resolves (env or config.json)">set ✓</span>
+              {% else %}<span class="muted" title="no key — paste one into config.json">—</span>{% endif %}
+            </td>
+            <td style="text-align:center;">
+              <form method="post" action="/settings/provider/{{ p.name }}/enabled" style="display:inline;">
+                <input type="hidden" name="enabled" value="{{ 'false' if p.enabled else 'true' }}">
+                <button type="submit" class="link small" title="toggle enabled">
+                  {{ 'on' if p.enabled else 'off' }}</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="/settings/provider/{{ p.name }}/remove" style="display:inline;"
+                    onsubmit="return confirm('Remove provider {{ p.name }} from config.json? (its key, if any, is dropped)');">
+                <button type="submit" class="danger small">remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:11px; margin-top:0.4rem;">
+        ● = active (key resolves + enabled). Editing the model/prices saves to <code>config.json</code>;
+        the script + key_env stay as registered (a new lab = drop a <code>providers/&lt;name&gt;.py</code> script + add it below).
+      </p>
+    </div>
+
+    <!-- ── Add a provider ────────────────────────────────────────────── -->
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">add / register a provider</h3>
+      <form method="post" action="/settings/provider"
+            style="display:grid; grid-template-columns: repeat(2, 1fr); gap:0.5rem; max-width:640px;">
+        <label style="font-size:12px;">name
+          <input type="text" name="name" placeholder="moonshot" required style="width:100%;"></label>
+        <label style="font-size:12px;">model id
+          <input type="text" name="model" placeholder="kimi-k2" style="width:100%;"></label>
+        <label style="font-size:12px;">script
+          <input type="text" name="script" placeholder="providers/moonshot.py" style="width:100%;"></label>
+        <label style="font-size:12px;">key env var
+          <input type="text" name="key_env" placeholder="MOONSHOT_API_KEY" style="width:100%;"></label>
+        <label style="font-size:12px;">$/M input
+          <input type="number" step="0.01" name="price_in" value="0" style="width:100%;"></label>
+        <label style="font-size:12px;">$/M output
+          <input type="number" step="0.01" name="price_out" value="0" style="width:100%;"></label>
+        <div style="grid-column: 1 / -1;">
+          <button type="submit" class="primary small">add provider</button>
+          <span class="muted" style="font-size:11px;">then paste its key into <code>config.json</code> and write its provider script.</span>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}
