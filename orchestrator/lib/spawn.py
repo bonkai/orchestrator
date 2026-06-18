@@ -10,6 +10,7 @@ Strategy:
 """
 
 import asyncio
+import base64
 import json
 import os
 import signal
@@ -326,6 +327,19 @@ if frontApp is not "" then
     end try
 end if
 '''
+
+
+def _setuservar_printf(name: str, value: str) -> str:
+    """A shell `printf` (with trailing ` && `) that sets an iTerm2 session user
+    variable `user.<name>` via the OSC 1337 SetUserVar escape (value base64-
+    encoded, as iTerm requires). We tag each tab with `user.orch_id` so the
+    close path can find it by a STABLE id even after the running program
+    (claude) overwrites the tab TITLE — which makes `name`-based matching
+    unreliable. Read back in AppleScript via `variable named "user.<name>"`.
+    The doubled backslashes survive the later cmd->AppleScript escaping in the
+    spawn functions, exactly like the adjacent `\\033]0;` title printf."""
+    b64 = base64.b64encode(value.encode()).decode()
+    return f'printf "\\033]1337;SetUserVar={name}={b64}\\007" && '
 
 
 def spawn_iterm2(project_path: str, dispatch_id: int, task: str, tab_title: str | None = None, effort: str = "max", model: str = "") -> None:
