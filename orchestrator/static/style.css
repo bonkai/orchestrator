@@ -405,6 +405,33 @@ main { min-width: 0; }
 /* push the two send buttons to the right, keep them grouped */
 .dispatch-controls #btn-send-raw { margin-left: auto; }
 
+/* fusion (multi-model) toggle + key-gated provider picker */
+.dispatch-controls .fusion-toggle { cursor: pointer; }
+.dispatch-controls .fusion-toggle input[disabled] { cursor: not-allowed; }
+.fusion-extra { margin-top: 0.5rem; }
+.fusion-hint { display: block; font-size: 11px; }
+.fusion-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+.fusion-prov {
+  color: var(--text);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.fusion-prov .fusion-prov-name { font-weight: 600; }
+.fusion-prov.inactive { opacity: 0.5; cursor: not-allowed; }
+.fusion-prov.inactive input { cursor: not-allowed; }
+
 /* drop zone */
 .drop-zone {
   border: 1px dashed var(--border-strong);

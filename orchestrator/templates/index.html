@@ -377,7 +377,10 @@
           statusEl.style.color = '#67e8f9';
           statusEl.style.fontSize = '13px';
           statusEl.innerHTML = '<span class="spinner"></span> Queued — ' +
-            (rewrite ? 'rewriting then dispatching (~5–15s). ' : 'dispatching. ') +
+            (rewrite
+              ? (fusionOn ? 'rewriting (multi-model) then dispatching (~15–40s). '
+                          : 'rewriting then dispatching (~5–15s). ')
+              : 'dispatching. ') +
             'Safe to leave this tab; the runs panel below will update when it’s ready.';
 
           var observer = null, watchdog = null, settled = false;
