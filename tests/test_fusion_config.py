@@ -27,6 +27,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Import the in-repo orchestrator (not any installed version).
 REPO = Path(__file__).resolve().parent.parent
