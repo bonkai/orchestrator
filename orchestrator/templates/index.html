@@ -89,9 +89,34 @@
               <option value="haiku">haiku 4.5</option>
             </select>
           </label>
+          <label class="fusion-toggle" title="multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes">
+            <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
+            fusion (multi-model) ⚡
+          </label>
           <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
           <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
           <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+        </div>
+        <div class="fusion-extra">
+          {% if fusion_available %}
+          <span class="muted fusion-hint">multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes</span>
+          {% else %}
+          <span class="muted fusion-hint">Configure ≥2 providers’ keys in <code>~/.orchestrator/config.json</code> to enable.</span>
+          {% endif %}
+          <div id="fusion-panel" class="fusion-panel" style="display:none;">
+            {% for p in fusion_providers %}
+            <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
+                   title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
+              <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
+                     {% if not p.active %}disabled{% endif %}>
+              <span class="fusion-prov-name">{{ p.name }}</span>
+              <span class="muted">{{ p.model }}</span>
+              {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
+            </label>
+            {% else %}
+            <span class="muted">No providers registered.</span>
+            {% endfor %}
+          </div>
         </div>
         <div id="submit-status" class="muted" style="display:none; font-size: 12px; margin-top: 0.5rem;"></div>
       </form>

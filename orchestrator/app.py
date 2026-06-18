@@ -80,11 +80,29 @@ def _view_ctx() -> dict:
     open_ids = {t["project_id"] for t in tabs}
     all_projects = db.list_projects()
     saved = [p for p in all_projects if p["id"] not in open_ids]
+    # F4.2/F4.4: Fusion dispatch-form picker data. active_providers() are the
+    # keyed+enabled seats (checkable in the UI); every other registry entry is
+    # still listed but greyed-out ("no API key set"). fusion_available mirrors
+    # config.is_fusion_available() but is derived from the SAME `active` snapshot
+    # so the checkbox-enabled state and the row list can never disagree.
+    # fusion_default_panel seeds the picker's checked set from the configured
+    # preset's active members (the JS uses it only when nothing is saved yet).
+    fcfg = config.fusion_config()
+    active = config.active_providers()
+    fusion_providers = [
+        {"name": name, "model": prov.get("model", ""), "active": name in active}
+        for name, prov in fcfg["providers"].items()
+    ]
+    fusion_default_panel = [n for n in fcfg["presets"].get(fcfg.get("preset"), [])
+                            if n in active]
     return {
         "tabs": tabs,
         "saved_projects": saved,
         "fmt_duration": _fmt_duration,
         "fmt_rel": _fmt_rel,
+        "fusion_providers": fusion_providers,
+        "fusion_available": len(active) >= 2,
+        "fusion_default_panel": fusion_default_panel,
     }
 
 
