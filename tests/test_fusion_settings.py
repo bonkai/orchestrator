@@ -19,11 +19,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from orchestrator.lib import config
+from orchestrator import app as app_module
 
 
 class _IsolatedConfig(unittest.TestCase):
@@ -143,6 +145,47 @@ class TestCorruptionGuard(_IsolatedConfig):
         config.upsert_provider("xai", script="providers/xai.py", key_env="XAI_API_KEY",
                                model="grok-4", price_in=1.25, price_out=2.5)
         self.assertEqual(self._read()["fusion"]["providers"]["glm"]["api_key"], "KEEP-ME")
+
+
+class TestSettingsReadModel(unittest.TestCase):
+    """app._settings_ctx() must surface the registry WITHOUT ever leaking a key —
+    only a derived has_key boolean (like active_providers does for the form)."""
+
+    FCFG = {"preset": "budget", "timeout_s": 300,
+            "providers": {
+                "glm": {"model": "glm-5.2", "api_key": "SECRET-GLM",
+                        "script": "providers/glm.py", "key_env": "ZAI_API_KEY",
+                        "price_in": 0, "price_out": 0},
+                "deepseek": {"model": "deepseek-chat", "api_key": "",
+                             "script": "providers/deepseek.py",
+                             "key_env": "DEEPSEEK_API_KEY", "price_in": 0.44, "price_out": 0.87},
+            },
+            "presets": {"budget": ["glm", "deepseek"]}}
+
+    def _ctx(self):
+        with mock.patch.object(app_module.config, "fusion_config", return_value=self.FCFG), \
+                mock.patch.object(app_module.config, "active_providers",
+                                  return_value={"glm": {}}), \
+                mock.patch.object(app_module.config, "get_provider_key",
+                                  side_effect=lambda n: "SECRET-GLM" if n == "glm" else None), \
+                mock.patch.object(app_module.config, "is_fusion_available", return_value=True), \
+                mock.patch.object(app_module.config, "claude_cli_available", return_value=True):
+            return app_module._settings_ctx(ok="saved")
+
+    def test_never_leaks_api_key(self):
+        ctx = self._ctx()
+        for p in ctx["providers"]:
+            self.assertNotIn("api_key", p)
+
+    def test_has_key_and_active_derived(self):
+        ctx = self._ctx()
+        by = {p["name"]: p for p in ctx["providers"]}
+        self.assertTrue(by["glm"]["has_key"])
+        self.assertTrue(by["glm"]["active"])
+        self.assertFalse(by["deepseek"]["has_key"])      # empty key → no key resolves
+        self.assertFalse(by["deepseek"]["active"])
+        self.assertEqual(ctx["preset"], "budget")
+        self.assertEqual(ctx["active_count"], 1)
 
 
 if __name__ == "__main__":
