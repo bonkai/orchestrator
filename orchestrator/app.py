@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from orchestrator.lib import attachments as attachments_mod
 from orchestrator.lib import bundle as bundle_mod
-from orchestrator.lib import config, db, edits as edits_mod, embeddings, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
+from orchestrator.lib import config, db, edits as edits_mod, embeddings, fusion as fusion_mod, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
 
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -620,7 +620,7 @@ def _fusion_panel_breakdown(result) -> list[dict]:
     return out
 
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
@@ -734,16 +734,50 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
         print(f"[orchestrator] /send created failed dispatch #{dispatch_id} (rewrite failed)")
         return
 
+    # F7: optional multi-model ENRICHMENT — analyze the (possibly rewritten) task
+    # with a panel and APPEND a "## Multi-model analysis" block to the executor's
+    # prompt. This is SEPARATE from the rewrite (which AUTHORS the prompt); here
+    # the panel only informs. A failure must NEVER abort the dispatch — on any
+    # shortfall we dispatch the un-enriched prompt and record fusion_skipped.
+    fusion_event: dict | None = None
+    if do_enrich:
+        try:
+            loop = asyncio.get_running_loop()
+            fres = await loop.run_in_executor(
+                None, fusion_mod.enrich, final_task, proj["path"], panel)
+            if fres.ok and fres.enrichment_md:
+                final_task = final_task + "\n\n" + fres.enrichment_md
+                rewrite_cost += fres.cost_usd                    # add to dispatch spend
+                rewrite_fused = rewrite_fused or bool(fres.panel_models)
+                fusion_event = {
+                    "stage": "fusion_ok",
+                    "cost_usd": round(fres.cost_usd, 4),
+                    "panel_models": fres.panel_models,
+                    "analysis": fres.analysis,
+                }
+            else:
+                fusion_event = {
+                    "stage": "fusion_skipped",
+                    "reason": fres.error or "no analysis produced",
+                    "cost_usd": round(fres.cost_usd, 4),
+                }
+                print(f"[orchestrator] /send enrich skipped: {fres.error}")
+        except Exception as e:
+            fusion_event = {"stage": "fusion_skipped", "reason": f"exception: {e}"}
+            print(f"[orchestrator] /send enrich crashed (dispatching un-enriched): {e}")
+
     dispatch_id, err = await _run_dispatch(project_id, final_task, wall_cap_s, effort, model)
     if err:
         print(f"[orchestrator] /send dispatch failed: {err}")
         return
-    # F5: record the rewrite spend on the dispatch row; complete_dispatch (and the
-    # kill/pause/orphan writers) copy it onto the outcome row at completion.
-    if do_rewrite:
+    # F5: record the rewrite (+ enrich) spend on the dispatch row; complete_dispatch
+    # (and the kill/pause/orphan writers) copy it onto the outcome row at completion.
+    if do_rewrite or do_enrich:
         db.set_dispatch_cost(dispatch_id, rewrite_cost, fused=rewrite_fused)
     if rewrite_event:
         db.record_event(dispatch_id, "stage", rewrite_event)
+    if fusion_event:
+        db.record_event(dispatch_id, "stage", fusion_event)
 
 
 @app.post("/send")
@@ -757,6 +791,7 @@ async def send(
     fusion: str = Form("false"),
     fusion_panel: str = Form(""),
     fusion_seats: str = Form(""),
+    fusion_enrich: str = Form("false"),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
