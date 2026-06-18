@@ -71,8 +71,10 @@ class TestEnrich(unittest.TestCase):
                                return_value=_judge(json.dumps(ANALYSIS))) as rfj:
             fusion.enrich(big, "/proj")
         sent = rfj.call_args.kwargs["prompt"]
-        # The task slice fed to the panel is bounded by MAX_INPUT_CHARS.
-        self.assertLessEqual(sent.count("x"), fusion.MAX_INPUT_CHARS)
+        # The contiguous task slice fed to the panel is bounded by MAX_INPUT_CHARS
+        # (the template adds a couple of stray 'x's in prose, so count the run).
+        self.assertIn("x" * fusion.MAX_INPUT_CHARS, sent)
+        self.assertNotIn("x" * (fusion.MAX_INPUT_CHARS + 1), sent)
 
     def test_panel_unavailable_returns_not_ok(self):
         with mock.patch.object(claude_runner, "run_fusion_json",
