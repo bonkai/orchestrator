@@ -314,7 +314,7 @@ disagreement among models.** Everything routine stays solo.
 |-------|-------|-------------|--------|
 | **F0** | Config & key mgmt | `config.py` (registry + per-provider keys + presets) + idempotent `install.sh` template | ✅ |
 | **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ☐ |
-| **F2** | Rewriter integration | rewriter routes through fusion when toggled | ☐ |
+| **F2** | Rewriter integration | rewriter routes through fusion when toggled | ✅ |
 | **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ☐ |
 | **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ☐ |
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ☐ |
