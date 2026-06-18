@@ -321,6 +321,7 @@ disagreement among models.** Everything routine stays solo.
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
 | **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
+| **F9** (opt) | Anthropic CLI panel seats | effort-differentiated local `claude` seats — **no API, $0, no egress**; awaiting confirm | ☐ *(design only)* |
 
 **F0–F5 deliver a working, shippable on/off Fusion toggle.** Build strictly in order;
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
