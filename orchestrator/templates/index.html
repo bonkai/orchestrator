@@ -89,7 +89,7 @@
               <option value="haiku">haiku 4.5</option>
             </select>
           </label>
-          <label class="fusion-toggle" title="multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes">
+          <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
             <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
             fusion (multi-model) ⚡
           </label>
@@ -99,23 +99,36 @@
         </div>
         <div class="fusion-extra">
           {% if fusion_available %}
-          <span class="muted fusion-hint">multi-model panel — costs API tokens at each provider; best for architecture / research / high-stakes</span>
+          <span class="muted fusion-hint">multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.</span>
           {% else %}
-          <span class="muted fusion-hint">Configure ≥2 providers’ keys in <code>~/.orchestrator/config.json</code> to enable.</span>
+          <span class="muted fusion-hint">Install the <code>claude</code> CLI (or configure ≥2 provider keys) to enable.</span>
           {% endif %}
           <div id="fusion-panel" class="fusion-panel" style="display:none;">
-            {% for p in fusion_providers %}
-            <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
-                   title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
-              <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
-                     {% if not p.active %}disabled{% endif %}>
-              <span class="fusion-prov-name">{{ p.name }}</span>
-              <span class="muted">{{ p.model }}</span>
-              {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
-            </label>
-            {% else %}
-            <span class="muted">No providers registered.</span>
-            {% endfor %}
+            <div class="fusion-section" style="margin:0.3rem 0;">
+              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+                Claude Code seats <span class="muted">— local <code>claude</code> CLI · no API · $0 · add as many as you like</span>
+              </div>
+              <div id="claude-seats" class="claude-seats"></div>
+              <button type="button" id="add-claude-seat" class="secondary small" style="margin-top:0.25rem;">+ add Claude seat</button>
+            </div>
+            <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
+              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+                Cross-lab providers <span class="muted">— external API · costs tokens · key-gated</span>
+              </div>
+              {% for p in fusion_providers %}
+              <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
+                     title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
+                <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
+                       {% if not p.active %}disabled{% endif %}>
+                <span class="fusion-prov-name">{{ p.name }}</span>
+                <span class="muted">{{ p.model }}</span>
+                {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
+              </label>
+              {% else %}
+              <span class="muted">No external providers registered.</span>
+              {% endfor %}
+            </div>
+            <div id="fusion-count" class="muted fusion-count" style="font-size:12px; margin-top:0.35rem;"></div>
           </div>
         </div>
         <div id="submit-status" class="muted" style="display:none; font-size: 12px; margin-top: 0.5rem;"></div>
