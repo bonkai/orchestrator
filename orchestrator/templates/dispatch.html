@@ -90,6 +90,40 @@
     </div>
     {% endif %}
 
+    {% if enrichment %}
+    <div class="pane reveal">
+      <details {% if enrichment.stage == 'fusion_ok' %}open{% endif %}>
+        <summary style="cursor:pointer; font-weight:600;">
+          multi-model analysis ⚡
+          {% if enrichment.stage == 'fusion_skipped' %}
+            <span class="badge badge-failed" style="font-size:10px;">skipped</span>
+          {% else %}
+            <span class="muted" style="font-weight:normal; font-size:12px;">
+              · {{ (enrichment.panel_models or [])|join(', ') }} · ${{ '%.4f'|format(enrichment.cost_usd or 0) }}</span>
+          {% endif %}
+        </summary>
+        {% if enrichment.stage == 'fusion_skipped' %}
+          <p class="muted" style="font-size:12px; margin:0.5rem 0;">
+            enrichment skipped: {{ enrichment.reason }} (the task was dispatched un-enriched).</p>
+        {% elif enrichment.analysis %}
+          <div style="margin-top:0.5rem;">
+          {% set titles = {'consensus':'Consensus','contradictions':'Contradictions / trade-offs',
+                           'partial_coverage':'Partial coverage','unique_insights':'Unique insights',
+                           'blind_spots':'Blind spots / risks'} %}
+          {% for key in ['consensus','contradictions','partial_coverage','unique_insights','blind_spots'] %}
+            {% if enrichment.analysis.get(key) %}
+              <h4 style="margin:0.6rem 0 0.2rem; font-size:13px;">{{ titles[key] }}</h4>
+              <ul style="margin:0; font-size:12px;">
+                {% for it in enrichment.analysis[key] %}<li>{{ it }}</li>{% endfor %}
+              </ul>
+            {% endif %}
+          {% endfor %}
+          </div>
+        {% endif %}
+      </details>
+    </div>
+    {% endif %}
+
     <div class="pane reveal">
       <h3>live activity
         <span class="muted" style="font-weight: normal; font-size: 12px;">
