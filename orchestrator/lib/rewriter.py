@@ -50,6 +50,13 @@ class RewriteResult:
     raw_assistant_text: str = ""   # for debugging when parse fails
     bundle_chars: int = 0
     similar_hits: list = field(default_factory=list)  # retrieval.Hit objects, for UI display
+    # F5: fusion panel breakdown, populated only when a real multi-model panel
+    # authored this rewrite (run_brain_json went through run_fusion_json, not the
+    # plain/fallback claude call). fusion_panel is the per-seat answer list
+    # (name/model/ok/cost/tokens/text or error); empty ⇒ not a fused rewrite.
+    fusion_panel: list = field(default_factory=list)
+    fusion_preset: str = ""
+    fusion_seats: list = field(default_factory=list)  # readable seat labels
 
 
 def _coerce_list_of_str(v) -> list[str]:
@@ -96,10 +103,20 @@ def rewrite(user_task: str, project_path: str,
     run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion,
                                        panel=panel, model="opus", effort="high",
                                        label="rewriter")
+    # F5: capture the fusion panel breakdown BEFORE the auto-retry (which swaps
+    # `run` for a single-model claude call). A fused run carries the panel under
+    # run.raw["panel"]; a plain/fallback claude run does not, so this stays empty
+    # for non-fusion sends and for fusion sends that fell back to plain claude.
+    fmeta = run.raw if (isinstance(run.raw, dict) and "panel" in run.raw) else {}
+    f_panel = fmeta.get("panel") or []
+    f_preset = fmeta.get("preset") or ""
+    f_seats = fmeta.get("seats") or []
     if not run.ok:
         return RewriteResult(ok=False, error=run.error,
                              cost_usd=run.cost_usd, model=run.model,
-                             bundle_chars=pack.total_chars)
+                             bundle_chars=pack.total_chars,
+                             fusion_panel=f_panel, fusion_preset=f_preset,
+                             fusion_seats=f_seats)
 
     data = run.parsed_json
     rewritten = (str(data.get("rewritten_prompt", "")).strip()
@@ -146,6 +163,7 @@ def rewrite(user_task: str, project_path: str,
             raw_assistant_text=run.text[:2000],
             cost_usd=total_cost, duration_s=total_duration, model=run.model,
             bundle_chars=pack.total_chars,
+            fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
         )
 
     if not rewritten:
