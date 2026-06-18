@@ -313,7 +313,7 @@ disagreement among models.** Everything routine stays solo.
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
 | **F0** | Config & key mgmt | `config.py` (registry + per-provider keys + presets) + idempotent `install.sh` template | ✅ |
-| **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ◐ *(core+judge+tab done; only `gemini.py`+`glm.py` written — F1.2/F1.2b pending)* |
+| **F1** | Provider scripts + `claude_runner` | `providers/*.py` + `run_fusion_json()` (parallel scripts + `claude` judge) + `run_brain_json()` | ◐ *(code complete — all 6 provider scripts written + offline-tested; LIVE per-script paid verify still pending keys for deepseek/xai/minimax/qwen)* |
 | **F2** | Rewriter integration | rewriter routes through fusion when toggled | ✅ |
 | **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ✅ *(via F9 — `fusion_seats`)* |
 | **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ✅ *(via F9 — seat picker)* |
@@ -331,14 +331,16 @@ tasks.
 > panel (cross-lab providers + Claude Code seats), and the rewriter fans out → judges →
 > dispatches, falling back to the plain `claude` call when <2 seats are usable.
 > **Done:** F0, **F1 *core*** (`run_fusion_json`/`_panel_answer`/`_run_panel`/judge/fusion
-> tab/`run_brain_json`), F2, F3, F4, F9. **NOT done (still roadmap):**
-> - **F1.2 / F1.2b** — only `gemini.py` + `glm.py` provider scripts exist. `deepseek`,
->   `xai`, `minimax`, `qwen` are registered but **have no script**, so any preset naming
->   them silently drops those seats. Usable external providers today = **gemini, glm**
->   (the only two with both a script *and* a key). The default `budget` preset
->   (`deepseek, minimax, gemini-*`) therefore collapses to 1 real seat → falls back to a
->   plain rewrite; a custom panel of Claude seats + gemini + glm is the way to get a real
->   cross-lab panel right now.
+> tab/`run_brain_json`), **F1.2/F1.2b code** (all 6 provider scripts now written +
+> offline-tested 2026-06-18), F2, F3, F4, F9. **NOT done (still roadmap):**
+> - **F1.2 / F1.2b LIVE verify** — all six scripts (`deepseek`, `xai`, `qwen`, `minimax`,
+>   `gemini`, `glm`) now exist and pass offline `urllib`-mocked tests, but `deepseek`,
+>   `xai`, `minimax`, `qwen` still have **no key** in `config.json`, so their one-real-paid-call
+>   verify hasn't run and any preset naming them silently drops those seats. Usable external
+>   providers today are still = **gemini, glm** (the only two with both a script *and* a key).
+>   The default `budget` preset (`deepseek, minimax, gemini-*`) therefore still collapses to 1
+>   real seat → falls back to a plain rewrite until the four keys are added; a custom panel of
+>   Claude seats + gemini + glm is the way to get a real cross-lab panel right now.
 > - **F5** — no durable surface: per-seat panel answers + cost are shown live in the tabs
 >   but **not persisted** (dispatch detail shows nothing; cost doesn't reach `outcomes`),
 >   so a finished fusion run can't be inspected after the fact.
@@ -381,8 +383,8 @@ watchable `brain` tab). **No new Python deps** (stdlib `urllib`, `subprocess`,
 `concurrent.futures`). Reuse `_strip_fences` for the judge's JSON.
 
 - [x] **F1.1** Define the **normalized provider-script contract** (above) and write the first script, `providers/gemini.py` (stdlib `urllib`): read `<request.json>` (`{prompt, model, timeout_s}`), resolve the key (env → `config.json`), POST to DeepSeek, echo progress + answer to **stderr**, print normalized JSON to **stdout**; never raise. · *verify:* `python3 providers/deepseek.py req.json` prints normalized JSON with `ok=true`, token counts, and you SEE the answer on stderr; missing key → `ok=false`, no traceback.
-- [ ] **F1.2** ⟂ Write the **OpenAI-shaped** seed scripts by copying `deepseek.py` and swapping base URL + key env: `xai.py`, `glm.py`, `gemini.py` (its `/openai` path), `qwen.py` (DashScope `compatible-mode`). Each independently runnable, each emits the same normalized JSON. · *verify:* each script run by hand returns normalized JSON with token counts.
-- [ ] **F1.2b** ⟂ *(spike — do this one FIRST; it's the only real unknown)* `minimax.py` — MiniMax is **not** OpenAI-shaped. Confirm its live request/response (`/v1/text/chatcompletion_v2` or current), then map it to the **same normalized stdout**. **Timebox it**; if the API fights back, ship F1 without MiniMax (just drop it from the registry) and add it later — nothing else depends on it. · *verify:* `minimax.py` returns normalized JSON despite the native shape.
+- [x] **F1.2** ⟂ Write the **OpenAI-shaped** seed scripts by copying `deepseek.py` and swapping base URL + key env: `xai.py`, `glm.py`, `gemini.py` (its `/openai` path), `qwen.py` (DashScope `compatible-mode`). Each independently runnable, each emits the same normalized JSON. · *verify:* **code+offline done** — `deepseek.py`/`xai.py`/`qwen.py` written as exact mirrors of `gemini.py`/`glm.py`; endpoints re-verified against live docs 2026-06-18; `tests/test_fusion_providers.py` exercises request shape + parse + never-raise with `urllib` mocked. ⚠ **LIVE per-script run by hand (a real paid call) still pending** — deepseek/xai/qwen have **no key** in `config.json`.
+- [x] **F1.2b** ⟂ *(spike)* `minimax.py` — **resolved:** as of the 2026-06-18 docs MiniMax ALSO exposes a fully OpenAI-compatible `POST https://api.minimax.io/v1/chat/completions` (standard `messages`/roles, `choices[0].message.content`, OpenAI-shaped `usage`), so it no longer needs the bespoke `/v1/text/chatcompletion_v2` body/parser — it's just another copy of the OpenAI-shaped template. · *verify:* **code+offline done** (same test file). ⚠ **LIVE run pending** — `minimax` has **no key**.
 - [x] **F1.3** `claude_runner._panel_answer(name, prov, prompt, timeout)` — run `prov["script"]` as a subprocess with the request, parse the normalized JSON, compute `cost = (in×price_in + out×price_out)/1e6` from the registry. Never raises. · *verify:* returns `{ok, text, cost, …}` for one provider; a script that errors → `ok=False`, no raise.
 - [x] **F1.4** `_run_panel(prompt, panel, providers, timeout)` — run the preset's subset **in parallel** (`ThreadPoolExecutor` over `_panel_answer`). · *verify:* a 3-seat preset returns 3 answers; wall-clock ≈ slowest seat, not the sum.
 - [x] **F1.5** `_judge_prompt(orig, answers)` — **reuse the original prompt verbatim** (so its output JSON schema travels with it), then append the N panel answers + *"synthesize the single best response, in the exact same format."* **+** `run_fusion_json(..., judge_model="opus", judge_effort="high")` resolves preset/panel/timeout, runs the panel, then calls `run_claude_json(synthesis, cwd, model=judge_model, effort=judge_effort, label="fusion-judge")` — ⚠ **the model MUST be passed explicitly** (`run_claude_json` defaults to *sonnet*); sets `cost_usd = Σ panel cost`. · *verify:* `run_fusion_json("Should a single-writer app use SQLite WAL?")` → `ok=True`, `cost>0`, judge tab runs **Opus**; editing a registry `model` changes which models are billed. *(In-process subprocess fan-out for now; F1.7b puts the visible tab in front.)*
