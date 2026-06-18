@@ -83,14 +83,14 @@ OPENAI_OK = {
 def _run_main(mod, req, urlopen=None, key="test-key"):
     """Drive a provider's main() offline: stub _read_req + _key, patch urlopen,
     capture stdout, and return the parsed normalized JSON. Never lets main() see
-    the network or the real config.json."""
+    the network or the real config.json. `urlopen` is an Exception instance to
+    simulate a failure, or None for the canned OK response."""
+    urlopen_kw = ({"side_effect": urlopen} if urlopen is not None
+                  else {"return_value": _fake_resp(OPENAI_OK)})
     buf = io.StringIO()
     with mock.patch.object(mod, "_read_req", return_value=req), \
             mock.patch.object(mod, "_key", return_value=key), \
-            mock.patch.object(mod.urllib.request, "urlopen",
-                              **({"side_effect": urlopen} if callable(urlopen) and isinstance(urlopen, type)
-                                 else {"side_effect": urlopen} if urlopen is not None
-                                 else {"return_value": _fake_resp(OPENAI_OK)})), \
+            mock.patch.object(mod.urllib.request, "urlopen", **urlopen_kw), \
             redirect_stdout(buf):
         mod.main()
     return json.loads(buf.getvalue().strip())
