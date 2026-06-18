@@ -318,7 +318,7 @@ disagreement among models.** Everything routine stays solo.
 | **F3** | Pipeline wiring | thread `fusion` flag `/send` → `_send_in_background` | ✅ *(via F9 — `fusion_seats`)* |
 | **F4** | Toggle + model picker | on/off checkbox + key-gated model multiselect, localStorage, disabled-when-<2-providers | ✅ *(via F9 — seat picker)* |
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ✅ |
-| **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
+| **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ✅ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
 | **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
 | **F9** (opt) | Claude Code panel seats | per-dispatch picker seats (model+effort, duplicates) via local `claude` CLI — **no API, $0, no egress** | ✅ *(implemented)* |
@@ -593,11 +593,11 @@ uninstalled, it still returns a valid `ClaudeRun` via the in-process subprocess 
 - [x] **F5.2** Ensure the fused rewrite's `cost_usd` (panel sum) flows into the `outcomes` row. · ⚠ *plan pointer was wrong:* there was **no `cost_usd` on `outcomes`** (db.py:113 is `onboarding_runs`). Added `cost_usd`+`fused` to `dispatches` and `cost_usd` to `outcomes`, with an idempotent additive `_migrate()` (guarded `ALTER`s — safe on the existing real DB). `set_dispatch_cost()` stamps the dispatch at `/send`; **every** outcome writer (complete/kill/pause/orphan/failed_to_spawn) copies it forward via a subquery. *verify:* `test_fusion_cost` proves cost lands on the outcome for all five terminal paths + a legacy-DB upgrade.
 - [x] **F5.3** ⟂ a ⚡ badge on fused rows in `templates/_runs.html` (both the per-project and all-recent tables; driven by `dispatches.fused`, cost in the tooltip). · *verify:* fused runs are visually distinguishable.
 
-### Phase F6 — Summarizer + onboarding *(optional)*
-- [ ] **F6.1** ⟂ `summarizer.summarize(..., fusion=False)` → `run_brain_json(..., fusion=fusion)`. · *verify:* a summary can be produced via a fusion panel + judge.
-- [ ] **F6.2** ⟂ `onboarding.analyze(..., fusion=False)` → `run_brain_json(..., fusion=fusion)`. · *verify:* an onboarding run can use fusion.
+### Phase F6 — Summarizer + onboarding *(optional)* ✅ *(2026-06-18)*
+- [x] **F6.1** ⟂ `summarizer.summarize(..., fusion=False, panel=None)` → `run_brain_json(..., fusion=fusion, panel=panel)`. Tier kept DELIBERATELY low — sonnet/medium for the call AND a sonnet/medium judge (a distillation must not escalate to the Opus judge the rewriter uses). fusion=False is byte-for-byte the original single-claude path. · *verify:* `test_fusion_brain_calls` asserts the forwarded fusion/panel/tier/judge kwargs.
+- [x] **F6.2** ⟂ `onboarding.analyze(..., fusion=False, panel=None)` → `run_brain_json(...)`, same sonnet/medium tier + sonnet/medium judge. · *verify:* same test file.
 
-*(Lower priority — short sessions rarely justify panel cost, §7.)*
+*(Capable but default-OFF; no UI toggle wired — short sessions rarely justify panel cost, §7. A caller opts in by passing `fusion=True`.)*
 
 ### Phase F7 — Enrichment-block mode *(optional, advanced)*
 *Goal: optionally append a "multi-model analysis" block to the executor's prompt instead of replacing the rewrite. Build only once F1–F5 are solid.*
