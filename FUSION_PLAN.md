@@ -330,26 +330,22 @@ tasks.
 > **📍 Current status (2026-06-18).** Fusion runs end-to-end today: toggle it on, pick a
 > panel (cross-lab providers + Claude Code seats), and the rewriter fans out → judges →
 > dispatches, falling back to the plain `claude` call when <2 seats are usable.
-> **Done:** F0, **F1 *core*** (`run_fusion_json`/`_panel_answer`/`_run_panel`/judge/fusion
-> tab/`run_brain_json`), **F1.2/F1.2b code** (all 6 provider scripts now written +
-> offline-tested 2026-06-18), F2, F3, F4, F9. **NOT done (still roadmap):**
-> - **F1.2 / F1.2b LIVE verify** — all six scripts (`deepseek`, `xai`, `qwen`, `minimax`,
->   `gemini`, `glm`) now exist and pass offline `urllib`-mocked tests, but `deepseek`,
->   `xai`, `minimax`, `qwen` still have **no key** in `config.json`, so their one-real-paid-call
->   verify hasn't run and any preset naming them silently drops those seats. Usable external
->   providers today are still = **gemini, glm** (the only two with both a script *and* a key).
->   The default `budget` preset (`deepseek, minimax, gemini-*`) therefore still collapses to 1
->   real seat → falls back to a plain rewrite until the four keys are added; a custom panel of
->   Claude seats + gemini + glm is the way to get a real cross-lab panel right now.
-> - **F5** — no durable surface: per-seat panel answers + cost are shown live in the tabs
->   but **not persisted** (dispatch detail shows nothing; cost doesn't reach `outcomes`),
->   so a finished fusion run can't be inspected after the fact.
-> - **F6 / F7 / F8** — optional, unbuilt.
+> **Done (code + offline tests):** F0, **F1 *core*** (`run_fusion_json`/`_panel_answer`/
+> `_run_panel`/judge/fusion tab/`run_brain_json`), **F1.2/F1.2b** (all 6 provider scripts),
+> F2, F3, F4, **F5** (durable per-seat surface + cost into `outcomes`), **F6** (summarizer +
+> onboarding fusion-capable), **F7** (enrichment-block mode), **F8** (settings registry/preset
+> editor; F8.4 lens prompts deferred), F9. The whole suite is green — `python -m unittest` →
+> **285 ok, 4 skipped** (the skips need `httpx`, which isn't in the venv).
+> **NOT done (still roadmap):**
+> - **F1.2 / F1.2b LIVE verify** — all six scripts pass offline `urllib`-mocked tests, but
+>   `deepseek`, `xai`, `minimax`, `qwen` have **no key** in `config.json`, so their
+>   one-real-paid-call verify hasn't run and any preset naming them silently drops those seats.
+>   Usable external providers today = **gemini, glm** (script *and* key). A real cross-lab panel
+>   right now = **glm + gemini + Claude Code seats** (the keys actually present).
+> - **F8.4** — per-seat lens prompts (the §5 decorrelation refinement), deferred.
 >
-> **Next up:** add the four provider keys (deepseek/xai/minimax/qwen) to `config.json` and
-> run the one-paid-call-per-script F1.2/F1.2b LIVE verify; then **F5** (the observability
-> surface — the next incomplete *code* phase, needs no keys). Until then Fusion is a working
-> MVP, not complete.
+> **Next up:** add the four missing provider keys when available + run the paid F1.2/F1.2b
+> live verify; optionally F8.4. Everything else in F0–F9 is built.
 
 ### Pre-build checklist *(verified against the live code 2026-06-17 — read before F0)*
 - **Get ≥1 provider key before F1** (DeepSeek is cheapest). F0 needs no network, but
