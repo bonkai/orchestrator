@@ -372,13 +372,20 @@ def _coerce_list_of_str(v) -> list[str]:
 
 
 def analyze(project_path: str, prior_runs_context: str = "",
-            last_run_ts: int | None = None) -> OnboardingResult:
+            last_run_ts: int | None = None,
+            fusion: bool = False, panel: "list | None" = None) -> OnboardingResult:
     """Scan + call `claude` (visible iTerm2 tab) + parse → return OnboardingResult.
 
     `prior_runs_context` is a rendered summary of recent onboarding rounds.
     `last_run_ts` (Unix epoch) is the timestamp of the most recent prior run;
     when provided, a git-diff summary of changes since that run is injected
     into the analyzer prompt so re-runs focus on new/changed areas.
+
+    F6.2: with fusion=False this is byte-for-byte the original single-claude
+    (sonnet/medium) path. fusion=True routes the one brain call through a panel →
+    judge, degrading to that same single call when the panel is unavailable. The
+    tier stays DELIBERATELY low (sonnet/medium, judge included) — onboarding scans
+    of small projects rarely justify an Opus panel (§7).
     """
     root = Path(project_path).expanduser().resolve()
     if not root.is_dir():
@@ -400,7 +407,10 @@ def analyze(project_path: str, prior_runs_context: str = "",
         "git_changes": git_changes,
     })
 
-    run = claude_runner.run_claude_json(prompt=prompt, cwd=str(root), effort="medium", label="onboarding")
+    run = claude_runner.run_brain_json(
+        prompt=prompt, cwd=str(root), fusion=fusion, panel=panel,
+        model="sonnet", effort="medium", label="onboarding",
+        judge_model="sonnet", judge_effort="medium")
     if not run.ok:
         return OnboardingResult(ok=False, error=run.error,
                                 cost_usd=run.cost_usd, model=run.model, scan=scan)
