@@ -321,7 +321,7 @@ disagreement among models.** Everything routine stays solo.
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ☐ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ☐ |
 | **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ☐ |
-| **F9** (opt) | Anthropic CLI panel seats | effort-differentiated local `claude` seats — **no API, $0, no egress**; awaiting confirm | ☐ *(design only)* |
+| **F9** (opt) | Claude Code panel seats | per-dispatch picker seats (model+effort, duplicates) via local `claude` CLI — **no API, $0, no egress** | ✅ *(implemented)* |
 
 **F0–F5 deliver a working, shippable on/off Fusion toggle.** Build strictly in order;
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
@@ -593,7 +593,7 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
 - [ ] **F8.3** Registry editor — add/remove a provider (script, key_env, model, prices) and edit each seat's **model id** (free text — a live cross-provider model list would be N different endpoints, so editing the slug is simpler and sufficient); save to `config.json`. **Key fields stay file-only.** · *verify:* a brand-new provider/model appears and is selectable once its script exists.
 - [ ] **F8.4** ⟂ *(optional)* per-seat **lens prompts** (the §5 refinement): let each provider carry a prompt prefix ("find the risks" / "find the simplest path"), edited here and stored in the registry. *(The per-dispatch model pick is already delivered by F4 — no separate override task needed.)* · *verify:* a seat's lens prefix is applied on the next fusion call.
 
-### Phase F9 — Anthropic CLI panel seats *(design proposal — awaiting confirmation, no code yet)*
+### Phase F9 — Claude Code panel seats *(✅ implemented 2026-06-18)*
 
 > 🧭 **Three findings to confirm before any code (the headline of this phase):**
 > 1. **The API-vs-CLI tension — resolved one way only.** Panel seats today are provider
