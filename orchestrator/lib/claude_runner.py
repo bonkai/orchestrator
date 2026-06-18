@@ -553,28 +553,73 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     panel = panel or presets.get(preset) or config.FUSION_PRESETS_SEED["budget"]
     timeout_s = timeout_s or cfg.get("timeout_s") or config.DEFAULT_FUSION_TIMEOUT_S
 
-    # Keep only seats that are usable right now (key resolves AND enabled). This
-    # is what makes "fusion on but <2 keys" fall back instead of erroring.
+    # Normalize the (possibly mixed) panel into usable seats. Each entry is either
+    # an EXTERNAL provider — a registry NAME (str), fanned out via its provider
+    # script — or a LOCAL Claude Code seat (dict {"kind":"claude_cli","model",
+    # "effort"}) run through the `claude` CLI like the judge: visible tab,
+    # subscription, $0, NO Anthropic API. Duplicate Claude seats are allowed.
+    # External names are kept only if active (key resolves), so "fusion on but
+    # <2 usable seats" falls back instead of erroring.
     active = config.active_providers()
-    panel = [n for n in panel if n in active]
-    if len(panel) < 2:
+    claude_ok = config.claude_cli_available()
+    prov_names: list = []          # external providers (fan out via scripts)
+    claude_seats: list = []        # local claude CLI seats
+    seats_desc: list = []          # readable seat labels (raw / diagnostics)
+    for s in panel:
+        if isinstance(s, dict) and s.get("kind") == "claude_cli":
+            if not claude_ok:
+                continue
+            cs_model = (s.get("model") or "opus").strip()
+            cs_effort = (s.get("effort") or "high").strip()
+            claude_seats.append({"model": cs_model, "effort": cs_effort,
+                                 "name": f"{cs_model}-{cs_effort}"})
+            seats_desc.append(f"{cs_model}-{cs_effort} (cli)")
+        elif isinstance(s, str) and s in active:
+            prov_names.append(s)
+            seats_desc.append(s)
+    total = len(prov_names) + len(claude_seats)
+    if total < 2:
         return ClaudeRun(ok=False,
-                         error=f"fusion: need >=2 active panel providers, have {len(panel)}")
+                         error=f"fusion: need >=2 usable panel seats, have {total}")
 
-    spawn.ensure_fusion_providers()                    # materialize scripts (lazy)
-    # Prefer the watchable fusion tab; in-process is the no-iTerm2 fallback.
-    answers = _panel_answers(prompt, panel, providers, timeout_s, cwd=cwd or os.getcwd())
+    cwd_eff = cwd or os.getcwd()
+    if prov_names:
+        spawn.ensure_fusion_providers()                # materialize scripts (lazy)
+
+    # Fan out BOTH groups in parallel: external providers through the watchable
+    # fusion tab (in-process fallback if no iTerm2), each Claude seat as its own
+    # watchable brain tab. Wall-clock ~= slowest seat, not the sum. (iTerm2 tab
+    # CREATION is serialized by a lock in spawn.py so concurrent spawns don't
+    # race; only the spawn moment is serial — the polling overlaps.)
+    answers: list = []
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=(len(claude_seats) + (1 if prov_names else 0)) or 1) as ex:
+        prov_future = (ex.submit(_panel_answers, prompt, prov_names, providers,
+                                 timeout_s, cwd_eff) if prov_names else None)
+        claude_futures = [ex.submit(_anthropic_seat_answer, cs, prompt, cwd_eff)
+                          for cs in claude_seats]
+        if prov_future is not None:
+            try:
+                answers.extend(prov_future.result() or [])
+            except Exception as e:
+                print(f"[claude_runner] fusion provider group failed: {e}")
+        for fut in claude_futures:
+            try:
+                answers.append(fut.result())
+            except Exception as e:
+                print(f"[claude_runner] fusion claude seat failed: {e}")
+
     ok = [a for a in answers if a.get("ok")]
     if len(ok) < 2:
         errs = "; ".join(f"{a.get('name')}: {a.get('error')}"
                          for a in answers if not a.get("ok"))
         return ClaudeRun(ok=False,
-                         error=f"fusion panel: only {len(ok)} provider(s) answered ({errs})")
+                         error=f"fusion panel: only {len(ok)} seat(s) answered ({errs})")
 
-    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd or os.getcwd(),
+    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd_eff,
                             model=judge_model, effort=judge_effort, label="fusion-judge")
-    judge.cost_usd = sum(a["cost"] for a in ok)        # real out-of-pocket = panel only
-    judge.raw = {"panel": answers, "preset": preset, "panel_names": panel}
+    judge.cost_usd = sum(a.get("cost", 0.0) for a in ok)   # out-of-pocket = external seats only
+    judge.raw = {"panel": answers, "preset": preset, "seats": seats_desc}
     return judge
 
 

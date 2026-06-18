@@ -18,6 +18,13 @@ from orchestrator.lib import config, db, edits as edits_mod, embeddings, idle_no
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# Fusion Claude Code seats: the models / efforts the dispatch picker offers and
+# that /send validates a submitted panel against. Claude seats run via the local
+# `claude` CLI (NO Anthropic API), so any combination here is free and duplicates
+# are allowed. Efforts are the `claude --effort` choices (low…max).
+CLAUDE_SEAT_MODELS = ["opus", "sonnet", "haiku"]
+CLAUDE_SEAT_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -101,7 +108,10 @@ def _view_ctx() -> dict:
         "fmt_duration": _fmt_duration,
         "fmt_rel": _fmt_rel,
         "fusion_providers": fusion_providers,
-        "fusion_available": len(active) >= 2,
+        "fusion_available": config.is_fusion_available(),
+        "claude_cli_available": config.claude_cli_available(),
+        "claude_seat_models": CLAUDE_SEAT_MODELS,
+        "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
     }
 
@@ -686,6 +696,7 @@ async def send(
     model: str = Form(""),
     fusion: str = Form("false"),
     fusion_panel: str = Form(""),
+    fusion_seats: str = Form(""),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
@@ -702,15 +713,38 @@ async def send(
     wall_cap_s = max(60, min(21600, int(wall_cap_s)))  # ceiling: 6h (see _run_dispatch)
     do_rewrite = rewrite.lower() in ("1", "true", "yes", "on")
 
-    # F3.1: optional multi-model Fusion for the rewrite brain call. Validate the
-    # requested panel against providers whose key actually resolves right now,
-    # silently dropping any unkeyed/unknown name — so a stale UI selection can
-    # never force a provider we can't call. active_providers() reads config
-    # once; an empty panel lets run_fusion_json fall back to the configured
-    # preset. Threaded into _send_in_background; _run_dispatch needs no change.
+    # Optional multi-model Fusion for the rewrite brain call. The panel is a mixed
+    # list of seats: Claude Code seats (local `claude` CLI, model+effort, $0, NO
+    # Anthropic API) and external cross-lab providers (key-gated). The UI sends it
+    # as JSON in `fusion_seats`; we validate each seat — Claude seats against the
+    # model/effort whitelist, provider seats against active keys — dropping
+    # anything we can't honor so a stale UI selection can never force an unusable
+    # seat. (Legacy comma `fusion_panel` is still accepted as a fallback.) An
+    # empty panel lets run_fusion_json fall back to the configured preset.
+    import json as _json
     do_fusion = fusion.lower() in ("1", "true", "yes", "on")
     active = config.active_providers()
-    panel = [p for p in fusion_panel.split(",") if p in active]
+    panel: list = []
+    raw_seats = (fusion_seats or "").strip()
+    if raw_seats:
+        try:
+            decoded = _json.loads(raw_seats)
+        except (ValueError, TypeError):
+            decoded = []
+        for s in decoded if isinstance(decoded, list) else []:
+            if not isinstance(s, dict):
+                continue
+            if s.get("type") == "claude":
+                model = str(s.get("model", "")).strip()
+                effort = str(s.get("effort", "")).strip()
+                if model in CLAUDE_SEAT_MODELS and effort in CLAUDE_SEAT_EFFORTS:
+                    panel.append({"kind": "claude_cli", "model": model, "effort": effort})
+            elif s.get("type") == "provider":
+                name = str(s.get("name", "")).strip()
+                if name in active:
+                    panel.append(name)
+    else:
+        panel = [p for p in fusion_panel.split(",") if p in active]
     if do_fusion:
         print(f"[orchestrator] /send fusion=on, panel={panel or '(preset)'}")
 
