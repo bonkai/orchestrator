@@ -175,6 +175,7 @@ def rewrite(user_task: str, project_path: str,
             raw_assistant_text=run.text[:2000],
             cost_usd=total_cost, duration_s=total_duration, model=run.model,
             bundle_chars=pack.total_chars,
+            fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
         )
 
     # Parse proposed_edits — pre-validate each so the UI can show invalid
@@ -213,4 +214,5 @@ def rewrite(user_task: str, project_path: str,
         model=run.model,
         bundle_chars=pack.total_chars,
         similar_hits=hits,
+        fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
     )
