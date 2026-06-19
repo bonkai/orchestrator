@@ -320,14 +320,14 @@ disagreement among models.** Everything routine stays solo.
 | **F5** | Surface + cost | show panel breakdown + summed cost; cost in outcomes | ✅ |
 | **F6** (opt) | Summarizer + onboarding | same drop-in for the other two brain calls | ✅ |
 | **F7** (opt) | Enrichment-block mode | panel → analysis block appended to executor prompt | ✅ |
-| **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ✅ *(F8.4 lens prompts deferred)* |
+| **F8** (opt) | Settings UI (advanced) | edit the registry, manage presets, add new providers from the browser | ✅ *(incl. F8.4 per-seat lenses)* |
 | **F9** (opt) | Claude Code panel seats | per-dispatch picker seats (model+effort, duplicates) via local `claude` CLI — **no API, $0, no egress** | ✅ *(implemented)* |
 
 **F0–F5 deliver a working, shippable on/off Fusion toggle.** Build strictly in order;
 don't start a task until the previous one's verify passes. **⟂** marks order-independent
 tasks.
 
-> **📍 Current status (2026-06-18).** Fusion runs end-to-end today: toggle it on, pick a
+> **📍 Current status (2026-06-19).** Fusion runs end-to-end today: toggle it on, pick a
 > panel (cross-lab providers + Claude Code seats), and the rewriter fans out → judges →
 > dispatches, falling back to the plain `claude` call when <2 seats are usable.
 > **Done (code + offline tests):** F0, **F1 *core*** (`run_fusion_json`/`_panel_answer`/
