@@ -11,7 +11,8 @@ captures to <id>.json for the orchestrator to read back.
 
 Request (argv[1] → JSON file):
     {"prompt": "...", "timeout_s": 300, "panel": ["gemini", "gemini2"],
-     "providers": {"gemini": {"script": "providers/gemini.py", "model": "..."}}}
+     "providers": {"gemini": {"script": "providers/gemini.py", "model": "..."}},
+     "lenses": {"gemini": "<per-seat lens text>"}}   # optional (F8.4); absent → none
 
 Stdout (the ONLY thing printed to stdout):
     [{"name": "gemini", "ok": true, "text": "...", "model": "...",
@@ -24,6 +25,19 @@ import subprocess
 import sys
 
 BIN_DIR = os.path.expanduser("~/.orchestrator/bin")   # where providers/*.py live
+
+
+def _apply_lens(prompt, lens):
+    """F8.4: prepend a per-seat lens, keeping the original prompt verbatim and
+    LAST (so its output-format instructions still travel). Empty lens → unchanged.
+    ⚠ Kept textually identical to claude_runner._apply_lens so the watchable-tab
+    panel (this file) and the in-process fallback build the SAME lensed prompt."""
+    lens = (lens or "").strip()
+    if not lens:
+        return prompt
+    return ("Approach the task below through this specific lens — let it shape "
+            "what you emphasize, but still answer the task in full:\n"
+            + lens + "\n\n--- TASK ---\n" + prompt)
 
 
 def _run_one(name, prov, prompt, timeout_s):
@@ -53,12 +67,15 @@ def main(req_path):
     providers = req.get("providers", {})
     prompt = req.get("prompt", "")
     timeout_s = req.get("timeout_s", 300)
+    lenses = req.get("lenses", {}) or {}        # F8.4: per-seat lens text (optional)
 
     sys.stderr.write(f"fusion panel: {len(panel)} seat(s) — {', '.join(panel)}\n")
     sys.stderr.flush()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(panel))) as ex:
         answers = list(ex.map(
-            lambda n: _run_one(n, providers.get(n, {}), prompt, timeout_s), panel))
+            lambda n: _run_one(n, providers.get(n, {}),
+                               _apply_lens(prompt, lenses.get(n, "")), timeout_s),
+            panel))
 
     # The ONLY stdout write — captured by `tee` to <id>.json.
     print(json.dumps(answers))
