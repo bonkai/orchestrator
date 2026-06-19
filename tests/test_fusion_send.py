@@ -209,5 +209,82 @@ class TestSendInBackgroundForwarding(unittest.IsolatedAsyncioTestCase):
         rd.assert_awaited_once()
 
 
+# ─────────────── "one knob": UI model/effort drives the judge ───────────────
+
+class TestSendInBackgroundJudgeFromPicker(unittest.IsolatedAsyncioTestCase):
+    """The dispatch's UI model/effort picker also steers the Fusion judge:
+    _send_in_background passes judge_model/judge_effort positionally to
+    rewriter.rewrite (args[4]/args[5]) and as kwargs to fusion_mod.enrich.
+
+    Rules under test:
+      - explicit model → judge uses it verbatim; effort flows through.
+      - blank model ("default") → judge stays "opus" (no silent downgrade).
+      - out-of-range effort → judge falls back to "high".
+    Same mocking seams as TestSendInBackgroundForwarding."""
+
+    def _patches(self, rewrite_result, dispatch=(1, "")):
+        import contextlib
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": "/tmp/proj"}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        rw = es.enter_context(mock.patch.object(
+            app_module.rewriter, "rewrite", return_value=rewrite_result))
+        rd = es.enter_context(mock.patch.object(
+            app_module, "_run_dispatch", new_callable=mock.AsyncMock))
+        rd.return_value = dispatch
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        en = es.enter_context(mock.patch.object(app_module.fusion_mod, "enrich"))
+        return es, rw, en
+
+    @staticmethod
+    def _ok_result():
+        return RewriteResult(ok=True, rewritten_prompt="REWRITTEN",
+                             cost_usd=0.01, duration_s=2.0, model="opus",
+                             bundle_chars=123)
+
+    async def test_explicit_model_and_effort_reach_judge(self):
+        es, rw, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "max", "sonnet",
+                do_fusion=True, panel=["deepseek"])
+        args = rw.call_args.args
+        self.assertEqual(args[4], "sonnet")   # judge_model
+        self.assertEqual(args[5], "max")      # judge_effort
+
+    async def test_blank_model_keeps_judge_on_opus(self):
+        es, rw, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "high", "",     # model="" → "default"
+                do_fusion=True, panel=["deepseek"])
+        args = rw.call_args.args
+        self.assertEqual(args[4], "opus")     # no silent downgrade to sonnet
+        self.assertEqual(args[5], "high")
+
+    async def test_out_of_range_effort_falls_back_to_high(self):
+        es, rw, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "ludicrous", "opus",
+                do_fusion=True, panel=["deepseek"])
+        self.assertEqual(rw.call_args.args[5], "high")
+
+    async def test_enrich_judge_uses_same_picker_values(self):
+        # do_enrich path forwards judge_model/judge_effort as kwargs to enrich.
+        es, _, en = self._patches(self._ok_result())
+        en.return_value = mock.Mock(ok=False, error="panel unavailable",
+                                    cost_usd=0.0, enrichment_md="", panel_models=[])
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "xhigh", "haiku",
+                do_fusion=True, panel=["deepseek"], do_enrich=True)
+        en.assert_called_once()
+        self.assertEqual(en.call_args.kwargs["judge_model"], "haiku")
+        self.assertEqual(en.call_args.kwargs["judge_effort"], "xhigh")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
