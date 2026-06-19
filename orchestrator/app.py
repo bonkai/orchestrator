@@ -651,6 +651,16 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     rewrite_error = ""
     rewrite_cost = 0.0          # F5: out-of-pocket spend stored on the dispatch row
     rewrite_fused = False       # F5: a real (>=2 seat) panel authored the rewrite
+    # "One knob": the dispatch's UI model/effort picker also drives the Fusion
+    # judge (rewrite synthesis) and the enrich judge — same model that runs the
+    # executor. Blank model ("default") keeps the judge on opus so an untouched
+    # picker never silently downgrades the synthesis seat; effort flows straight
+    # through (claude --effort accepts medium/high/xhigh/max), falling back to
+    # "high" only for an out-of-range value.
+    judge_model = (model or "").strip() or "opus"
+    judge_effort = (effort or "").strip()
+    if judge_effort not in ("medium", "high", "xhigh", "max"):
+        judge_effort = "high"
     if do_rewrite:
         # Include staged attachments in the rewriter input so it can plan
         # around them. They get moved to the dispatch dir inside _run_dispatch.
@@ -662,14 +672,15 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
         loop = asyncio.get_running_loop()
         try:
             # F3.2: route the rewrite's ONE brain call through Fusion when the
-            # send asked for it. fusion/panel are passed positionally
+            # send asked for it. fusion/panel/judge_* are passed positionally
             # (run_in_executor takes *args, not kwargs) — rewriter.rewrite's
-            # signature is (user_task, project_path, fusion, panel). With
-            # do_fusion=False this is byte-for-byte the original single-claude
-            # path (panel is inert downstream when fusion is off).
+            # signature is (user_task, project_path, fusion, panel, judge_model,
+            # judge_effort). With do_fusion=False this is byte-for-byte the
+            # original single-claude path (panel + judge_* are inert downstream
+            # when fusion is off).
             result = await loop.run_in_executor(
                 None, rewriter.rewrite, task_for_rewriter, proj["path"],
-                do_fusion, panel,
+                do_fusion, panel, judge_model, judge_effort,
             )
             if result.ok and result.rewritten_prompt:
                 final_task = result.rewritten_prompt
