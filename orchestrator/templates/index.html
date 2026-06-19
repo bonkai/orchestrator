@@ -121,14 +121,23 @@
                 Cross-lab providers <span class="muted">— external API · costs tokens · key-gated</span>
               </div>
               {% for p in fusion_providers %}
-              <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
-                     title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
-                <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
-                       {% if not p.active %}disabled{% endif %}>
-                <span class="fusion-prov-name">{{ p.name }}</span>
-                <span class="muted">{{ p.model }}</span>
-                {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
-              </label>
+              <span class="fusion-prov-wrap" style="display:inline-flex; align-items:center; gap:0.25rem; margin-right:0.5rem;">
+                <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
+                       title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
+                  <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
+                         {% if not p.active %}disabled{% endif %}>
+                  <span class="fusion-prov-name">{{ p.name }}</span>
+                  <span class="muted">{{ p.model }}</span>
+                  {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
+                </label>
+                {% if p.active and fusion_lenses %}
+                <select class="fusion-prov-lens" data-prov="{{ p.name }}"
+                        title="lens for {{ p.name }}" style="font-size:10px;">
+                  <option value="">no lens</option>
+                  {% for l in fusion_lenses %}<option value="{{ l.name }}">{{ l.name }}</option>{% endfor %}
+                </select>
+                {% endif %}
+              </span>
               {% else %}
               <span class="muted">No external providers registered.</span>
               {% endfor %}
@@ -275,6 +284,10 @@
         var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
         var CLAUDE_MODELS = {{ claude_seat_models | tojson }};
         var CLAUDE_EFFORTS = {{ claude_seat_efforts | tojson }};
+        // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
+        var FUSION_LENSES = {{ fusion_lenses | tojson }};
+        var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
+        var PROV_LENSES_KEY = 'orch_fusion_prov_lenses';
         var FUSION_ON_KEY = 'orch_fusion_on';
         var FUSION_ENRICH_KEY = 'orch_fusion_enrich';
         var FUSION_PANEL_KEY = 'orch_fusion_panel';
