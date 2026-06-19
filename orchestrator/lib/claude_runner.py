@@ -609,21 +609,42 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     # <2 usable seats" falls back instead of erroring.
     active = config.active_providers()
     claude_ok = config.claude_cli_available()
+    lenses_cfg = cfg.get("lenses") or config.FUSION_LENSES_SEED  # F8.4 name→text map
     prov_names: list = []          # external providers (fan out via scripts)
+    prov_lenses: dict = {}         # provider name → resolved lens TEXT (fan-out)
+    prov_lens_names: dict = {}     # provider name → lens NAME (surface/tagging)
     claude_seats: list = []        # local claude CLI seats
     seats_desc: list = []          # readable seat labels (raw / diagnostics)
+    lenses_used: list = []         # [{"seat","lens"}] for lensed seats — raw surface
     for s in panel:
         if isinstance(s, dict) and s.get("kind") == "claude_cli":
             if not claude_ok:
                 continue
             cs_model = (s.get("model") or "opus").strip()
             cs_effort = (s.get("effort") or "high").strip()
-            claude_seats.append({"model": cs_model, "effort": cs_effort,
-                                 "name": f"{cs_model}-{cs_effort}"})
-            seats_desc.append(f"{cs_model}-{cs_effort} (cli)")
+            lens_name = (s.get("lens") or "").strip()
+            name = f"{cs_model}-{cs_effort}"
+            claude_seats.append({"model": cs_model, "effort": cs_effort, "name": name,
+                                 "lens": lens_name,
+                                 "lens_text": config.resolve_lens(lens_name, lenses_cfg)})
+            seats_desc.append(f"{cs_model}-{cs_effort} (cli)"
+                              + (f" [lens:{lens_name}]" if lens_name else ""))
+            if lens_name:
+                lenses_used.append({"seat": name, "lens": lens_name})
         elif isinstance(s, str) and s in active:
             prov_names.append(s)
             seats_desc.append(s)
+        elif (isinstance(s, dict) and isinstance(s.get("name"), str)
+              and s["name"].strip() in active):
+            # External seat carrying a lens: {"name": <provider>, "lens": ...}.
+            nm = s["name"].strip()
+            lens_name = (s.get("lens") or "").strip()
+            prov_names.append(nm)
+            seats_desc.append(nm + (f" [lens:{lens_name}]" if lens_name else ""))
+            if lens_name:
+                prov_lenses[nm] = config.resolve_lens(lens_name, lenses_cfg)
+                prov_lens_names[nm] = lens_name
+                lenses_used.append({"seat": nm, "lens": lens_name})
     total = len(prov_names) + len(claude_seats)
     if total < 2:
         return ClaudeRun(ok=False,
@@ -642,7 +663,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=(len(claude_seats) + (1 if prov_names else 0)) or 1) as ex:
         prov_future = (ex.submit(_panel_answers, prompt, prov_names, providers,
-                                 timeout_s, cwd_eff) if prov_names else None)
+                                 timeout_s, cwd_eff, prov_lenses) if prov_names else None)
         claude_futures = [ex.submit(_anthropic_seat_answer, cs, prompt, cwd_eff)
                           for cs in claude_seats]
         if prov_future is not None:
@@ -656,6 +677,12 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
             except Exception as e:
                 print(f"[claude_runner] fusion claude seat failed: {e}")
 
+    # F8.4: tag each external answer with its lens NAME for the surface/breakdown
+    # (Claude seats already carry their own "lens" from _anthropic_seat_answer).
+    for a in answers:
+        if isinstance(a, dict) and not a.get("lens"):
+            a["lens"] = prov_lens_names.get(a.get("name"), "")
+
     ok = [a for a in answers if a.get("ok")]
     if len(ok) < 2:
         errs = "; ".join(f"{a.get('name')}: {a.get('error')}"
@@ -663,10 +690,13 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
         return ClaudeRun(ok=False,
                          error=f"fusion panel: only {len(ok)} seat(s) answered ({errs})")
 
+    # The judge synthesizes from the ORIGINAL prompt verbatim — lenses bias only
+    # the panel seats (decorrelation), never the synthesis (§5 / F9.e).
     judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd_eff,
                             model=judge_model, effort=judge_effort, label="fusion-judge")
     judge.cost_usd = sum(a.get("cost", 0.0) for a in ok)   # out-of-pocket = external seats only
-    judge.raw = {"panel": answers, "preset": preset, "seats": seats_desc}
+    judge.raw = {"panel": answers, "preset": preset, "seats": seats_desc,
+                 "lenses": lenses_used}
     return judge
 
 
