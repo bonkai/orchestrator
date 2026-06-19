@@ -109,7 +109,7 @@ def _view_ctx() -> dict:
                             if n in active]
     # F8.4: named lenses offered as an (optional) per-seat dropdown in the picker.
     # Names + text travel; the form sends only the chosen NAME per seat (or none).
-    fusion_lenses = [{"name": n, "text": t} for n, t in fcfg["lenses"].items()]
+    fusion_lenses = [{"name": n, "text": t} for n, t in fcfg.get("lenses", {}).items()]
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -1445,7 +1445,7 @@ def _settings_ctx(err: str = "", ok: str = "") -> dict:
     presets = fcfg["presets"]
     # F8.4: lenses are NOT secrets (they're perspective prompts), so the text is
     # shown + editable here, unlike api_keys.
-    lenses = [{"name": n, "text": t} for n, t in fcfg["lenses"].items()]
+    lenses = [{"name": n, "text": t} for n, t in fcfg.get("lenses", {}).items()]
     return {
         "fusion_available": config.is_fusion_available(),
         "claude_cli_available": config.claude_cli_available(),
