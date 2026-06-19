@@ -765,7 +765,9 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
         try:
             loop = asyncio.get_running_loop()
             fres = await loop.run_in_executor(
-                None, fusion_mod.enrich, final_task, proj["path"], panel)
+                None, lambda: fusion_mod.enrich(
+                    final_task, proj["path"], panel,
+                    judge_model=judge_model, judge_effort=judge_effort))
             if fres.ok and fres.enrichment_md:
                 final_task = final_task + "\n\n" + fres.enrichment_md
                 rewrite_cost += fres.cost_usd                    # add to dispatch spend
