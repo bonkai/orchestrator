@@ -43,29 +43,40 @@ python -m orchestrator              # → http://127.0.0.1:7878
 ## Fusion — optional multi-model brain
 
 Fusion is an **opt-in, default-off** layer that fans a task out to a panel of models at
-**different labs in parallel**, then has a judge synthesize the results. It calls each
-provider's **native API directly** — no OpenRouter, no aggregator, no router margin.
+**different labs in parallel**, then has a local judge synthesize the results. It calls
+each provider's **native API directly** — no OpenRouter, no aggregator, no router margin.
 With the toggle off, behavior is byte-for-byte identical to the local-only path, and
 Fusion **never raises**: any panel failure silently falls back, so a flaky provider can
 never abort a dispatch.
 
-- **Two modes.**
+- **Two modes (per-dispatch toggles).**
   - *Rewriter panel → judge* — the panel **authors** the dispatched prompt (a drop-in
     upgrade to the single-model rewriter).
   - *Enrichment* — the panel **reasons about** the task and the judge distills it into a
     `## Multi-model analysis` block (consensus, contradictions, partial coverage, unique
     insights, blind spots) appended to the prompt. The executor weighs it as context, not
-    gospel — often safer than trusting non-frontier models to write the final artifact.
-- **One script per provider.** Each lab is called through its own small
-  `providers/<name>.py` speaking that lab's native API (DeepSeek, Gemini, GLM, MiniMax,
-  Qwen, xAI). No shared "OpenAI-compatible" adapter — a non-OpenAI-shaped API is just a
-  different script. Every script returns the same normalized result, so the orchestrator
-  treats them identically. Adding a provider = one script + one registry line.
-- **The judge is local.** Synthesis runs on the `claude` CLI (Opus) in a visible tab, so
-  **Fusion never calls the Anthropic API** — only the non-Anthropic panelists egress.
-- **Config.** Provider registry + presets live in `config.json` and are editable from the
-  settings page (no restart). API keys live in a separate `chmod 600` file and are never
-  shown or logged in the UI. Fusion is "available" only with ≥2 active providers.
+    gospel — often safer than trusting non-frontier models to author the final artifact.
+- **A six-provider panel, native APIs.** Each lab is called through its own small
+  `providers/<name>.py` speaking that lab's native API — DeepSeek (`deepseek-chat`), xAI
+  (`grok-4`), Gemini (`gemini-2.5-flash`), MiniMax (`MiniMax-Text-01`), GLM (`glm-4.6`),
+  and Qwen (`qwen-max`). No shared "OpenAI-compatible" adapter — a non-OpenAI-shaped API
+  is just a different script. Every script returns the same normalized result, so adding
+  a provider = one script + one registry line.
+- **Presets + per-dispatch picker.** Named presets choose the panel — `budget`,
+  `balanced`, or `max` (all six) — and the dispatch form exposes a checkbox picker so you
+  pick seats per task (providers with no key resolve greyed-out).
+- **Per-seat lenses (decorrelation).** Each seat can answer *through* a named
+  perspective — `risks`, `simplest`, `ambiguity`, or your own — so the panel makes less
+  correlated errors and the judge gets genuinely different angles to synthesize. Opt-in;
+  a lens-free panel is unchanged.
+- **Cost accounting.** Every provider carries list prices ($/M in→out) in the registry,
+  so each Fusion run reports its `cost_usd` from actual token usage. The judge itself is
+  free — it runs on the local `claude` CLI (Opus) in a visible tab, so **Fusion never
+  calls the Anthropic API**; only the non-Anthropic panelists egress.
+- **Config.** Provider registry, models, prices, presets, and lenses live in `config.json`
+  and are editable from the settings page (no restart). API keys live in a separate
+  `chmod 600` file, never shown or logged in the UI. Fusion is "available" only with ≥2
+  active providers.
 
 ## Why not the Anthropic API?
 
