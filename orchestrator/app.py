@@ -26,6 +26,9 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # are allowed. Efforts are the `claude --effort` choices (low…max).
 CLAUDE_SEAT_MODELS = ["opus", "sonnet", "haiku"]
 CLAUDE_SEAT_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# F8.4: ceiling on a per-seat lens string accepted from /send (a configured lens
+# name is short; a literal lens is a sentence or two). Bounds a crafted request.
+_MAX_LENS_CHARS = 2000
 
 
 @asynccontextmanager
@@ -835,6 +838,10 @@ async def send(
         for s in decoded if isinstance(decoded, list) else []:
             if not isinstance(s, dict):
                 continue
+            # F8.4: an optional per-seat lens (a configured lens NAME or literal
+            # text) decorrelates the panel; capped + stripped, resolved seat-side
+            # by config.resolve_lens. Empty ⇒ the seat gets the prompt verbatim.
+            seat_lens = str(s.get("lens", "")).strip()[:_MAX_LENS_CHARS]
             if s.get("type") == "claude":
                 # NB: seat_model/seat_effort — NOT the `model`/`effort` Form params,
                 # which govern the EXECUTOR. Shadowing them here silently rewrote the
@@ -842,11 +849,16 @@ async def send(
                 seat_model = str(s.get("model", "")).strip()
                 seat_effort = str(s.get("effort", "")).strip()
                 if seat_model in CLAUDE_SEAT_MODELS and seat_effort in CLAUDE_SEAT_EFFORTS:
-                    panel.append({"kind": "claude_cli", "model": seat_model, "effort": seat_effort})
+                    seat = {"kind": "claude_cli", "model": seat_model, "effort": seat_effort}
+                    if seat_lens:
+                        seat["lens"] = seat_lens
+                    panel.append(seat)
             elif s.get("type") == "provider":
                 name = str(s.get("name", "")).strip()
                 if name in active:
-                    panel.append(name)
+                    # A lens turns the bare-name seat into the dict form
+                    # run_fusion_json also accepts; no lens ⇒ stays a plain name.
+                    panel.append({"name": name, "lens": seat_lens} if seat_lens else name)
     else:
         panel = [p for p in fusion_panel.split(",") if p in active]
     # F7: enrichment mode — analyze the task with a panel and APPEND the analysis
