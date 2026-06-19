@@ -127,12 +127,44 @@ def fusion_config() -> dict:
             if isinstance(seats, list):
                 presets[name] = list(seats)
 
+    lenses = dict(FUSION_LENSES_SEED)
+    file_lenses = fcfg.get("lenses")
+    if isinstance(file_lenses, dict):
+        for name, text in file_lenses.items():
+            if isinstance(text, str) and text.strip():
+                lenses[name] = text
+
     return {
         "preset": fcfg.get("preset") or DEFAULT_FUSION_PRESET,
         "timeout_s": fcfg.get("timeout_s") or DEFAULT_FUSION_TIMEOUT_S,
         "providers": providers,
         "presets": presets,
+        "lenses": lenses,
     }
+
+
+def fusion_lenses() -> dict:
+    """The effective named lenses: FUSION_LENSES_SEED with config.json's
+    fusion.lenses merged over it (per-name override/extend, like presets). Each
+    value is a per-seat prompt prefix used for §5 decorrelation (F8.4)."""
+    return fusion_config()["lenses"]
+
+
+def resolve_lens(value: Optional[str], lenses: Optional[dict] = None) -> str:
+    """Resolve a seat's lens spec to its prompt text. A configured lens NAME
+    resolves to its text; any other non-empty string is treated as LITERAL lens
+    text; empty/None → "" (no lens — the seat gets the shared prompt verbatim, so
+    lenses stay opt-in). `lenses` may be passed in to avoid re-reading config.json
+    when resolving many seats in one call (run_fusion_json does this)."""
+    if value is None:
+        return ""
+    value = str(value).strip()
+    if not value:
+        return ""
+    if lenses is None:
+        lenses = fusion_lenses()
+    resolved = lenses.get(value)
+    return resolved if isinstance(resolved, str) and resolved.strip() else value
 
 
 def _resolve_key(prov: dict) -> Optional[str]:
@@ -288,5 +320,31 @@ def remove_provider(name: str) -> dict:
     cfg = _read_config_for_write()
     provs = cfg.setdefault("fusion", {}).setdefault("providers", {})
     provs.pop(name, None)
+    save_config(cfg)
+    return fusion_config()
+
+
+def set_lens(name: str, text: str) -> dict:
+    """Add or edit one named lens (fusion.lenses) — F8.4. Merge-preserving like
+    the other write helpers (everything else, incl. api_keys, is kept). A blank
+    name or blank text raises ConfigWriteError. Returns the new fusion_config()."""
+    name = (name or "").strip()
+    if not name:
+        raise ConfigWriteError("lens name is required")
+    text = (text or "").strip()
+    if not text:
+        raise ConfigWriteError("lens text is required")
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {}).setdefault("lenses", {})[name] = text
+    save_config(cfg)
+    return fusion_config()
+
+
+def remove_lens(name: str) -> dict:
+    """Remove a lens's config.json override. (A canonical SEED lens reappears from
+    the seeds; a custom lens disappears entirely.) Raises ConfigWriteError on a
+    corrupt file."""
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {}).setdefault("lenses", {}).pop(name, None)
     save_config(cfg)
     return fusion_config()
