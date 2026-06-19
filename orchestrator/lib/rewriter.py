@@ -69,14 +69,20 @@ def _coerce_list_of_str(v) -> list[str]:
 
 
 def rewrite(user_task: str, project_path: str,
-            fusion: bool = False, panel: Optional[list] = None) -> RewriteResult:
+            fusion: bool = False, panel: Optional[list] = None,
+            judge_model: str = "opus", judge_effort: str = "high") -> RewriteResult:
     """Build the project bundle, ask claude to rewrite the task, return result.
 
     fusion=False is byte-for-byte the original single-claude path. fusion=True
     routes the ONE rewrite brain call through run_brain_json (multi-model panel →
     judge), degrading to the same single-claude call if the panel is unavailable.
     `panel` (provider names) overrides the configured preset for this call. The
-    auto-retry below always stays single-model — it never re-fans-out the panel."""
+    auto-retry below always stays single-model — it never re-fans-out the panel.
+
+    `judge_model`/`judge_effort` drive the FUSION judge (the synthesis seat) so the
+    dispatch's UI model/effort picker controls it ("one knob"). They do NOT touch
+    the non-fusion brain or the single-model fallback/retry, which stay opus/high
+    by design — there is no judge on those paths to steer."""
     user_task = (user_task or "").strip()
     if not user_task:
         return RewriteResult(ok=False, error="empty task")
@@ -102,6 +108,7 @@ def rewrite(user_task: str, project_path: str,
 
     run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion,
                                        panel=panel, model="opus", effort="high",
+                                       judge_model=judge_model, judge_effort=judge_effort,
                                        label="rewriter")
     # F5: capture the fusion panel breakdown BEFORE the auto-retry (which swaps
     # `run` for a single-model claude call). A fused run carries the panel under
