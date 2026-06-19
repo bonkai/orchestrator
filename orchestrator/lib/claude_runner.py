@@ -524,16 +524,20 @@ def _run_fusion_in_tab(prompt: str, panel: list, providers: dict,
 
 
 def _panel_answers(prompt: str, panel: list, providers: dict,
-                   timeout_s: int, cwd: str = "") -> list:
+                   timeout_s: int, cwd: str = "",
+                   lenses: Optional[dict] = None) -> list:
     """Get the panel's answers. PREFERS the watchable iTerm2 fusion tab; falls
     back to the in-process subprocess fan-out only when iTerm2 is absent or the
-    tab fails — so a panel is never hidden when iTerm2 is available."""
+    tab fails — so a panel is never hidden when iTerm2 is available. `lenses`
+    (provider name → resolved lens TEXT, F8.4) is threaded to BOTH paths so the
+    seat prompts are identical whichever path runs."""
     if spawn.iterm2_installed():
-        tab = _run_fusion_in_tab(prompt, panel, providers, timeout_s, cwd=cwd)
+        tab = _run_fusion_in_tab(prompt, panel, providers, timeout_s, cwd=cwd,
+                                 lenses=lenses)
         if tab is not None:
             return tab
         print("[claude_runner] fusion tab unavailable; in-process panel fallback")
-    return _run_panel(prompt, panel, providers, timeout_s)
+    return _run_panel(prompt, panel, providers, timeout_s, lenses=lenses)
 
 
 def _anthropic_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
@@ -550,13 +554,20 @@ def _anthropic_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
     model = (seat.get("model") or "opus").strip()
     effort = (seat.get("effort") or "high").strip()
     name = seat.get("name") or f"{model}-{effort}"
-    run = run_claude_json(prompt=prompt, cwd=cwd or os.getcwd(), model=model,
-                          effort=effort, label=f"fusion-seat:{name}")
+    # F8.4: a per-seat lens prefixes the prompt (resolved TEXT in lens_text; the
+    # NAME in lens is carried only for the surface/breakdown). No lens ⇒ the
+    # prompt is unchanged, so an un-lensed Claude seat behaves exactly as before.
+    lens_name = (seat.get("lens") or "").strip()
+    lens_text = (seat.get("lens_text") or "").strip()
+    label = f"fusion-seat:{name}" + (f"+{lens_name}" if lens_name else "")
+    run = run_claude_json(prompt=_apply_lens(prompt, lens_text), cwd=cwd or os.getcwd(),
+                          model=model, effort=effort, label=label)
     if not run.ok:
-        return {"name": name, "ok": False, "error": run.error or "claude seat failed"}
+        return {"name": name, "ok": False, "error": run.error or "claude seat failed",
+                "lens": lens_name}
     return {"name": name, "model": run.model or model, "text": run.text,
             "cost": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
-            "effort": effort, "subscription": True, "ok": True}
+            "effort": effort, "subscription": True, "lens": lens_name, "ok": True}
 
 
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
