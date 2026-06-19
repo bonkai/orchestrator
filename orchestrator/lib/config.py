@@ -63,6 +63,25 @@ FUSION_PRESETS_SEED = {
 DEFAULT_FUSION_PRESET = "budget"
 DEFAULT_FUSION_TIMEOUT_S = 300
 
+# ── F8.4: per-seat LENS prompts (the §5 decorrelation refinement) ────────────
+# A lens is a short perspective a panel seat answers THROUGH ("find the risks",
+# "find the simplest path", "find what's ambiguous"), so the seats make less
+# correlated errors and the judge has genuinely different angles to synthesize.
+# A seat opts into a lens by NAME (resolved against this seed merged with
+# config.json's fusion.lenses) or by literal text; no lens ⇒ the seat gets the
+# shared prompt verbatim, so lenses are opt-in and a lens-free panel is unchanged.
+FUSION_LENSES_SEED = {
+    "risks":     "Approach this through a RISK lens: surface failure modes, edge "
+                 "cases, security and correctness hazards, and what could go wrong "
+                 "— even where the obvious approach looks fine.",
+    "simplest":  "Approach this through a SIMPLICITY lens: favour the most direct, "
+                 "minimal path that still solves the task, and call out needless "
+                 "complexity or anything that could be cut.",
+    "ambiguity": "Approach this through an AMBIGUITY lens: surface what is "
+                 "underspecified, the assumptions a confident answer would smuggle "
+                 "in, and the questions worth resolving before acting.",
+}
+
 
 def load_config() -> dict:
     """Read ~/.orchestrator/config.json and return it as a dict. Returns {} if
@@ -87,6 +106,7 @@ def fusion_config() -> dict:
         `script`/`key_env`/prices. A provider present only in config.json is
         added — a user can register a brand-new lab without touching code.
       - presets: per-name override; config.json presets replace/extend the seeds.
+      - lenses: per-name override; config.json lenses replace/extend the seeds.
       - preset / timeout_s: the config.json value when truthy, else the default.
     """
     fcfg = load_config().get("fusion")
