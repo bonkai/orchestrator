@@ -127,6 +127,57 @@
         </div>
       </form>
     </div>
+
+    <!-- ── Lenses (per-seat perspectives) ─────────────────────────────── -->
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">lenses <span class="muted" style="font-size:12px;">— per-seat perspectives (decorrelate the panel)</span></h3>
+      <p class="muted" style="margin-top:0; font-size:12px;">
+        A lens makes a panel seat answer the SAME task through a particular angle
+        (&ldquo;find the risks&rdquo;, &ldquo;find the simplest path&rdquo;), so the seats make less
+        correlated errors and the judge has genuinely different views to synthesize.
+        Assign one per seat in the dispatch form&rsquo;s Fusion picker. The judge always sees
+        the original task verbatim. Lenses are <strong>not secrets</strong> — text is shown + editable here.
+      </p>
+      <table style="font-size:12px; width:100%;">
+        <thead><tr>
+          <th style="text-align:left; width:120px;">name</th><th style="text-align:left;">text</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for l in lenses %}
+          <tr>
+            <td><code>{{ l.name }}</code></td>
+            <td>
+              <form method="post" action="/settings/lens" style="display:flex; gap:0.25rem; align-items:center;">
+                <input type="hidden" name="name" value="{{ l.name }}">
+                <input type="text" name="text" value="{{ l.text }}" style="flex:1; min-width:280px; font-size:11px;">
+                <button type="submit" class="secondary small" title="save lens text">save</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="/settings/lens/{{ l.name }}/remove" style="display:inline;"
+                    onsubmit="return confirm('Remove lens {{ l.name }} from config.json?');">
+                <button type="submit" class="danger small">remove</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="muted">No lenses configured.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <form method="post" action="/settings/lens"
+            style="display:flex; gap:0.5rem; align-items:flex-end; flex-wrap:wrap; margin-top:0.6rem;">
+        <label style="font-size:12px;">name
+          <input type="text" name="name" placeholder="coding" required style="display:block; width:140px;"></label>
+        <label style="font-size:12px; flex:1; min-width:280px;">text
+          <input type="text" name="text" placeholder="Approach this through a CODING lens: …" required style="display:block; width:100%;"></label>
+        <button type="submit" class="primary small">add lens</button>
+      </form>
+      <p class="muted" style="font-size:11px; margin-top:0.4rem;">
+        A canonical seed lens (<code>risks</code>, <code>simplest</code>, <code>ambiguity</code>) re-appears from the
+        seeds if removed; a custom lens disappears. Changes take effect on the next fusion call — no restart.
+      </p>
+    </div>
   </main>
 </div>
 {% endblock %}
