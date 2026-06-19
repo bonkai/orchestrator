@@ -442,6 +442,27 @@
               updateFusionCount();
             });
           });
+          // F8.4: restore + persist each provider's lens choice (independent of
+          // whether it's checked — survives reload like the Claude-seat lenses).
+          function provLensSelects() {
+            return fusionPanel
+              ? Array.prototype.slice.call(fusionPanel.querySelectorAll('select.fusion-prov-lens'))
+              : [];
+          }
+          function saveProvLenses() {
+            var map = {};
+            provLensSelects().forEach(function(sel) {
+              if (sel.value) map[sel.getAttribute('data-prov')] = sel.value;
+            });
+            try { localStorage.setItem(PROV_LENSES_KEY, JSON.stringify(map)); } catch (e) {}
+          }
+          var savedProvLenses = {};
+          try { savedProvLenses = JSON.parse(localStorage.getItem(PROV_LENSES_KEY)) || {}; } catch (e) {}
+          provLensSelects().forEach(function(sel) {
+            var prov = sel.getAttribute('data-prov');
+            if (savedProvLenses && savedProvLenses[prov]) sel.value = savedProvLenses[prov];
+            sel.addEventListener('change', saveProvLenses);
+          });
           if (addClaudeSeatBtn) {
             addClaudeSeatBtn.addEventListener('click', function() {
               addClaudeSeatRow('opus', 'high'); saveClaudeSeats();
@@ -516,10 +537,16 @@
           fd.append('fusion', fusionOn ? 'true' : 'false');
           var fusionSeats = [];
           claudeSeats().forEach(function(s) {
-            fusionSeats.push({ type: 'claude', model: s.model, effort: s.effort });
+            var seat = { type: 'claude', model: s.model, effort: s.effort };
+            if (s.lens) seat.lens = s.lens;       // F8.4: per-seat lens (optional)
+            fusionSeats.push(seat);
           });
           checkedProviders().forEach(function(n) {
-            fusionSeats.push({ type: 'provider', name: n });
+            var seat = { type: 'provider', name: n };
+            var lensSel = fusionPanel &&
+              fusionPanel.querySelector('select.fusion-prov-lens[data-prov="' + n + '"]');
+            if (lensSel && lensSel.value) seat.lens = lensSel.value;
+            fusionSeats.push(seat);
           });
           fd.append('fusion_seats', JSON.stringify(fusionSeats));
           // Enrichment is independent of the rewrite — it appends a panel analysis
