@@ -906,3 +906,208 @@ one registry line each** (never a core change). Minimum upfront signup to get mo
 - **Edits don't take effect until you restart `python -m orchestrator`** (uvicorn
   `reload=False` on :7878), and the **auto-push daemon commits within seconds** —
   `git diff` won't show your changes.
+
+---
+
+## 10. Design study — mid-flight executor watcher *(DESIGN ONLY — not approved, not built)*
+
+**The question.** Could the Fusion panel help **long-context executor** dispatches by
+periodically inspecting an *in-progress* `claude` executor session — surfacing blind
+spots, missing work, and errors as mid-flight critique? Three sub-verdicts asked for:
+**would it help? would it cost too many tokens? is it a good idea?** This section answers
+all three, grounded in what the CLI *actually* exposes (verified, not assumed), and ends
+with an open-questions list. **No executor-watching code is written here.**
+
+It is the natural generalization of the summarizer (§F6): `summarizer.py` distills the
+transcript JSONL (`distill_transcript`, caps `PER_BLOCK_MAX=1.5KB` / `DISTILLED_MAX_CHARS=30KB`)
+and fires **one** panel/brain call **after** Stop. A watcher fires that *same* call
+**every N tool-calls or M minutes, while the executor runs.** Everything below reuses
+that machinery rather than inventing new instrumentation.
+
+### 10.a — What the CLI actually exposes (verified `claude --help`, 2026-06-18)
+
+The central unverified claim — *can you observe or inject into a RUNNING session?* — was
+tested against the live binary, not assumed (the prior `--effort`-list lesson applies):
+
+| Capability | Flag | Available? | Implication for a watcher |
+|------------|------|-----------|---------------------------|
+| Attach to / inject into an **already-running turn** | — | ❌ **none exists** | **Live steering is impossible.** No flag pushes a message into the executor's in-flight turn. |
+| Resume a session **after its turn ends** | `-r/--resume <id>`, `-c/--continue`, `--session-id <uuid>` | ✅ yes | Enables a **pause-then-resume gate** only — a *new* user turn, not mid-turn injection. |
+| Fork on resume | `--fork-session` | ✅ yes | A resumed critique could branch instead of mutating the original session. |
+| Realtime **input** streaming | `--input-format stream-json` | ✅ yes | Streams into a session **you start**, not one already spawned — does **not** reach the live executor. |
+| Interactive remote control | `--remote-control [name]` | ✅ exists | Interactive, not a headless brain call; using it to steer would be exactly the **live-steering scope-creep** line we should not cross (see 10.e). |
+| Read the live transcript | (filesystem) | ✅ yes | `~/.claude/projects/<slug>/<session>.jsonl` is append-only; the [orphan-recovery] path already proves sessions live there. This is the only live feed. |
+
+**Confirmed conclusion:** a critique **cannot be injected into the running executor.**
+It must land in one of exactly two ways:
+
+1. **Non-blocking advisory** — surface to the orchestrator (DB / ring-buffer / HTMX side
+   panel). The executor never sees it mid-run; a human reads it. *Safe, but the executor
+   may never act on it.*
+2. **Pause-and-resume gate** — let the current turn finish (or kill it), then
+   `claude --resume <session_id>` with the critique as a new user turn. *Actionable, but
+   interrupts a long-context session and risks the executor "chasing the panel."*
+
+There is **no third option** where the panel quietly corrects a running turn. Any design
+claiming otherwise is wrong about the CLI.
+
+### 10.b — Cost: concrete tokens → USD (free CLI seats vs paid external seats)
+
+Prices are the §6 snapshot ($/M tokens, in→out): deepseek 0.44/0.87 · xai 1.25/2.50 ·
+gemini 0.30/1.50 · minimax 0.30/1.20 · glm 1.40/4.40 · qwen 1.25/3.75. As everywhere in
+Fusion, **`cost_usd = Σ external seat cost only**; **Claude-CLI seats and the judge are
+$0** (subscription, no Anthropic API).
+
+**Per-checkpoint token model.** IN = distilled transcript-**delta** since the last
+checkpoint (bounded by the summarizer caps) ≈ **~4K tokens**; OUT = the structured
+critique ≈ **~1K tokens**. (The judge is a *second* round-trip — judge IN ≈ original
+prompt + N panel answers, OUT ≈ 1K — but the judge is the local CLI, so it adds **latency,
+not USD**.)
+
+**Per-checkpoint external cost**, `balanced` preset (deepseek + xai + qwen), 4K in / 1K out each:
+
+| seat | in cost | out cost | seat total |
+|------|--------:|---------:|-----------:|
+| deepseek | $0.00176 | $0.00087 | $0.0026 |
+| xai      | $0.00500 | $0.00250 | $0.0075 |
+| qwen     | $0.00500 | $0.00375 | $0.0088 |
+| **per checkpoint** | | | **≈ $0.019** |
+
+**Checkpoints per 30-min dispatch** (the default `wall_clock_cap_s=1800`): a busy executor
+at ~5 tool-calls/min over 30 min ≈ 150 calls. Fire every N=20 calls → **~7–8 checkpoints**;
+or a 5-min wall timer → **6 checkpoints**. So:
+
+- `balanced` panel: 8 × $0.019 ≈ **$0.15 / dispatch.**
+- `max` panel (6 seats incl. glm/gemini/minimax): ≈ **$0.30–0.45 / dispatch.**
+- **pure Claude-CLI panel (e.g. `anthropic-local` = opus-high + opus-medium): $0** — the
+  only out-of-pocket "cost" is shared subscription rate-limit + wall-clock.
+
+**This compounds, and the naive read is ~quadratic.** If each checkpoint re-reads the
+*whole growing transcript* instead of the delta, checkpoint *k* reads ≈ *k·δ* tokens; over
+*C* checkpoints total IN ≈ δ·C(C+1)/2 = **O(C²)**. With a per-run **byte-offset cursor**
+(stored in `~/.orchestrator`, append-only JSONL → no diff machinery) each checkpoint reads
+δ **once**: total IN = δ·C = **O(C)**.
+
+> Worked numbers (δ = 4K, C = 8): **cursor → 32K IN total; full re-read → 4K·36 = 144K IN
+> total (≈4.5×), and the gap widens the longer the run.** The cursor + the existing
+> 1.5KB/30KB caps are mandatory, not optional.
+
+**Verdict on cost:** a **paid** watcher is affordable per-dispatch ($0.15–0.45) but
+**multiplies** the single post-run summary many times over and scales with run length and
+with concurrent executors. A **Claude-CLI-only** watcher is **$0** and is the only
+economically sane default. The real "too many tokens?" risk for the free panel is **shared
+subscription throttling**: checkpoints draw on the **same** subscription as the executor
+and could rate-limit the very session they watch — a self-defeating failure mode.
+
+### 10.c — Trigger / hook designs (what it RECEIVES, what it EMITS, where it lands)
+
+Two concrete triggers, both reusing existing plumbing — no new executor instrumentation:
+
+- **(A) N-tool-call piggyback (recommended).** The `PreToolUse` hook
+  (`bin/notify_tool_use.sh`) already POSTs `{run_id, tool_name, input_hash}` to
+  `/api/tool_use` **per call**. `/api/tool_use` counts per `run_id`; every Nth call (config
+  `checkpoint_every_n`) fires a checkpoint. A tool-call boundary is a **cleaner snapshot**
+  than a raw wall timer that can fire mid-tool-call. This is the same feed the planned loop
+  watchdog uses — zero new hooks.
+- **(B) Stuck-signal / milestone gate (cheapest, highest-value).** Instead of a blind
+  cadence, fire **only when something looks wrong** — the loop-watchdog ring buffer shows
+  repeated identical `input_hash`es (executor spinning). Spend tokens only on a stuck
+  signal. If panel+judge latency exceeds inter-tool-call gaps (likely), a blind interval
+  lands **stale** critique anyway, making (B) strictly better than a dumb timer.
+
+A wall-clock interval (every M minutes) is the fallback when no tool-call feed is desired,
+but it shares the staleness problem and can fire mid-tool-call.
+
+- **RECEIVES:** the distilled transcript **delta** since the cursor (`distill_transcript`
+  pointed at the executor's live JSONL, bounded by the caps) + optionally a short rolling
+  summary of prior critiques (a **hidden cumulative token cost** — keep it to ≤1KB).
+- **EMITS:** a structured critique `{blind_spots[], missing_work[], errors[], confidence}`
+  → **non-blocking sink only:** an `outcomes`-style / `checkpoint_event` row + the dispatch
+  HTMX side panel. Default sink is **advisory (mode 1)**; the pause-resume gate (mode 2) is
+  a separate, louder opt-in.
+
+### 10.d — The structural problem unique to reviewing *in-progress* work
+
+Reviewing a partial transcript has a **built-in false-positive rate**: "missing work" and
+"errors" are frequently just **"not done yet."** A panel handed a half-finished transcript
+will hallucinate gaps the executor was about to fill, inflating noise. This is the single
+biggest reason the feature may not pay off — and the reason the critique schema must carry
+a **confidence/"may-be-incomplete" flag** and the prompt must say *"this transcript is a
+snapshot of work in progress; do not flag as missing what may simply be unfinished."*
+
+It also weakens Fusion's core premise here: a panel given a distilled **partial** transcript
+may add little over a **single** Claude summarizer call — multi-model diversity helps most
+on hard, complete judgments, least on "is this half-done run on track?" **Honest flag:
+multi-model may not beat one-model for incremental critique.**
+
+### 10.e — Rollout & hard-rule compliance (re-justified per component)
+
+- **Default-off, opt-in, per-dispatch** — like every Fusion path. A `watch_executor`
+  checkbox; off → byte-for-byte today's behavior.
+- **No Anthropic API.** Panel = external scripts + local CLI seats; judge = local CLI.
+  Same as §9.1. ✅
+- **Visible, never headless.** Every checkpoint's seats + judge run in **watchable iTerm2
+  tabs** via the existing `run_fusion_json` / `run_claude_json`. ⚠️ **Tab-storm caveat:** N
+  checkpoints × (seats + judge) tabs, created under `spawn.py`'s serialization lock — which
+  the executor's own spawns also contend on. A **single reused watcher tab** would be
+  cleaner, but `run_brain_json`/`run_fusion_json` **don't currently support tab reuse**, so
+  today this means real tab churn. Open question below.
+- **Local only.** Same relaxation as §9.2 (external seats see the transcript delta) — and
+  **wider**: the delta now leaves the laptop *repeatedly* per dispatch, not once. A
+  Claude-CLI-only panel keeps it 100% local.
+- **Stop-hook gate preserved.** Checkpoint brain calls must **scrub `ORCHESTRATOR_RUN_ID`**
+  exactly like `run_claude_json`/`run_claude_headless` already do — otherwise each checkpoint
+  fires the Stop hook and **pollutes `/api/complete`**. The watcher reads the executor's
+  `run_id` to find its transcript, but must never *propagate* it into the panel env.
+- **Killable / kill-all / wall-clock.** Global kill-all and the 1800s cap must **also
+  terminate in-flight checkpoint tabs/panels**, or a killed dispatch orphans brain tabs. If
+  kill-all fires mid-round-trip, an external seat may **still be billed** (open question).
+- **Self-terminate on completion.** Race: the executor may hit Stop (→ summarizer) while a
+  checkpoint is still running — overlapping panel calls on the same transcript. The watcher
+  must stop on completion/death to avoid orphan loops.
+- **The live-steering line.** Surfacing critique that a human then **manually pastes** into
+  the executor is a back-door form of live steering. The design draws the line at: advisory
+  sink (mode 1) is in-scope; automated injection is **not** without an explicit mode-2
+  pause-resume gate; `--remote-control` steering is **out of scope** entirely.
+
+### 10.f — Go / No-Go
+
+- **Would it help?** **Partially / conditionally.** Real value only with a **stuck-signal
+  gate (10.c-B)** and a confidence-flagged schema (10.d). A blind-cadence advisory watcher
+  mostly produces stale, "not-done-yet" noise. Net: **qualified yes for the milestone-gate
+  variant, no for the naive interval variant.**
+- **Would it cost too many tokens?** **Not with a Claude-CLI-only panel ($0) + delta cursor
+  + caps.** A **paid** panel is affordable per-dispatch ($0.15–0.45) but compounds across
+  checkpoints, runs, and concurrent executors, and risks subscription throttling. **So: no
+  if free-seat default; watch out if paid.**
+- **Is it a good idea?** **Not yet — build the milestone-gate, Claude-CLI-only, advisory
+  (mode-1) version behind a default-off flag *only if* the post-run summarizer proves
+  insufficient in practice.** The partial-transcript false-positive problem and the unproven
+  multi-model-over-single-model edge make this **lower priority than finishing F8.4 / live
+  provider verify.** **Provisional: defer; do not build now.**
+
+### 10.g — OPEN QUESTIONS *(resolve before any implementation)*
+
+1. **Does the executor flush its transcript JSONL incrementally mid-run, or only at
+   completion?** If only at completion, the watcher sees nothing and the whole feature is
+   dead. *Not verified here — must be confirmed empirically against a live dispatch.* (The
+   `PreToolUse` hook proves *events* are observable live; JSONL flush cadence is separate.)
+2. **Partial-line tolerance:** reading the JSONL while `claude` appends can yield a
+   truncated final line — does `distill_transcript`'s defensive parse + a cursor that
+   rewinds to the last newline fully cover this?
+3. **Does the panel's partial-transcript critique actually beat a single Claude
+   summarizer call?** If not, drop the panel and use one CLI call (or drop the feature).
+4. **Tab reuse:** is it worth teaching `run_brain_json`/`run_fusion_json` a reusable
+   watcher tab to avoid N-checkpoint tab storms under `spawn.py`'s lock?
+5. **Kill-all mid-round-trip billing:** if a dispatch is killed while an external seat is
+   in flight, is that seat still billed — and how is its tab reaped?
+6. **Concurrency:** multiple simultaneous executors each spawn their own watcher —
+   multiplying cost, tabs, and subscription load. Cap total concurrent checkpoints?
+7. **Cadence:** N tool-calls vs stuck-signal gate vs wall timer — which default? (10.c
+   argues stuck-signal.)
+8. **Mode-2 gate:** is a pause-and-resume (`claude --resume`) gate ever wanted, or is
+   advisory-only the permanent ceiling to avoid the executor chasing the panel?
+9. **Cursor location & lifecycle:** confirm `~/.orchestrator/<run_id>.cursor` (byte offset)
+   is the right home and is cleaned up on completion/kill.
+
+**STOP — design only. No executor-watching code written or approved.**
