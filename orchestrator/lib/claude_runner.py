@@ -584,7 +584,12 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
 
     `panel` is a list whose entries are either a provider NAME (str — an external
     seat) or a dict {"kind":"claude_cli","model","effort"} (a local Claude seat);
-    duplicate Claude seats (same model+effort) are allowed.
+    duplicate Claude seats (same model+effort) are allowed. F8.4: any entry may
+    also carry a "lens" (a configured lens NAME or literal text) — Claude seats as
+    {"kind":"claude_cli",...,"lens"} and external seats as the dict form
+    {"name":<provider>,"lens":...}; each lensed seat answers the SAME task through
+    that perspective (§5 decorrelation). The judge still sees the original prompt
+    verbatim. No lens anywhere ⇒ byte-for-byte the pre-F8.4 behavior.
 
     ⚠ run_claude_json defaults to sonnet, so the judge model is passed
     EXPLICITLY (default opus/high; a summarizer caller can pass sonnet)."""
