@@ -334,18 +334,19 @@ tasks.
 > `_run_panel`/judge/fusion tab/`run_brain_json`), **F1.2/F1.2b** (all 6 provider scripts),
 > F2, F3, F4, **F5** (durable per-seat surface + cost into `outcomes`), **F6** (summarizer +
 > onboarding fusion-capable), **F7** (enrichment-block mode), **F8** (settings registry/preset
-> editor; F8.4 lens prompts deferred), F9. The whole suite is green — `python -m unittest` →
-> **285 ok, 4 skipped** (the skips need `httpx`, which isn't in the venv).
+> editor **+ F8.4 per-seat lenses**), F9. The whole suite is green — `python -m unittest` →
+> **313 ok, 4 skipped** (the skips need `httpx`, which isn't in the venv).
 > **NOT done (still roadmap):**
 > - **F1.2 / F1.2b LIVE verify** — all six scripts pass offline `urllib`-mocked tests, but
 >   `deepseek`, `xai`, `minimax`, `qwen` have **no key** in `config.json`, so their
 >   one-real-paid-call verify hasn't run and any preset naming them silently drops those seats.
 >   Usable external providers today = **gemini, glm** (script *and* key). A real cross-lab panel
->   right now = **glm + gemini + Claude Code seats** (the keys actually present).
-> - **F8.4** — per-seat lens prompts (the §5 decorrelation refinement), deferred.
+>   right now = **glm + gemini + Claude Code seats** (the keys actually present). **This paid
+>   per-script verify is the ONLY remaining no-key-blocked item** — every other F0–F9 task,
+>   F8.4 included, is built + offline-tested.
 >
 > **Next up:** add the four missing provider keys when available + run the paid F1.2/F1.2b
-> live verify; optionally F8.4. Everything else in F0–F9 is built.
+> live verify. Everything else in F0–F9 — F8.4 lenses included — is built.
 
 ### Pre-build checklist *(verified against the live code 2026-06-17 — read before F0)*
 - **Get ≥1 provider key before F1** (DeepSeek is cheapest). F0 needs no network, but
@@ -614,7 +615,7 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
     error: str = ""
 ```
 
-### Phase F8 — Settings UI *(advanced registry management — basic selection already ships in F4)* ✅ *(2026-06-18; F8.4 deferred)*
+### Phase F8 — Settings UI *(advanced registry management — basic selection already ships in F4)* ✅ *(2026-06-18; F8.4 lenses 2026-06-19)*
 *Goal: the browser-side **registry editor** — add/remove providers, change a model slug, manage presets globally, see which providers are active.*
 - [x] **F8.1** `/settings` read view (`templates/settings.html`, `app._settings_ctx`): shows fusion availability, the current `preset`/`presets`/`providers` from `config.fusion_config()`, and a derived `has_key` ●/— per provider. **Keys are never shown or editable in the browser** (`_settings_ctx` strips `api_key`; a no-leak test guards it). Linked from the dispatch form (⚙). · *verify:* `test_fusion_settings::TestSettingsReadModel`.
 - [x] **F8.2** Preset switch — `POST /settings/preset` → `config.set_preset()` (merge-preserving). · *verify:* settings tests + the switch changes which providers the next fusion call bills.
