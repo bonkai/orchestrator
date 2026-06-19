@@ -620,6 +620,7 @@ def _fusion_panel_breakdown(result) -> list[dict]:
             "prompt_tokens": a.get("prompt_tokens", 0) or 0,
             "completion_tokens": a.get("completion_tokens", 0) or 0,
             "subscription": bool(a.get("subscription")),
+            "lens": a.get("lens", "") or "",        # F8.4: which lens this seat used
         }
         if a.get("ok"):
             seat["preview"] = (a.get("text", "") or "")[:_SEAT_PREVIEW_CHARS]
@@ -1442,6 +1443,9 @@ def _settings_ctx(err: str = "", ok: str = "") -> dict:
             "has_key": bool(config.get_provider_key(name)),   # key resolves (never the key)
         })
     presets = fcfg["presets"]
+    # F8.4: lenses are NOT secrets (they're perspective prompts), so the text is
+    # shown + editable here, unlike api_keys.
+    lenses = [{"name": n, "text": t} for n, t in fcfg["lenses"].items()]
     return {
         "fusion_available": config.is_fusion_available(),
         "claude_cli_available": config.claude_cli_available(),
@@ -1449,6 +1453,7 @@ def _settings_ctx(err: str = "", ok: str = "") -> dict:
         "presets": presets,
         "preset_names": list(presets.keys()),
         "providers": providers,
+        "lenses": lenses,
         "active_count": len(active),
         "err": err, "ok": ok,
     }
@@ -1503,5 +1508,24 @@ async def settings_provider_remove(name: str):
     try:
         config.remove_provider(name)
         return _settings_redirect(ok=f"removed {name}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
+
+
+# ── F8.4: lens management (per-seat perspective prompts) ─────────────────────
+@app.post("/settings/lens")
+async def settings_set_lens(name: str = Form(...), text: str = Form("")):
+    try:
+        config.set_lens(name, text)
+        return _settings_redirect(ok=f"saved lens {name}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
+
+
+@app.post("/settings/lens/{name}/remove")
+async def settings_lens_remove(name: str):
+    try:
+        config.remove_lens(name)
+        return _settings_redirect(ok=f"removed lens {name}")
     except config.ConfigWriteError as e:
         return _settings_redirect(err=str(e))
