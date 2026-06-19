@@ -354,6 +354,25 @@ def run_claude_json(
 # this same logic (the judge is already a visible brain tab via run_claude_json).
 
 
+def _apply_lens(prompt: str, lens: str) -> str:
+    """F8.4: prepend a per-seat LENS so this seat answers the SAME task through a
+    particular perspective (§5 decorrelation). The original prompt is kept
+    verbatim and LAST, so any output-format / JSON-schema instructions it carries
+    still travel to the seat unmodified (and stay the last thing the model reads).
+    An empty lens returns the prompt unchanged — lenses are opt-in, so a lens-free
+    panel is byte-for-byte the pre-F8.4 behavior.
+
+    ⚠ Kept textually identical to fusion_call._apply_lens so the watchable-tab and
+    in-process panel paths build the SAME lensed prompt (fusion_call.py can't
+    import this module — it runs standalone in the tab)."""
+    lens = (lens or "").strip()
+    if not lens:
+        return prompt
+    return ("Approach the task below through this specific lens — let it shape "
+            "what you emphasize, but still answer the task in full:\n"
+            f"{lens}\n\n--- TASK ---\n{prompt}")
+
+
 def _panel_answer(name: str, prov: dict, prompt: str, timeout_s: int) -> dict:
     """Run ONE provider's script as a subprocess → normalized dict + computed
     cost. NEVER raises — a spawn/timeout/parse failure or an ok=false script
@@ -378,14 +397,20 @@ def _panel_answer(name: str, prov: dict, prompt: str, timeout_s: int) -> dict:
             "prompt_tokens": in_tok, "completion_tokens": out_tok, "ok": True}
 
 
-def _run_panel(prompt: str, panel: list, providers: dict, timeout_s: int) -> list:
+def _run_panel(prompt: str, panel: list, providers: dict, timeout_s: int,
+               lenses: Optional[dict] = None) -> list:
     """Fan out to the panel's providers IN PARALLEL (wall-clock ≈ slowest seat,
-    not the sum). Order of the returned answers matches `panel`."""
+    not the sum). Order of the returned answers matches `panel`. `lenses` maps a
+    provider name → its resolved lens TEXT (F8.4); a seat with no entry gets the
+    shared prompt verbatim, so `lenses=None` is the pre-F8.4 behavior."""
     if not panel:
         return []
+    lenses = lenses or {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(panel))) as ex:
         return list(ex.map(
-            lambda n: _panel_answer(n, providers[n], prompt, timeout_s), panel))
+            lambda n: _panel_answer(n, providers[n],
+                                    _apply_lens(prompt, lenses.get(n, "")), timeout_s),
+            panel))
 
 
 def _judge_prompt(orig: str, answers: list) -> str:
@@ -431,18 +456,24 @@ def _price_tab_answers(raw: list, providers: dict) -> list:
 
 
 def _run_fusion_in_tab(prompt: str, panel: list, providers: dict,
-                       timeout_s: int, cwd: str = "") -> Optional[list]:
+                       timeout_s: int, cwd: str = "",
+                       lenses: Optional[dict] = None) -> Optional[list]:
     """Run the panel in a WATCHABLE iTerm2 fusion tab: write the request, spawn
     the tab (fusion_run.sh → fusion_call.py), poll <id>.done/.pid like the brain
     loop (simpler — <id>.json is already the final collected answers), then price
     them from the registry. Returns the answers list, or None on any tab failure
-    (→ caller falls back to the in-process panel). Never raises."""
+    (→ caller falls back to the in-process panel). Never raises. `lenses` maps a
+    provider name → its resolved lens TEXT (F8.4); only NON-empty entries are sent,
+    so a lens-free panel's request body is byte-for-byte the pre-F8.4 shape."""
     fusion_id = f"fusion-{uuid.uuid4().hex[:8]}"
+    lenses = lenses or {}
     # The request carries only what the standalone fusion_call.py needs (it can't
-    # import the package or read the registry): each seat's script + model.
+    # import the package or read the registry): each seat's script + model, plus
+    # any per-seat lens text (fusion_call.py applies it exactly like _run_panel).
     body = {"prompt": prompt, "timeout_s": timeout_s, "panel": panel,
             "providers": {n: {"script": providers[n].get("script", ""),
-                              "model": providers[n].get("model", "")} for n in panel}}
+                              "model": providers[n].get("model", "")} for n in panel},
+            "lenses": {n: lenses[n] for n in panel if lenses.get(n)}}
     try:
         spawn.spawn_fusion_tab(fusion_id, body, cwd or os.getcwd())
     except Exception as e:
