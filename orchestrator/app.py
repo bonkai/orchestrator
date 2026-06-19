@@ -104,6 +104,9 @@ def _view_ctx() -> dict:
     ]
     fusion_default_panel = [n for n in fcfg["presets"].get(fcfg.get("preset"), [])
                             if n in active]
+    # F8.4: named lenses offered as an (optional) per-seat dropdown in the picker.
+    # Names + text travel; the form sends only the chosen NAME per seat (or none).
+    fusion_lenses = [{"name": n, "text": t} for n, t in fcfg["lenses"].items()]
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -115,6 +118,7 @@ def _view_ctx() -> dict:
         "claude_seat_models": CLAUDE_SEAT_MODELS,
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
+        "fusion_lenses": fusion_lenses,
     }
 
 
