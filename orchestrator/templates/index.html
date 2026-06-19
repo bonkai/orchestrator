@@ -413,7 +413,7 @@
           var savedSeats = null;
           try { savedSeats = JSON.parse(localStorage.getItem(CLAUDE_SEATS_KEY)); } catch (e) {}
           if (Array.isArray(savedSeats) && savedSeats.length) {
-            savedSeats.forEach(function(s) { addClaudeSeatRow(s.model, s.effort); });
+            savedSeats.forEach(function(s) { addClaudeSeatRow(s.model, s.effort, s.lens); });
           } else {
             addClaudeSeatRow('opus', 'high');
             addClaudeSeatRow('opus', 'medium');
