@@ -1118,3 +1118,270 @@ multi-model may not beat one-model for incremental critique.**
    is the right home and is cleaned up on completion/kill.
 
 **STOP — design only. No executor-watching code written or approved.**
+
+## 11. Design study — pushing the Fusion panel to full potential *(DESIGN ONLY — not approved, not built)*
+
+**The question.** The panel today is a *single* round — fan out to N seats in parallel, then ONE
+judge synthesizes (`run_fusion_json` → `_panel_answers` → `_judge_prompt`). What concrete steps —
+extra rounds, more lenses, verifier/voting/routing seats — would push it toward its full potential,
+and what does each cost? This section mines Abacus AI's multi-model products for mechanisms,
+re-grounds each in the *existing* seam, ranks them under an explicit weighting, and ends with open
+questions. **No Fusion code is written or changed here.**
+
+Two facts shape everything below, both **verified against the live code/CLI 2026-06-21**:
+
+- **The judge sees only the original prompt verbatim + the seat answers** (`_judge_prompt`) — never
+  the lensed seat prompts, never a prior round. Any multi-round design must *define a new
+  information-flow contract*, because none exists today.
+- **The Claude CLI has no sampling knobs.** `claude --help` exposes `--effort {low,medium,high,xhigh,max}`
+  and `--model`, but **no `--temperature`, `--top-p`, or `--seed`**. For the free Claude seats,
+  **effort + lens are the ONLY decorrelation levers** — re-running identical Claude seats manufactures
+  no diversity.
+
+### 11.a — Abacus AI mechanisms (documented vs. marketing vs. black-box)
+
+Abacus's multi-model story splits into two products, and **its own docs keep the internal algorithms
+a black box** — so the honest extraction is "shapes, not internals":
+
+- **RouteLLM (ChatLLM / RouteLLM API) — routing, not ensembling.** A single OpenAI-compatible
+  endpoint over 50+ models that "intelligently routes to the best available model based on the
+  complexity of the request" ([RouteLLM API reference](https://abacus.ai/help/developer-platform/route-llm/),
+  [routellm-apis.abacus.ai](https://routellm-apis.abacus.ai/)). You either let the `route-llm`
+  identifier auto-route or **force a model by name**; marketing adds "automatic failover for
+  closed-source models" ([Abacus.AI on X](https://x.com/abacusai/status/1986111621845172386)). A
+  review describes the router "evaluat[ing] query characteristics in real-time … token length,
+  inference speed, or creative output"
+  ([KDnuggets ChatLLM review](https://www.kdnuggets.com/2026/03/abacus/chatllm-all-in-one-ai-platform-review)).
+  **Crucially, Abacus's own RouteLLM reference states the routing algorithm is *not disclosed*** — no
+  documented voting, ensembling, or failover internals. The flagship mechanism is **pick ONE model**,
+  the opposite of "ensemble many then judge."
+- **DeepAgent — debate & self-reflection (mechanism undisclosed).** Abacus's autonomous agent
+  ([github.com/abacusai/DeepAgent](https://github.com/abacusai/DeepAgent),
+  [deepagent.abacus.ai](https://deepagent.abacus.ai/)) is marketed with "expert dialogues" that
+  **orchestrate multi-persona debate** and multi-agent **self-reflection** where agents "correct their
+  peers' mistakes," reporting 74% on SWE-bench Verified. But the
+  [DeepAgent review](https://blog.abacus.ai/blog/2025/10/23/deepagent-review/) confirms the internal
+  coordination is **not specified** ("integrates multiple AI models" is stated only for multimedia
+  generation). So debate/self-reflection is a *documented shape* with an *undisclosed mechanism* — we
+  design the internals ourselves.
+- **Eval-driven selection (the disciplined external version).** Building "an Abacus-style app" is
+  described as A/B'ing selection policies — route 5–10% of traffic to an experimental policy and
+  measure **quality-per-cost**
+  ([.NET guide](https://medium.com/@bergamo.gustavo/a-net-developers-guide-to-building-an-abacus-ai-style-4bde9794ddc8)).
+  The LLM-as-judge literature adds **judge-ensembling** with a sharp caveat: aggregating *weak* judges
+  helps slightly, while aggregating *strong* judges can show **no improvement**
+  ([debate-judge benchmark](https://arxiv.org/pdf/2506.05062), [UniCBE](https://arxiv.org/pdf/2502.11454))
+  — directly relevant to a judge-of-judges idea on one strong family (11.c.7). *(These are non-Abacus
+  sources informing the design where Abacus is opaque; exact attribution of the ensembling finding is
+  itself an open question, 11.g-7.)*
+
+**Strategic takeaway.** Abacus's flagship optimizes the *opposite* objective to ours: RouteLLM routes
+to one *cheaper* model to cut paid-API spend, whereas here **Claude seats are $0 and external seats are
+paid.** A faithful copy would *shrink* the panel. The transferable move is the **inversion** — *prefer
+the free Claude seats, escalate to paid external only when a cheap signal says it pays* (11.c.2) — the
+one Abacus-derived idea that serves "full potential" *and* lowers cost.
+
+### 11.b — The seam as it exists (cost & latency model, stated once)
+
+So the per-proposal RISK lines stay terse, the ground truth (verified in `run_fusion_json` /
+`_panel_answers` / `spawn.py`):
+
+- **Out-of-pocket:** `cost_usd = Σ external-seat token cost only` (`judge.cost_usd = sum(a.get("cost",0.0) for a in ok)`).
+  Claude seats and the judge are **$0 out-of-pocket** — but **not free**: each draws on the shared
+  Claude subscription (rate-limit/throttle), adds wall-clock, and opens an iTerm2 tab. A RISK line that
+  calls a Claude seat "$0" means *out-of-pocket only.*
+- **Latency, one round:** seats fan out in parallel (`_panel_answers`/`_run_panel`/the futures in
+  `run_fusion_json`), so a round ≈ **slowest seat**, NOT the sum; then the judge runs **serially** after
+  (`run_claude_json`). One fusion ≈ slowest-seat + judge.
+- **Tab-spawn serialization:** `spawn.py` holds `_TAB_SPAWN_LOCK` (verified) around tab creation, so S
+  seats serialize at the *spawn moment* (~hundreds of ms each), then their runs overlap. Many seats add
+  spawn-serial latency even though the runs are parallel.
+- **Extra rounds serialize:** a 2nd round can't start until round 1 (+ optionally its judge) finishes →
+  ~2× wall-clock. Parallel *width* is cheap; sequential *depth* is not.
+- **The 30-min wall-clock cap** (default `wall_clock_cap_s=1800`) bounds the whole dispatch — any
+  multi-round loop needs an explicit round cap + aggregate timeout.
+- **Two-file `_apply_lens` duplication tax:** `_apply_lens` is **byte-for-byte in BOTH**
+  `claude_runner.py` and `fusion_call.py` (the tab runner can't import the package). Any change to how
+  *external* seats build a round-2 prompt must be made in **both** files; Claude-only rounds touch only
+  `claude_runner.py`.
+
+### 11.c — Enhancement proposals, ranked
+
+Ranked under the explicit weighting in 11.f (out-of-pocket $, then wall-clock, then tab pressure, then
+hard-rule contact). Each carries a **RISK** line.
+
+| # | Proposal | Abacus root | $ | Wall-clock | Tabs | Hard-rule |
+|---|----------|-------------|---|-----------|------|-----------|
+| 1 | Verifier / critic seat (Claude) | judge-ensembling / self-reflection | $0 | +1 serial Claude round | +1–2 | none |
+| 2 | Claude-first cost-aware escalation | RouteLLM (inverted) | **saves $** | +1 serial stage *on escalation only* | base: fewer | none (router must be local) |
+| 3 | Genuinely-decorrelated lenses | judge-ensembling diversity | $0 | none (relabel) | none (relabel) | none |
+| 4 | Parallel self-consistency (extra Claude seats) | ensembling / voting | $0 | ~none (parallel) | +K peak | none |
+| 5 | Debate / cross-examination round | DeepAgent debate | ~2× external | ~2× (serial) | 2× seats | none* (injection surface) |
+| 6 | Task-type routing via local outcome logs | eval-driven selection | $0 | negligible | none | none (logs, not hosted eval) |
+| 7 | Judge-of-judges / meta-judge | judge-ensembling | $0 | +1 serial round | +2–3 | none |
+
+**11.c.1 — Verifier / critic seat (rank 1).** After the judge returns, run ONE more Claude CLI call
+(`run_claude_json`, opus/high) as an adversarial *verifier*: input = original prompt + the judge's
+synthesis (+ optionally the panel answers), task = "find anything the synthesis gets wrong, omits, or
+over-claims; if clean, say so." Either surface its critique alongside the result, or gate a single
+re-judge when it finds a defect. Mirrors DeepAgent "self-reflection" and judge-ensembling, but as a
+*checker*, not a second synthesizer. Seam: a thin wrapper after the `judge = run_claude_json(...)` line
+in `run_fusion_json`; no panel/provider changes; no `fusion_call.py` touch.
+**RISK —** $0 out-of-pocket (Claude-only). Wall-clock: +1 serial Claude round (+1 more if re-judge
+fires) — the cost here is *latency*, which `cost_usd` does not show, so a "$0" tag hides a real
+wall-clock add. Tabs: +1 (+1). Hard rule: none. Limit: the verifier shares Claude's model family → it
+inherits the judge's blind spots (can't catch an error the whole family makes), and a single wrong
+verifier can trigger a needless re-judge.
+
+**11.c.2 — Claude-first cost-aware escalation (rank 2).** RouteLLM with the economics inverted. Stage 1:
+a **free Claude-only panel** (2–3 effort/lens-differentiated seats) + judge. Stage 2: only if a *cheap
+local signal* says it's worth it — the judge self-reports low confidence, or the Claude seats visibly
+disagree — spawn the **paid external** preset and re-judge with the full set. Most dispatches finish at
+$0; external spend happens only where it pays. Seam: wraps `run_fusion_json` in a two-call gate;
+reuses the existing preset machinery (`FUSION_PRESETS_SEED`) for the stage-2 set. **The router MUST be a
+local heuristic or a visible Claude CLI call — never a hosted router** (RouteLLM-the-service is OUT OF
+SCOPE, 11.d).
+**RISK —** $: **net savings** vs. always-on external — the only proposal that *reduces* spend.
+Wall-clock: base case unchanged; +1 serial stage on escalation. Tabs: base case fewer than today's
+external presets. Hard rule: none **iff** the router stays local; an auto-router that POSTs to a hosted
+model-picker would break Local-only + No-hidden-HTTP. Limit: needs a trustworthy "is this hard?" signal
+— the CLI emits no confidence (no logprobs), so it must be judge-elicited or disagreement-based, which
+can misfire.
+
+**11.c.3 — Genuinely-decorrelated lenses (rank 3).** Today's `FUSION_LENSES_SEED` has 3 (risks,
+simplest, ambiguity). Add lenses that attack *different* failure axes, not synonyms: e.g. `adversary`
+(red-team the obvious answer), `first-principles` (ignore convention, re-derive), `long-horizon` (what
+breaks in 6 months / at scale), `user-intent` (what the asker needs vs. literally said). Decorrelation
+— *not lens count* — is the lever; overlapping lenses add tabs/latency without adding diversity. Seam:
+pure config (`config.py` `FUSION_LENSES_SEED` / `fusion.lenses`), resolved by the existing
+`resolve_lens` + `_apply_lens`; no logic change.
+**RISK —** $0 (prompt strings only; no new seats if lenses just relabel existing ones). Wall-clock: none
+when relabeling existing seats; +slowest-seat only if lenses *add* seats. Tabs: none (relabel) / +1 per
+added seat. Hard rule: none. Limit: for Claude seats a lens is the *only* diversity knob (no
+temperature/seed), and all Claude seats share one model family — lenses reduce but cannot eliminate a
+shared blind spot; a too-strong lens can pull a seat off-task (mitigated by `_apply_lens` keeping the
+original prompt verbatim and last).
+
+**11.c.4 — Parallel self-consistency, extra Claude seats (rank 4).** The *self-consistency* reading of
+"run the panel twice" (NOT the debate reading — see 11.c.5). Add K extra **Claude** seats (varied
+effort/lens) in the *same parallel round*, then let the judge weigh agreement ("where the seats
+converge, trust it; where they split, reason it out"). Because the extra seats ride the existing
+parallel fan-out, they add **~no wall-clock** (only tab-spawn-serial time + a tab each). Seam: just a
+longer `panel` list of `{"kind":"claude_cli",...}` seats — no new code path; `_anthropic_seat_answer`
+already allows duplicates.
+**RISK —** $0 (Claude seats). Wall-clock: ~none — extra seats are parallel (the cheap-on-latency option,
+unlike 11.c.1/.5/.7). Tabs: **+K concurrent** — the peak-tab-pressure proposal; max preset + K extra can
+mean a dozen+ tabs at once under the spawn lock. Hard rule: none. Limit: no true confidence signal (no
+logprobs → "voting" is judge-elicited, not measured); correlated Claude seats can agree *and be wrong
+together* — self-consistency across one family can't break a shared blind spot. External seats would
+decorrelate better but cost $.
+
+**11.c.5 — Debate / cross-examination round (rank 5).** The DeepAgent "expert dialogue / peer-correction"
+shape: after round 1, give each seat the OTHER seats' answers and ask it to critique and revise; then
+the judge synthesizes the *revised* set. This is the *refinement* reading of "run the panel twice" —
+distinct from 11.c.4's identical re-run. It requires the new info-flow contract flagged up top: **round-2
+seats see round-1 answers** (today only the judge does). Seam: a round-2 prompt builder + a second
+`_panel_answers`/seat fan-out in `run_fusion_json`, then `_judge_prompt` over revised answers;
+**external-seat round-2 prompts must be built in both `claude_runner.py` AND `fusion_call.py`** (the
+duplication tax, 11.b).
+**RISK —** $: **~2× external** (every external seat runs twice); Claude seats stay $0. Wall-clock: **~2×**
+— round 2 serializes behind round 1's slowest seat, then itself ≈ slowest seat, then judge; the closest
+of all proposals to the 30-min cap. Tabs: 2× seat tabs + judge. Hard rule: none broken (revised text
+stays on the laptop) — **but two real hazards:** (a) feeding external-model text back into a later
+seat/judge is a **prompt-injection surface** (untrusted text now steers a second round), and (b) **debate
+herds** — seats converge toward consensus, *reducing* the very decorrelation lenses buy; more steps can
+lower diversity. Needs a hard cap of exactly one extra round (no unbounded loop).
+
+**11.c.6 — Task-type routing via local outcome logs (rank 6).** Abacus's eval-driven selection done
+*locally*: instead of a fixed default preset, pick the preset + lens assignment from the orchestrator's
+**own past-outcome logs** (its stated learning loop) by task type — "refactors did best on `balanced` +
+risks/simplest," etc. No hosted eval service; a local lookup/heuristic over the `outcomes` table. Seam:
+a selection step *before* `run_fusion_json` that sets `preset`/`panel`; the fusion call itself is
+unchanged.
+**RISK —** $0 (local lookup; no model call required). Wall-clock: negligible. Tabs: none extra. Hard
+rule: none **iff** selection reads local logs — Abacus's *hosted* eval/A-B platform is OUT OF SCOPE
+(11.d). Limit (the big one): eval-driven selection presumes **labeled ground-truth the orchestrator does
+not have** — "which past dispatch was *better*?" is unscored today, so this quietly smuggles in a
+benchmark/scoring build effort. Speculative until outcomes are scored (11.g-6).
+
+**11.c.7 — Judge-of-judges / meta-judge (rank 7).** Run 2–3 independent judges (different effort/lens)
+over the same panel answers, then a meta-judge merges/picks. Mirrors judge-ensembling. Seam: call
+`_judge_prompt` → `run_claude_json` N times, then one more meta-judge call; all in `run_fusion_json`, no
+panel change.
+**RISK —** $0 (Claude). Wall-clock: +1 serial round for the meta-judge (the N base judges parallelize,
+but the meta waits on all). Tabs: +2–3 judge tabs + meta. Hard rule: none. Limit (why it ranks last):
+the LLM-as-judge literature finds **ensembling *strong* judges can yield no improvement** (it helps
+mostly for weak judges), and all our judges are the same strong family — so the expected uplift is
+smallest here while latency/tab cost is among the highest. Cost-risk ($0) and latency-risk (high) point
+in *opposite* directions.
+
+### 11.d — OUT OF SCOPE (hosted / hidden-HTTP — would break the hard rules)
+
+- **RouteLLM as a service** (the unified OpenAI-compatible router over 50+ models behind one hosted
+  endpoint): a hosted router + hidden HTTP → violates **Local-only** and **No hidden HTTP**. We borrow
+  only the *idea* (11.c.2/.6) as a local heuristic or a visible Claude CLI call. *The "OpenRouter fusion
+  api is what we copied" premise is **stale** — Fusion already dropped OpenRouter for direct providers;
+  do **not** reintroduce any hosted router.*
+- **Abacus hosted eval / A-B platform** (quality-per-cost selection as a service): hosted → OUT. Local
+  analogue = 11.c.6 over our own logs.
+- **DeepAgent cloud agents / SuperAgent:** hosted multi-agent service → OUT.
+- **Any auto-router that calls an external endpoint to choose the model:** OUT, however cheap — the call
+  must be local or a visible tab.
+
+### 11.e — Cross-cutting risks (apply to every multi-round / multi-seat proposal)
+
+- **Tab storm.** max preset (6 seats) × extra rounds × verifier/judge can spawn a dozen-plus iTerm2 tabs,
+  all serializing at creation under `_TAB_SPAWN_LOCK` (shared with the executor's own spawns). A real
+  UX/resource ceiling; `run_fusion_json`/`run_claude_json` have **no tab reuse** today.
+- **Wall-clock cap.** Every depth-adding proposal (verifier, debate, meta-judge, escalation stage) eats
+  the 1800s dispatch cap; multi-round needs an explicit round cap + aggregate timeout.
+- **Subscription throttle.** "$0" Claude seats still draw the *same* subscription as the dispatch
+  executor; piling on free seats/judges can rate-limit the very work they support.
+- **Prompt-injection surface.** Any proposal that feeds external-model text into a *later* round or judge
+  (11.c.5 especially) widens the untrusted-input path; today only the single judge ingests external text,
+  once.
+- **Two-file `_apply_lens` duplication.** Round/lens logic touching *external* seats must change both
+  `claude_runner.py` and `fusion_call.py`; Claude-only steps avoid this.
+- **The "$0 ≠ free" trap.** `cost_usd` counts external tokens only; for Claude-only proposals the real
+  cost is wall-clock + tabs + throttle, which that number hides. Rank Claude-only steps on *latency*, not
+  dollars.
+
+### 11.f — Ranking rationale (the explicit weighting)
+
+"Ranked" needs a stated objective, because cost-rank, latency-rank, and quality-rank disagree. The
+ordering above weights, in order: **(1) out-of-pocket $ (lower = better; $0 Claude beats paid external),
+(2) wall-clock added (parallel width is cheap, serial depth is not), (3) tab pressure, (4) hard-rule
+contact (any contact heavily penalized).** Under that weighting the cheap, rule-safe, low-latency wins
+(verifier, Claude-first escalation, better lenses) rank above the deep/expensive ones (debate,
+meta-judge). A **quality-first** weighting would lift debate (11.c.5) — genuine cross-model refinement —
+toward the top despite its 2× cost; that is the main trade-off to decide. **None of these is proposed as
+a default; Fusion stays opt-in / default-off — this is a menu, not a switch.**
+
+### 11.g — OPEN QUESTIONS *(resolve before any implementation)*
+
+1. **Does any of this beat one more Claude seat?** The §10.d caution recurs: multi-model diversity helps
+   most on hard, complete judgments. Does a verifier/debate round measurably beat simply adding one
+   Claude seat to the panel? Unproven — needs an A/B on real dispatches (which presumes scoring; see Q6).
+2. **What is the escalation signal (11.c.2)?** The CLI emits no confidence/logprobs. Is judge-elicited
+   self-confidence trustworthy enough to gate paid external seats, or does disagreement-among-Claude-seats
+   work better? Either can misfire.
+3. **Debate info-flow contract (11.c.5):** do round-2 seats see *all* peers' answers or only a summary?
+   Does the judge see the debate or only the final revised answers? Undefined today.
+4. **Does debate herd?** Measure whether a cross-examination round *increases* answer quality or merely
+   *converges* the seats (lowering the decorrelation that justified the panel).
+5. **Tab reuse:** worth teaching `run_fusion_json`/`run_claude_json` a reusable tab to survive the
+   tab-storm (11.e), or cap concurrent seats instead? (Same open question as §10.g-4, now sharper with
+   extra rounds.)
+6. **Scoring for eval-driven routing (11.c.6):** the `outcomes` table is unscored — what cheap signal
+   labels a past dispatch "better"? Without it, task-type routing is speculative.
+7. **Judge-ensembling uplift (11.c.7):** does the "strong judges ⇒ no improvement" finding from the
+   LLM-as-judge literature hold for our single-family judges, making meta-judging pure cost? Confirm
+   before building. *(Exact source attribution for that finding is itself unverified here — treat as a
+   hypothesis, not a settled result.)*
+8. **Kill-all / billing mid-round:** a 2nd external round doubles the window in which a kill-all can
+   leave an external seat billed-but-orphaned (same hazard as §10.g-5, now twice).
+9. **Where does multi-round state live?** Round-1 answers must reach round 2 without an Anthropic API
+   call and without leaving the laptop — confirm the request-file/sidecar path (`fusion_call.py` ↔
+   `_run_fusion_in_tab`) carries them cleanly.
+
+**STOP — design only. No Fusion-enhancement code written or approved.**
