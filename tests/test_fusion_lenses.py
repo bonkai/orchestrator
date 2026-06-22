@@ -170,6 +170,84 @@ class TestLensWriteHelpers(_IsolatedConfig):
         self.assertEqual(config.CONFIG_PATH.read_text(), "{ not valid json")
 
 
+# ───────────────────── fusion profiles (saveable panels) ────────────────────
+
+class TestProfiles(_IsolatedConfig):
+    """Saved Fusion profiles: named, full panel configs the dispatch picker stores
+    and re-applies. CRUD mirrors the lens helpers — normalized on write, merge-
+    preserving, corruption-guarded."""
+
+    SEATS = {"claude_seats": [{"model": "opus", "effort": "high", "lens": "first-principles"}],
+             "provider_seats": [{"name": "glm", "lens": "adversary"}]}
+
+    def test_save_and_read_roundtrip(self):
+        config.save_profile("debug", self.SEATS)
+        profs = config.fusion_profiles()
+        self.assertIn("debug", profs)
+        self.assertEqual(profs["debug"]["claude_seats"][0]["lens"], "first-principles")
+        self.assertEqual(profs["debug"]["provider_seats"][0]["name"], "glm")
+        self.assertIn("debug", config.fusion_config()["profiles"])   # surfaced like lenses/presets
+
+    def test_normalize_drops_junk_and_fills_defaults(self):
+        config.save_profile("p", {
+            "claude_seats": [{"model": "opus"},     # effort defaulted, lens blank
+                             {"effort": "high"},     # no model → dropped
+                             "nope"],                # not a dict → dropped
+            "provider_seats": [{"name": "glm", "lens": "risks", "extra": 1},
+                               {"lens": "y"}],       # no name → dropped
+            "junk": 5,                               # unknown top-level key → gone
+        })
+        p = config.fusion_profiles()["p"]
+        self.assertEqual(p["claude_seats"], [{"model": "opus", "effort": "high", "lens": ""}])
+        self.assertEqual(p["provider_seats"], [{"name": "glm", "lens": "risks"}])
+        self.assertNotIn("junk", p)
+
+    def test_save_preserves_keys_and_lenses(self):
+        self._write({"fusion": {"providers": {"glm": {"api_key": "KEEP"}},
+                                "lenses": {"custom": "x"}}})
+        config.save_profile("p", self.SEATS)
+        on_disk = self._read()["fusion"]
+        self.assertEqual(on_disk["providers"]["glm"]["api_key"], "KEEP")   # secrets survive
+        self.assertEqual(on_disk["lenses"]["custom"], "x")
+        self.assertIn("p", on_disk["profiles"])
+
+    def test_edit_overwrites_in_place(self):
+        config.save_profile("p", self.SEATS)
+        config.save_profile("p", {"claude_seats": [{"model": "sonnet", "effort": "low"}],
+                                  "provider_seats": []})
+        p = config.fusion_profiles()["p"]
+        self.assertEqual(p["claude_seats"][0]["model"], "sonnet")
+        self.assertEqual(p["provider_seats"], [])
+
+    def test_blank_name_no_seats_or_nondict_raise(self):
+        for bad in (lambda: config.save_profile("  ", self.SEATS),
+                    lambda: config.save_profile("empty", {"claude_seats": [], "provider_seats": []}),
+                    lambda: config.save_profile("bad", "not-a-dict")):
+            with self.assertRaises(config.ConfigWriteError):
+                bad()
+
+    def test_remove_idempotent_and_corruption_guarded(self):
+        config.save_profile("p", self.SEATS)
+        config.remove_profile("p")
+        self.assertNotIn("p", config.fusion_profiles())
+        config.remove_profile("ghost")                       # unknown → no raise
+        config.CONFIG_PATH.write_text("{ bad json", encoding="utf-8")
+        for call in (lambda: config.save_profile("a", self.SEATS),
+                     lambda: config.remove_profile("a")):
+            with self.assertRaises(config.ConfigWriteError):
+                call()
+        self.assertEqual(config.CONFIG_PATH.read_text(), "{ bad json")   # never clobbered
+
+    def test_garbage_profiles_block_filtered_on_read(self):
+        self._write({"fusion": {"profiles": "not-a-dict"}})
+        self.assertEqual(config.fusion_profiles(), {})
+        self._write({"fusion": {"profiles": {"p": "nope",
+                                             "q": {"claude_seats": [{"model": "opus"}]}}}})
+        profs = config.fusion_profiles()
+        self.assertNotIn("p", profs)                         # non-dict profile dropped
+        self.assertEqual(profs["q"]["claude_seats"][0]["model"], "opus")
+
+
 # ───────────────────────────── _apply_lens ─────────────────────────────────
 
 class TestApplyLens(unittest.TestCase):
