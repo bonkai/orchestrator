@@ -276,27 +276,35 @@
         // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
         var FUSION_LENSES = {{ fusion_lenses | tojson }};
         var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
-        var PROV_LENSES_KEY = 'orch_fusion_prov_lenses';
+        // F12: cross-lab providers are now ADDED as seats (like Claude seats) so the
+        // same provider can appear multiple times, each with its own lens. Only
+        // active (keyed) providers are selectable; the server re-validates.
+        var FUSION_PROVIDERS = {{ fusion_providers | tojson }};
+        var ACTIVE_PROVIDERS = (FUSION_PROVIDERS || []).filter(function(p) { return p.active; });
+        var PROVIDER_MODEL = {};
+        (FUSION_PROVIDERS || []).forEach(function(p) { PROVIDER_MODEL[p.name] = p.model; });
         var FUSION_ON_KEY = 'orch_fusion_on';
         var FUSION_ENRICH_KEY = 'orch_fusion_enrich';
         var FUSION_VERIFY_KEY = 'orch_fusion_verify';
-        var FUSION_PANEL_KEY = 'orch_fusion_panel';
+        var PROVIDER_SEATS_KEY = 'orch_fusion_provider_seats';
         var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
         var claudeSeatsEl = document.getElementById('claude-seats');
         var addClaudeSeatBtn = document.getElementById('add-claude-seat');
+        var providerSeatsEl = document.getElementById('provider-seats');
+        var addProviderSeatBtn = document.getElementById('add-provider-seat');
         var fusionCountEl = document.getElementById('fusion-count');
 
-        function fusionProvCbs() {
-          return fusionPanel
-            ? Array.prototype.slice.call(fusionPanel.querySelectorAll('.fusion-prov-cb'))
-            : [];
-        }
-        function checkedProviders() {
-          // Only active (non-disabled) provider rows can be checked, so this is
-          // already validated; the server re-validates against live keys too.
-          return fusionProvCbs()
-            .filter(function(cb) { return cb.checked && !cb.disabled; })
-            .map(function(cb) { return cb.value; });
+        function providerSeats() {
+          // Each row → {name, lens}. The provider <select> only offers active
+          // providers, so every row is already valid; the server re-validates too.
+          if (!providerSeatsEl) return [];
+          return Array.prototype.slice.call(
+            providerSeatsEl.querySelectorAll('.provider-seat-row')
+          ).map(function(r) {
+            var lensEl = r.querySelector('.provider-seat-lens');
+            return { name: r.querySelector('.provider-seat-name').value,
+                     lens: lensEl ? lensEl.value : '' };
+          });
         }
         function syncFusionPanel() {
           // The seat picker is shared by BOTH modes (fusion rewrite + enrich), so
