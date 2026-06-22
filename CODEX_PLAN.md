@@ -376,10 +376,12 @@ Build strictly in order; the seat (C2) is the first shippable thing and is hook-
 
 ## 8. OPEN QUESTIONS *(resolve before any implementation)*
 
-1. **THE $0 PREMISE (gates everything).** Does `codex`'s **non-interactive** mode
-   (`codex exec` or equiv) authenticate via the **ChatGPT subscription at $0** — *in that
-   mode specifically*, not merely interactively — or only via a paid `OPENAI_API_KEY`?
-   **Unverified; codex is not installed here (§0).** Branch A vs Branch B (§2) hinges on this.
+> **C0 resolved Q1–Q5 + Q8** (2026-06-22, §0/§3): the $0 premise, token-usage presence, the
+> auth-state probe, the no-hang flag, the event schema, and per-seat state isolation are all
+> confirmed. The genuinely-open ones are **Q6, Q7, Q9, Q10, Q11** below.
+
+1. ✅ **RESOLVED — Branch A.** `codex exec --json` runs **$0 on the ChatGPT subscription** with
+   no `OPENAI_API_KEY` (§0/§3). The viability gate is cleared.
 2. **Token/cost usage in the terminal event?** Branch B's paid seat **can't be priced**
    without it — a double-conditional dead end (§2). What are the exact field names (§3)?
 3. **Auth-state probe.** Is there a cheap, **non-billing** way to detect login/expiry so
