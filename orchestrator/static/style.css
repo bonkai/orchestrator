@@ -420,18 +420,6 @@ main { min-width: 0; }
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
 }
-.fusion-prov {
-  color: var(--text);
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-}
-.fusion-prov .fusion-prov-name { font-weight: 600; }
-.fusion-prov.inactive { opacity: 0.5; cursor: not-allowed; }
-.fusion-prov.inactive input { cursor: not-allowed; }
-
 /* drop zone */
 .drop-zone {
   border: 1px dashed var(--border-strong);
