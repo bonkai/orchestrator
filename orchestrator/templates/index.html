@@ -523,36 +523,15 @@
               try { localStorage.setItem(FUSION_VERIFY_KEY, verifyCheckbox.checked ? '1' : '0'); } catch (e) {}
             });
           }
-          fusionProvCbs().forEach(function(cb) {
-            cb.addEventListener('change', function() {
-              try { localStorage.setItem(FUSION_PANEL_KEY, JSON.stringify(checkedProviders())); } catch (e) {}
-              updateFusionCount();
-            });
-          });
-          // F8.4: restore + persist each provider's lens choice (independent of
-          // whether it's checked — survives reload like the Claude-seat lenses).
-          function provLensSelects() {
-            return fusionPanel
-              ? Array.prototype.slice.call(fusionPanel.querySelectorAll('select.fusion-prov-lens'))
-              : [];
-          }
-          function saveProvLenses() {
-            var map = {};
-            provLensSelects().forEach(function(sel) {
-              if (sel.value) map[sel.getAttribute('data-prov')] = sel.value;
-            });
-            try { localStorage.setItem(PROV_LENSES_KEY, JSON.stringify(map)); } catch (e) {}
-          }
-          var savedProvLenses = {};
-          try { savedProvLenses = JSON.parse(localStorage.getItem(PROV_LENSES_KEY)) || {}; } catch (e) {}
-          provLensSelects().forEach(function(sel) {
-            var prov = sel.getAttribute('data-prov');
-            if (savedProvLenses && savedProvLenses[prov]) sel.value = savedProvLenses[prov];
-            sel.addEventListener('change', saveProvLenses);
-          });
           if (addClaudeSeatBtn) {
             addClaudeSeatBtn.addEventListener('click', function() {
               addClaudeSeatRow('opus', 'high'); saveClaudeSeats();
+            });
+          }
+          if (addProviderSeatBtn) {
+            addProviderSeatBtn.addEventListener('click', function() {
+              addProviderSeatRow(ACTIVE_PROVIDERS.length ? ACTIVE_PROVIDERS[0].name : '', '');
+              saveProviderSeats();
             });
           }
           updateFusionCount();
@@ -601,8 +580,8 @@
           // single-model rewrite. (Only the rewrite path uses fusion.)
           var fusionWanted = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
           if (rewrite && fusionWanted &&
-              (claudeSeats().length + checkedProviders().length) < 2) {
-            flashStatus('fusion needs ≥2 seats — add another Claude seat or tick a provider', true);
+              (claudeSeats().length + providerSeats().length) < 2) {
+            flashStatus('fusion needs ≥2 seats — add another Claude seat or provider seat', true);
             return;
           }
           // Persist the draft BEFORE dispatching so it survives any failure on
