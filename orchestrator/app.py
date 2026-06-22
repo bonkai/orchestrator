@@ -1656,7 +1656,8 @@ def _render_markdown(md: str) -> str:
         if re.match(r"^[-*]\s+", line):
             if not in_list:
                 out.append("<ul>"); in_list = True
-            out.append(f"<li>{_md_inline(re.sub(r'^[-*][ \t]+', '', line))}</li>"); i += 1; continue
+            item = re.sub(r"^[-*]\s+", "", line)
+            out.append(f"<li>{_md_inline(item)}</li>"); i += 1; continue
         # paragraph: gather consecutive plain lines
         close_list(); para = [line]; i += 1
         while (i < n and lines[i].strip()
