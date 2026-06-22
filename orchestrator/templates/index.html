@@ -335,19 +335,29 @@
         }
         // F8.4: a lens dropdown ("no lens" + each configured lens). Only built
         // when lenses exist, so a no-lens deployment renders exactly as before.
+        // Hovering reveals the lens TEXT: the <select> title tracks the current
+        // selection and each <option> carries its own text, so the names aren't opaque.
+        function setLensTitle(sel) {
+          sel.title = sel.value ? (LENS_TEXT[sel.value] || sel.value)
+                                : 'no lens — this seat answers the prompt verbatim';
+        }
         function makeLensSelect(val) {
           var sel = document.createElement('select');
           sel.className = 'claude-seat-lens';
           sel.style.fontSize = '10px';
           var none = document.createElement('option');
           none.value = ''; none.textContent = 'no lens';
+          none.title = 'no lens — this seat answers the prompt verbatim';
           sel.appendChild(none);
           LENS_NAMES.forEach(function(name) {
             var op = document.createElement('option');
             op.value = name; op.textContent = name;
+            op.title = LENS_TEXT[name] || '';
             if (name === val) op.selected = true;
             sel.appendChild(op);
           });
+          setLensTitle(sel);
+          sel.addEventListener('change', function() { setLensTitle(sel); });
           return sel;
         }
         function addClaudeSeatRow(model, effort, lens) {
@@ -415,13 +425,17 @@
           sel.style.fontSize = '10px';
           var none = document.createElement('option');
           none.value = ''; none.textContent = 'no lens';
+          none.title = 'no lens — this seat answers the prompt verbatim';
           sel.appendChild(none);
           LENS_NAMES.forEach(function(name) {
             var op = document.createElement('option');
             op.value = name; op.textContent = name;
+            op.title = LENS_TEXT[name] || '';
             if (name === val) op.selected = true;
             sel.appendChild(op);
           });
+          setLensTitle(sel);
+          sel.addEventListener('change', function() { setLensTitle(sel); });
           return sel;
         }
         function addProviderSeatRow(name, lens) {
