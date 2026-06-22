@@ -97,6 +97,10 @@
             <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
             enrich ⚡
           </label>
+          <label class="fusion-toggle" title="verify (requires fusion): after the panel's judge synthesizes, a $0 Claude-CLI critic checks it and, on a found defect, triggers ONE re-judge to fix it.">
+            <input type="checkbox" id="verify-checkbox" {% if not fusion_available %}disabled{% endif %} {% if verify_default %}checked{% endif %}>
+            verify ⚡
+          </label>
           <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
           <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
           <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
@@ -280,6 +284,7 @@
         // per-project). Default OFF. The picker reveals only when the toggle's on.
         var fusionCheckbox = document.getElementById('fusion-checkbox');
         var enrichCheckbox = document.getElementById('enrich-checkbox');
+        var verifyCheckbox = document.getElementById('verify-checkbox');
         var fusionPanel = document.getElementById('fusion-panel');
         var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
         var CLAUDE_MODELS = {{ claude_seat_models | tojson }};
@@ -290,6 +295,7 @@
         var PROV_LENSES_KEY = 'orch_fusion_prov_lenses';
         var FUSION_ON_KEY = 'orch_fusion_on';
         var FUSION_ENRICH_KEY = 'orch_fusion_enrich';
+        var FUSION_VERIFY_KEY = 'orch_fusion_verify';
         var FUSION_PANEL_KEY = 'orch_fusion_panel';
         var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
         var claudeSeatsEl = document.getElementById('claude-seats');
@@ -436,6 +442,17 @@
               updateFusionCount();
             });
           }
+          // F11.c.1: verify checkbox persists its own choice; absent storage keeps
+          // the server default (the `checked` attr seeded from verify_default).
+          if (verifyCheckbox) {
+            try {
+              var vStored = localStorage.getItem(FUSION_VERIFY_KEY);
+              if (vStored !== null) verifyCheckbox.checked = vStored === '1';
+            } catch (e) {}
+            verifyCheckbox.addEventListener('change', function() {
+              try { localStorage.setItem(FUSION_VERIFY_KEY, verifyCheckbox.checked ? '1' : '0'); } catch (e) {}
+            });
+          }
           fusionProvCbs().forEach(function(cb) {
             cb.addEventListener('change', function() {
               try { localStorage.setItem(FUSION_PANEL_KEY, JSON.stringify(checkedProviders())); } catch (e) {}
@@ -553,6 +570,9 @@
           // block to the executor prompt, so it's sent for BOTH buttons.
           var enrichOn = !!(enrichCheckbox && enrichCheckbox.checked && !enrichCheckbox.disabled);
           fd.append('fusion_enrich', enrichOn ? 'true' : 'false');
+          // F11.c.1: verifier seat (no-op unless fusion is on).
+          var verifyOn = !!(verifyCheckbox && verifyCheckbox.checked && !verifyCheckbox.disabled);
+          fd.append('fusion_verify', verifyOn ? 'true' : 'false');
 
           // /send is fire-and-forget — it returns in ~50ms after scheduling a
           // background task, then the rewriter (5-15s) + dispatch creation
