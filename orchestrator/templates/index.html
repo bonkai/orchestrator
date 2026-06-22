@@ -122,29 +122,13 @@
             </div>
             <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
               <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
-                Cross-lab providers <span class="muted">— external API · costs tokens · key-gated</span>
+                Cross-lab providers <span class="muted">— external API · costs tokens · key-gated · add as many as you like (even the same one)</span>
               </div>
-              {% for p in fusion_providers %}
-              <span class="fusion-prov-wrap" style="display:inline-flex; align-items:center; gap:0.25rem; margin-right:0.5rem;">
-                <label class="fusion-prov{% if not p.active %} inactive{% endif %}"
-                       title="{% if p.active %}{{ p.model }}{% else %}no API key set{% endif %}">
-                  <input type="checkbox" class="fusion-prov-cb" value="{{ p.name }}"
-                         {% if not p.active %}disabled{% endif %}>
-                  <span class="fusion-prov-name">{{ p.name }}</span>
-                  <span class="muted">{{ p.model }}</span>
-                  {% if not p.active %}<span class="muted">— no API key set</span>{% endif %}
-                </label>
-                {% if p.active and fusion_lenses %}
-                <select class="fusion-prov-lens" data-prov="{{ p.name }}"
-                        title="lens for {{ p.name }}" style="font-size:10px;">
-                  <option value="">no lens</option>
-                  {% for l in fusion_lenses %}<option value="{{ l.name }}">{{ l.name }}</option>{% endfor %}
-                </select>
-                {% endif %}
+              <div id="provider-seats" class="provider-seats"></div>
+              <button type="button" id="add-provider-seat" class="secondary small" style="margin-top:0.25rem;">+ add provider seat</button>
+              <span id="no-providers-hint" class="muted" style="display:none; font-size:12px;">
+                No external providers with API keys — add one in <a href="/settings">fusion settings</a>.
               </span>
-              {% else %}
-              <span class="muted">No external providers registered.</span>
-              {% endfor %}
             </div>
             <div id="fusion-count" class="muted fusion-count" style="font-size:12px; margin-top:0.35rem;"></div>
           </div>
