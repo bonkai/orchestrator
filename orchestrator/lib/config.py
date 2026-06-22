@@ -141,6 +141,28 @@ def load_config() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _normalize_profile(prof: dict) -> dict:
+    """Coerce a saved Fusion PROFILE to the canonical shape
+    {"claude_seats": [{model, effort, lens}], "provider_seats": [{name, lens}]},
+    dropping malformed seats and unknown keys. Pure / no IO — used on BOTH the
+    read path (fusion_config, so a hand-edited config.json can't break the picker)
+    and the write path (save_profile, so what lands on disk is always clean)."""
+    def s(v) -> str:
+        return str(v).strip() if v is not None else ""
+    prof = prof if isinstance(prof, dict) else {}
+    claude = []
+    for seat in prof.get("claude_seats") or []:
+        if isinstance(seat, dict) and s(seat.get("model")):
+            claude.append({"model": s(seat.get("model")),
+                           "effort": s(seat.get("effort")) or "high",
+                           "lens": s(seat.get("lens"))})
+    providers = []
+    for seat in prof.get("provider_seats") or []:
+        if isinstance(seat, dict) and s(seat.get("name")):
+            providers.append({"name": s(seat.get("name")), "lens": s(seat.get("lens"))})
+    return {"claude_seats": claude, "provider_seats": providers}
+
+
 def fusion_config() -> dict:
     """The effective Fusion config: the SEEDS above with config.json merged over
     them. Always returns {preset, timeout_s, providers, presets}.
