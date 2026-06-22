@@ -137,6 +137,7 @@ def fusion_config() -> dict:
     return {
         "preset": fcfg.get("preset") or DEFAULT_FUSION_PRESET,
         "timeout_s": fcfg.get("timeout_s") or DEFAULT_FUSION_TIMEOUT_S,
+        "verify": bool(fcfg.get("verify", False)),   # F11.c.1: opt-in verifier seat (default off)
         "providers": providers,
         "presets": presets,
         "lenses": lenses,
@@ -272,6 +273,18 @@ def set_preset(preset: str) -> dict:
     Returns the new fusion_config(). Raises ConfigWriteError on a corrupt file."""
     cfg = _read_config_for_write()
     cfg.setdefault("fusion", {})["preset"] = str(preset)
+    save_config(cfg)
+    return fusion_config()
+
+
+def set_verify(enabled: bool) -> dict:
+    """Set fusion.verify — the opt-in, default-off verifier seat (FUSION_PLAN §11.c.1):
+    after the fusion judge synthesizes, a $0 local-CLI critic checks it and, on a
+    found defect, triggers ONE re-judge. Merge-preserving (everything else, incl.
+    api_keys). Returns the new fusion_config(). Raises ConfigWriteError on a corrupt
+    file."""
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {})["verify"] = bool(enabled)
     save_config(cfg)
     return fusion_config()
 
