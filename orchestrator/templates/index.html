@@ -113,6 +113,16 @@
           {% endif %}
           <a href="/settings" class="preview-link" title="edit the fusion registry + presets">⚙ fusion settings →</a>
           <div id="fusion-panel" class="fusion-panel" style="display:none;">
+            <!-- Saved profiles: quick-switch the whole panel (your exact models + lenses). -->
+            <div id="fusion-profiles-bar" style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap; font-size:12px; margin:0 0 0.5rem; padding-bottom:0.5rem; border-bottom:1px solid #1e232c;">
+              <span class="muted">profile</span>
+              <select id="fusion-profile-select" style="font-size:12px;"></select>
+              <button type="button" id="profile-apply" class="secondary small" title="load this profile's models + lenses into the picker">apply</button>
+              <button type="button" id="profile-save" class="secondary small" title="save the current seats as a new named profile">save as…</button>
+              <button type="button" id="profile-update" class="secondary small" title="overwrite the selected profile with the current seats">update</button>
+              <button type="button" id="profile-delete" class="link" title="delete the selected profile" style="color:#f0676f;">delete</button>
+              <a href="/playbook" target="_blank" class="preview-link" style="margin-left:auto;" title="recommended lens combos by task type">📖 lens guide →</a>
+            </div>
             <div class="fusion-section" style="margin:0.3rem 0;">
               <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
                 Claude Code seats <span class="muted">— local <code>claude</code> CLI · no API · $0 · add as many as you like</span>
@@ -280,6 +290,9 @@
         // (names alone — first-principles, precedent, … — aren't self-explanatory).
         var LENS_TEXT = {};
         (FUSION_LENSES || []).forEach(function (l) { LENS_TEXT[l.name] = l.text; });
+        // Saved Fusion PROFILES (name → {claude_seats, provider_seats}) — the
+        // quick-switch dropdown re-populates the seats from one of these.
+        var FUSION_PROFILES = {{ fusion_profiles | tojson }};
         // F12: cross-lab providers are now ADDED as seats (like Claude seats) so the
         // same provider can appear multiple times, each with its own lens. Only
         // active (keyed) providers are selectable; the server re-validates.
