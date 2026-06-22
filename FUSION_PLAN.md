@@ -1248,13 +1248,18 @@ model-picker would break Local-only + No-hidden-HTTP. Limit: needs a trustworthy
 — the CLI emits no confidence (no logprobs), so it must be judge-elicited or disagreement-based, which
 can misfire.
 
-**11.c.3 — Genuinely-decorrelated lenses (rank 3).** Today's `FUSION_LENSES_SEED` has 3 (risks,
-simplest, ambiguity). Add lenses that attack *different* failure axes, not synonyms: e.g. `adversary`
-(red-team the obvious answer), `first-principles` (ignore convention, re-derive), `long-horizon` (what
-breaks in 6 months / at scale), `user-intent` (what the asker needs vs. literally said). Decorrelation
-— *not lens count* — is the lever; overlapping lenses add tabs/latency without adding diversity. Seam:
-pure config (`config.py` `FUSION_LENSES_SEED` / `fusion.lenses`), resolved by the existing
-`resolve_lens` + `_apply_lens`; no logic change.
+**11.c.3 — Genuinely-decorrelated lenses (rank 3).** ✅ *(shipped 2026-06-22)* `FUSION_LENSES_SEED`
+grew from 3 (risks, simplest, ambiguity) to 10 — added `first-principles` (reject the framing,
+re-derive), `user-intent` (the goal behind the literal request), `long-horizon` (future-change cost /
+lock-in, *not* present minimalism — that's `simplest`'s axis), `concrete` (force the runnable
+artifact), `adversary` (red-team the *committed* answer — sharpened vs. `risks`, the lens it sits
+closest to), `precedent` (reuse prior art — the literal inverse of `first-principles`), and `evidence`
+(distrust the *facts*, vs. `adversary`'s distrust of the *design*). Each attacks a *different* failure
+axis, not a synonym; `completeness`/`what's-missing` was considered and **declined** as too correlated
+with `ambiguity` + `risks`. Decorrelation — *not lens count* — is the lever; overlapping lenses add
+tabs/latency without adding diversity. Seam was exactly as predicted: pure config (`config.py`
+`FUSION_LENSES_SEED` / `fusion.lenses`), resolved by the existing `resolve_lens` + `_apply_lens`; no
+logic change.
 **RISK —** $0 (prompt strings only; no new seats if lenses just relabel existing ones). Wall-clock: none
 when relabeling existing seats; +slowest-seat only if lenses *add* seats. Tabs: none (relabel) / +1 per
 added seat. Hard rule: none. Limit: for Claude seats a lens is the *only* diversity knob (no

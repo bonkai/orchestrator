@@ -111,6 +111,27 @@ class TestResolveLens(_IsolatedConfig):
         self.assertEqual(config.resolve_lens("x", lenses), "TEXT-X")
         self.assertEqual(config.resolve_lens("y", lenses), "y")   # unknown → literal
 
+    def test_new_decorrelation_lenses_resolve_by_name(self):
+        # §11.c.3 (2026-06-22): the seven added lenses each resolve by NAME to
+        # their exact seed text, so a seat opts in by name like the original
+        # three. Each targets a DISTINCT failure axis from risks/simplest/
+        # ambiguity — that orthogonality is a human judgment, not asserted here;
+        # this proves only that the wiring (name → text) is live.
+        for name in ("first-principles", "user-intent", "long-horizon", "concrete",
+                     "adversary", "precedent", "evidence"):
+            self.assertIn(name, config.FUSION_LENSES_SEED)
+            self.assertEqual(config.resolve_lens(name),
+                             config.FUSION_LENSES_SEED[name])
+
+    def test_all_seed_lenses_follow_house_style(self):
+        # Convention: every SEED lens is a terse "Approach this through a[n] X
+        # lens: …" prefix that shifts EMPHASIS only — it must never imply an
+        # output shape, since the judge always sees the original prompt verbatim
+        # (a lens that deformed the format would break that contract).
+        for name, text in config.FUSION_LENSES_SEED.items():
+            self.assertTrue(text.startswith("Approach this through a"),
+                            f"{name!r} lens breaks the house style: {text[:40]!r}")
+
 
 class TestLensWriteHelpers(_IsolatedConfig):
     def test_set_lens_adds_and_preserves_keys(self):

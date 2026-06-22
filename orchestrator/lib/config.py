@@ -70,16 +70,61 @@ DEFAULT_FUSION_TIMEOUT_S = 300
 # A seat opts into a lens by NAME (resolved against this seed merged with
 # config.json's fusion.lenses) or by literal text; no lens ⇒ the seat gets the
 # shared prompt verbatim, so lenses are opt-in and a lens-free panel is unchanged.
+#
+# Decorrelation discipline (the WHOLE point of lenses): each lens must attack a
+# DISTINCT failure axis, not be a synonym of another. The original three accept
+# the task's framing and reason about the PRESENT artifact: risks = downside
+# enumeration, simplest = minimal path / what to cut, ambiguity = what's unclear
+# in the QUESTION. The seven added below open new axes (the §11.c.3 backlog,
+# 2026-06-22): first-principles rejects the framing itself; user-intent serves
+# the goal behind the literal request; long-horizon weighs future-change cost
+# (NOT present minimalism — that's simplest's axis); concrete forces the runnable
+# artifact; adversary red-teams a committed answer (sharpest-edge vs. risks);
+# precedent reuses prior art (the literal inverse of first-principles); evidence
+# distrusts the FACTS (vs. adversary's distrust of the DESIGN).
 FUSION_LENSES_SEED = {
-    "risks":     "Approach this through a RISK lens: surface failure modes, edge "
-                 "cases, security and correctness hazards, and what could go wrong "
-                 "— even where the obvious approach looks fine.",
-    "simplest":  "Approach this through a SIMPLICITY lens: favour the most direct, "
-                 "minimal path that still solves the task, and call out needless "
-                 "complexity or anything that could be cut.",
-    "ambiguity": "Approach this through an AMBIGUITY lens: surface what is "
-                 "underspecified, the assumptions a confident answer would smuggle "
-                 "in, and the questions worth resolving before acting.",
+    "risks":            "Approach this through a RISK lens: surface failure modes, edge "
+                        "cases, security and correctness hazards, and what could go wrong "
+                        "— even where the obvious approach looks fine.",
+    "simplest":         "Approach this through a SIMPLICITY lens: favour the most direct, "
+                        "minimal path that still solves the task, and call out needless "
+                        "complexity or anything that could be cut.",
+    "ambiguity":        "Approach this through an AMBIGUITY lens: surface what is "
+                        "underspecified, the assumptions a confident answer would smuggle "
+                        "in, and the questions worth resolving before acting.",
+    "first-principles": "Approach this through a FIRST-PRINCIPLES lens: ignore "
+                        "convention, precedent, and the way the task is framed; "
+                        "re-derive the right answer from the actual goal and "
+                        "constraints, and call out any premise in the task that "
+                        "doesn't hold.",
+    "user-intent":      "Approach this through a USER-INTENT lens: answer what "
+                        "the asker actually needs — the underlying goal behind "
+                        "the literal request — not just the words as written; "
+                        "where the literal reading and the real intent diverge, "
+                        "serve the intent and say so.",
+    "long-horizon":     "Approach this through a LONG-HORIZON lens: weigh what "
+                        "this choice costs later, not just now — how it ages, "
+                        "scales, and constrains future change; favour what stays "
+                        "cheap to reverse and flag anything that quietly locks "
+                        "the project in.",
+    "concrete":         "Approach this through a CONCRETE lens: prefer the exact, "
+                        "runnable artifact over description — the specific code, "
+                        "command, value, or worked example — and make every claim "
+                        "something the reader could check or execute directly.",
+    "adversary":        "Approach this through an ADVERSARY lens: assume the "
+                        "obvious answer is wrong and try to defeat it — find the "
+                        "counterexample, the input that breaks it, the case where "
+                        "it backfires — and report what survives the attack.",
+    "precedent":        "Approach this through a PRECEDENT lens: look first for "
+                        "how this is already solved — the existing pattern, "
+                        "library, prior art, or in-repo convention — and prefer "
+                        "adapting a proven solution over inventing a new one; "
+                        "name what you'd reuse.",
+    "evidence":         "Approach this through an EVIDENCE lens: treat every "
+                        "factual claim as unproven until supported; demand the "
+                        "source or the verification step, actively seek "
+                        "disconfirming evidence, and separate what is established "
+                        "from what is assumed.",
 }
 
 
