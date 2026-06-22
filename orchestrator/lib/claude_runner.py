@@ -431,6 +431,58 @@ def _judge_prompt(orig: str, answers: list) -> str:
     return "".join(blocks)
 
 
+def _verify_prompt(orig: str, synthesis: str, answers: list) -> str:
+    """F11.c.1: ask a CRITIC seat to check the judge's synthesis against the original
+    task and the panel answers. It must return ONLY a strict JSON verdict
+    {"defect": bool, "issues": [str, ...]} — `defect` true ONLY for a concrete,
+    correctable error/omission/over-claim, never style. Conservative by design so
+    re-judges stay rare (§10.d: a zealous critic on a partial view inflates false
+    positives)."""
+    blocks = ["You are a strict verifier. A panel of models answered a task and a "
+              "judge synthesized their answers into one response. Check that synthesis "
+              "for CONCRETE, CORRECTABLE problems: factual or logical errors, a correct "
+              "point from the panel the judge dropped, or claims the synthesis "
+              "over-states. Do NOT nitpick style, tone, or formatting.\n",
+              "\n--- ORIGINAL TASK ---\n", orig.strip(), "\n",
+              "\n--- JUDGE'S SYNTHESIS ---\n", (synthesis or "").strip(), "\n",
+              "\n--- PANEL ANSWERS ---\n"]
+    for i, a in enumerate(answers, 1):
+        blocks.append(f"\n### Panel answer {i} — {a.get('name', '?')} "
+                      f"({a.get('model', '?')})\n{a.get('text', '')}\n")
+    blocks.append('\n--- OUTPUT ---\nRespond with ONLY a single JSON object — no prose, '
+                  'no markdown fences, first character `{` and last `}`:\n'
+                  '{"defect": true|false, "issues": ["short, specific, correctable '
+                  'problem", ...]}\n'
+                  'Set "defect" false (and "issues" []) unless there is at least one '
+                  'concrete, correctable problem. Be conservative.')
+    return "".join(blocks)
+
+
+def _rejudge_prompt(orig: str, answers: list, prior_synthesis: str,
+                    issues: list) -> str:
+    """F11.c.1: re-judge after the verifier flagged a defect. Reuses the ORIGINAL
+    prompt verbatim (so any output-format/JSON-schema travels), shows the prior
+    synthesis + the specific issues, and asks for a CORRECTED synthesis in that same
+    format. Mirrors _judge_prompt's format-preservation contract."""
+    blocks = [orig.strip(),
+              f"\n\n---\nA panel of {len(answers)} independent models each answered "
+              "the task above. Their answers:\n"]
+    for i, a in enumerate(answers, 1):
+        blocks.append(f"\n### Panel answer {i} — {a.get('name', '?')} "
+                      f"({a.get('model', '?')})\n{a.get('text', '')}\n")
+    blocks.append("\n---\nA first synthesis was produced:\n\n"
+                  + (prior_synthesis or "").strip() + "\n")
+    issue_lines = "\n".join(f"- {it}" for it in issues if str(it).strip())
+    blocks.append("\n---\nA verifier found these correctable problems with that "
+                  "synthesis:\n" + (issue_lines or "- (unspecified)") + "\n")
+    blocks.append("\n---\nProduce a CORRECTED single best response to the original "
+                  "task: fix the problems above, resolve disagreements, keep what is "
+                  "correct, discard what is wrong. Respond in the EXACT same format the "
+                  "task requested — output only that, with no preamble and no mention "
+                  "of the panel or the verifier.")
+    return "".join(blocks)
+
+
 def _price_tab_answers(raw: list, providers: dict) -> list:
     """Turn fusion_call.py's collected outputs (normalized JSON + a `name`) into
     the SAME priced shape _panel_answer returns, so run_fusion_json treats tab
@@ -572,7 +624,9 @@ def _anthropic_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
 
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
-                    judge_model: str = "opus", judge_effort: str = "high") -> ClaudeRun:
+                    judge_model: str = "opus", judge_effort: str = "high",
+                    verify: Optional[bool] = None, verify_model: str = "opus",
+                    verify_effort: str = "high") -> ClaudeRun:
     """Fusion sibling of run_claude_json. Runs a PANEL — any mix of external
     per-provider scripts AND local Claude Code seats (effort-differentiated
     `claude` CLI calls; $0, NO Anthropic API) — in parallel, then synthesizes via
@@ -599,6 +653,9 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     preset = preset or cfg.get("preset") or config.DEFAULT_FUSION_PRESET
     panel = panel or presets.get(preset) or config.FUSION_PRESETS_SEED["budget"]
     timeout_s = timeout_s or cfg.get("timeout_s") or config.DEFAULT_FUSION_TIMEOUT_S
+    # F11.c.1: None ⇒ use the configured default; an explicit True/False overrides it
+    # (so a caller can force-off even when fusion.verify is on globally).
+    verify = cfg.get("verify", False) if verify is None else verify
 
     # Normalize the (possibly mixed) panel into usable seats. Each entry is either
     # an EXTERNAL provider — a registry NAME (str), fanned out via its provider
