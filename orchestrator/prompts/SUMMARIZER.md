@@ -2,11 +2,15 @@ You are summarizing a Claude Code session that just finished. Your job: extract 
 
 # Original user task
 
+<user_task>
 {user_task}
+</user_task>
 
 # Session transcript (distilled)
 
+<session_transcript>
 {transcript}
+</session_transcript>
 
 # Your job
 

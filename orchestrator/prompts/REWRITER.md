@@ -4,15 +4,21 @@ The downstream Claude Code session is a FRESH session — it has no memory of pa
 
 # Project context (read carefully)
 
+<project_context>
 {bundle}
+</project_context>
 
 # Similar past tasks (across all projects, semantically matched)
 
+<similar_past_tasks>
 {similar_tasks}
+</similar_past_tasks>
 
 # User's task (as typed)
 
+<user_task>
 {user_task}
+</user_task>
 
 # Your job
 
