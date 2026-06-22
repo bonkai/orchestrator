@@ -298,7 +298,7 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
-| **C0** | **Verification gate** | live `codex --help` + `codex exec --help` + auth probe + a captured terminal-event JSONL; the §2 branch verdict; pinned version + date | ◻ not started |
+| **C0** | **Verification gate** | live `codex --help`/`codex exec --help` + ChatGPT-login auth probe + captured event JSONL + the §2 verdict | ✅ **DONE 2026-06-22 — BRANCH A (0.141.0)** |
 | **C1** | The codex CLI invoker | `run_codex_json` (+ headless fallback) + `spawn_codex_tab`/`codex_run.sh`/`ensure_codex_runner` + the two parsers (§4) | ◻ design only |
 | **C2** | Fusion **codex seat** *(ships first after C1)* | `_codex_seat_answer` + `kind:"codex_cli"`; `codex_cli_available()` (auth-probing); panel splits 3 ways (provider / claude_cli / codex_cli) | ◻ design only |
 | **C3** | **Selectable judge** | `judge_engine` param + `_JUDGE_ENGINES` map; routes judge **and** verifier **and** re-judge; default `"claude"` | ◻ design only |
