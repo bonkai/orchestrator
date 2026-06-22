@@ -447,3 +447,38 @@ def remove_lens(name: str) -> dict:
     cfg.setdefault("fusion", {}).setdefault("lenses", {}).pop(name, None)
     save_config(cfg)
     return fusion_config()
+
+
+# ── Fusion PROFILES: named, saveable panel configs (the dispatch quick-switch) ──
+# A profile bundles the EXACT panel a user wants for a kind of task — Claude seats
+# (model+effort+lens) and provider seats (name+lens) — under a chosen name, so the
+# picker can re-populate itself in one click. Merge-preserving and corruption-
+# guarded like the lens/preset helpers (api_keys, presets, lenses all survive).
+
+def save_profile(name: str, profile: dict) -> dict:
+    """Add or edit one saved Fusion profile (fusion.profiles). The profile is
+    normalized to {claude_seats:[{model,effort,lens}], provider_seats:[{name,lens}]}
+    before storing, so junk can't land on disk. A blank name, a non-dict profile,
+    or a profile with NO valid seats raises ConfigWriteError. Returns the new
+    fusion_config(). Raises ConfigWriteError on a corrupt file (never clobbers it)."""
+    name = (name or "").strip()
+    if not name:
+        raise ConfigWriteError("profile name is required")
+    if not isinstance(profile, dict):
+        raise ConfigWriteError("profile must be an object")
+    clean = _normalize_profile(profile)
+    if not clean["claude_seats"] and not clean["provider_seats"]:
+        raise ConfigWriteError("profile has no seats")
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {}).setdefault("profiles", {})[name] = clean
+    save_config(cfg)
+    return fusion_config()
+
+
+def remove_profile(name: str) -> dict:
+    """Remove a saved profile from config.json (idempotent — unknown name is a
+    no-op). Raises ConfigWriteError on a corrupt file."""
+    cfg = _read_config_for_write()
+    cfg.setdefault("fusion", {}).setdefault("profiles", {}).pop((name or "").strip(), None)
+    save_config(cfg)
+    return fusion_config()
