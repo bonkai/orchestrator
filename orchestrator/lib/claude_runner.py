@@ -342,6 +342,254 @@ def run_claude_json(
         ok=False, error="brain call ended unexpectedly")
 
 
+# ─────────────────────────── codex calls (the codex twin of run_claude_json) ──
+# A $0 subscription `codex exec` call in a watchable iTerm2 tab — the codex
+# analogue of run_claude_json. Codex's stream schema is NOT claude's, so it gets
+# its OWN parser (_envelope_from_codex_stream + _build_codex_run), but reuses the
+# engine-neutral plumbing: ClaudeRun, _strip_fences, _read_pid, _tail, the
+# poll-loop shape, _STARTUP_GRACE_S/_POLL_INTERVAL_S. Branch A (CODEX_PLAN.md §0,
+# verified 2026-06-22 on codex-cli 0.141.0): subscription auth works
+# non-interactively at $0, so cost_usd is 0.0 by POLICY — usage IS present and is
+# stashed in `raw` so a future paid seat stays priceable, we just never bill it.
+# Schema + flags are version-pinned to 0.141.0; codex churns them, so the parser
+# is fail-soft (ok=False, never a raise) and should be re-verified on upgrade.
+
+# Placeholder codex model id. The authoritative `-m` value is a C4 SEED concern
+# (deferred); callers pass it EXPLICITLY (dispatch #3), so this is only a default
+# safety net. C1 has no live caller (C2/C3/C6 are the callers), so its exact
+# value doesn't affect C1's offline tests.
+DEFAULT_CODEX_MODEL = "gpt-5-codex"
+
+
+def _codex_envelope_from_lines(lines) -> Optional[dict]:
+    """Aggregate a `codex exec --json` JSONL transcript (an iterable of lines)
+    into ONE envelope _build_codex_run consumes. Codex's schema (codex-cli
+    0.141.0, §0) keys off `type`, NOT claude's result/system/assistant:
+        {"type":"thread.started","thread_id":...}
+        {"type":"turn.started"}
+        {"type":"item.completed","item":{"type":"agent_message","text":...}}
+        {"type":"turn.completed","usage":{...}}
+    The final text is the LAST item.completed whose item.type=="agent_message" →
+    .text (so a trailing reasoning/command item never leaks in); token usage is
+    on the terminal `turn.completed`. The final text and the usage live in
+    DIFFERENT events, so this must AGGREGATE across the whole stream rather than
+    read one terminal event. Returns None if no `turn.completed` is present
+    (codex died / the tab was cut mid-stream) — the codex analogue of claude's
+    "no result event". Never raises on bad lines (they're skipped)."""
+    text = ""
+    usage: Optional[dict] = None
+    thread_id = ""
+    saw_turn_completed = False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ttype = obj.get("type")
+        if ttype == "item.completed":
+            item = obj.get("item") or {}
+            if item.get("type") == "agent_message":
+                text = item.get("text") or text       # keep the LAST non-empty
+        elif ttype == "turn.completed":
+            saw_turn_completed = True
+            usage = obj.get("usage") or usage
+        elif ttype == "thread.started":
+            thread_id = obj.get("thread_id") or thread_id
+    if not saw_turn_completed:
+        return None
+    return {"result": text, "usage": usage, "thread_id": thread_id}
+
+
+def _envelope_from_codex_stream(path) -> Optional[dict]:
+    """File wrapper around _codex_envelope_from_lines for the tab path's sidecar
+    JSONL (the codex twin of _envelope_from_stream_jsonl). Returns None if the
+    file is unreadable or carries no terminal `turn.completed`. Never raises."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return _codex_envelope_from_lines(f)
+    except OSError:
+        return None
+
+
+def _build_codex_run(envelope: dict, requested_model: str) -> ClaudeRun:
+    """Turn a codex envelope (from _envelope_from_codex_stream) into a ClaudeRun,
+    so every brain caller and run_fusion_json treat a codex result identically to
+    a claude one. Reuses _strip_fences for JSON extraction. Two codex specifics
+    (§4): there is NO model field, so the model falls back to the one we passed
+    via `-m` (requested_model); and under Branch A cost_usd is 0.0 by POLICY —
+    usage IS present (kept in `raw` so a future paid seat is priceable), we just
+    don't bill the subscription. duration_s is 0.0 — codex's stream carries no
+    duration. Never raises."""
+    text = (envelope or {}).get("result", "") or ""
+
+    parsed = None
+    stripped = _strip_fences(text)
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+
+    if parsed is None and text:
+        print(f"[claude_runner] codex JSON parse failed; first 400 chars of "
+              f"response:\n{text[:400]}")
+
+    return ClaudeRun(
+        ok=True,
+        text=text,
+        parsed_json=parsed,
+        cost_usd=0.0,                 # Branch A POLICY — subscription, never billed
+        duration_s=0.0,               # codex's stream carries no duration
+        model=requested_model,        # codex --json has no model field (§0)
+        raw=envelope,                 # usage kept here → a future paid seat is priceable
+    )
+
+
+def run_codex_headless(
+    prompt: str,
+    cwd: str,
+    model: str = DEFAULT_CODEX_MODEL,
+    effort: str = "",
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+) -> ClaudeRun:
+    """FALLBACK: captured headless `codex exec --json`, used when iTerm2 is
+    absent — the codex twin of run_claude_headless. Both the tab and this path
+    emit `--json` JSONL, parsed by the SAME codex parser. Never raises — returns
+    ok=False with `error` set on any failure (timeout, nonzero exit, bad stream,
+    missing binary). Scrubs OPENAI_API_KEY (so codex never routes through the
+    billed API — CLAUDE.md hard rule) and ORCHESTRATOR_RUN_ID (so no Stop hook
+    fires), and closes stdin (codex exec hangs reading stdin otherwise)."""
+    cmd = ["codex", "exec", prompt, "-m", model, "-s", "read-only", "--json"]
+    if effort:
+        cmd += ["-c", f"model_reasoning_effort={effort}"]
+    # $0 subscription path only: drop the billed-API key AND the Stop-hook trigger
+    # from the child env (mirror of run_claude_headless's ORCHESTRATOR_RUN_ID scrub).
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("OPENAI_API_KEY", "ORCHESTRATOR_RUN_ID")}
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout_s,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        return ClaudeRun(ok=False, error=f"codex timed out after {timeout_s}s")
+    except FileNotFoundError:
+        return ClaudeRun(ok=False, error="`codex` binary not found on PATH")
+    except Exception as e:
+        return ClaudeRun(ok=False, error=f"codex spawn failed: {e}")
+
+    if proc.returncode != 0:
+        stderr_tail = (proc.stderr or "").strip()[-500:]
+        return ClaudeRun(ok=False, error=f"codex exit {proc.returncode}: {stderr_tail}")
+
+    envelope = _codex_envelope_from_lines((proc.stdout or "").splitlines())
+    if envelope is None:
+        return ClaudeRun(ok=False,
+                         error="codex produced no turn.completed event",
+                         text=(proc.stdout or "")[:1000])
+    return _build_codex_run(envelope, model)
+
+
+def run_codex_json(
+    prompt: str,
+    cwd: str,
+    model: str = DEFAULT_CODEX_MODEL,
+    effort: str = "",
+    timeout_s: Optional[int] = None,
+    label: str = "codex",
+) -> ClaudeRun:
+    """PRIMARY codex-call entrypoint — the codex twin of run_claude_json. Runs in
+    a watchable iTerm2 tab (`codex exec --json` tee'd to a sidecar we parse back
+    into structured data), falling back to headless if iTerm2 isn't installed.
+    `timeout_s=None` → no wall-clock limit (the tab is visible; a closed tab is
+    detected via PID). Never raises — returns ok=False on any failure
+    (auth-expired, rate-limit, closed tab, timeout). `model` is passed EXPLICITLY
+    to spawn_codex_tab so the parser's model fallback is the model we asked for
+    (dispatch #3)."""
+    if not spawn.iterm2_installed():
+        print("[claude_runner] iTerm2 not installed — running codex call "
+              f"headless ({label}). Install iTerm2 to watch codex calls live.")
+        return run_codex_headless(prompt, cwd, model, effort,
+                                  timeout_s or DEFAULT_TIMEOUT_S)
+
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "codex"
+    codex_id = f"{slug}-{uuid.uuid4().hex[:8]}"
+    try:
+        spawn.spawn_codex_tab(codex_id, prompt, cwd, model=model, effort=effort,
+                              label=label)
+    except Exception as e:
+        print(f"[claude_runner] codex tab spawn failed ({e}); headless fallback")
+        spawn.cleanup_codex_files(codex_id)
+        return run_codex_headless(prompt, cwd, model, effort,
+                                  timeout_s or DEFAULT_TIMEOUT_S)
+
+    out_file = spawn.CODEX_DIR / f"{codex_id}.jsonl"
+    done_file = spawn.CODEX_DIR / f"{codex_id}.done"
+    pid_file = spawn.CODEX_DIR / f"{codex_id}.pid"
+    deadline = (time.time() + timeout_s) if timeout_s else None
+
+    result: Optional[ClaudeRun] = None
+    success = False
+    pid: Optional[int] = None
+    started_at = time.time()
+    try:
+        while result is None:
+            if done_file.is_file():
+                try:
+                    exit_code = int((done_file.read_text().strip() or "1"))
+                except (ValueError, OSError):
+                    exit_code = 1
+                if exit_code != 0:
+                    result = ClaudeRun(ok=False, error=f"codex exit {exit_code}",
+                                       text=_tail(out_file, 800))
+                else:
+                    envelope = _envelope_from_codex_stream(out_file)
+                    if envelope is None:
+                        result = ClaudeRun(ok=False,
+                                           error="codex call produced no result event")
+                    else:
+                        result = _build_codex_run(envelope, model)
+                        success = True
+                break
+
+            # Detect a tab the user closed / a codex that died before writing
+            # .done (no completion marker would ever arrive otherwise).
+            if pid is None:
+                pid = _read_pid(pid_file)
+                if pid is None and (time.time() - started_at) > _STARTUP_GRACE_S:
+                    result = ClaudeRun(ok=False,
+                                       error="codex call tab failed to start "
+                                             f"(no PID after {_STARTUP_GRACE_S}s)")
+                    break
+            elif not spawn.pid_alive(pid):
+                if done_file.is_file():
+                    continue  # race: .done landed; handle on next loop top
+                result = ClaudeRun(ok=False,
+                                   error="codex call tab closed before completion")
+                break
+
+            if deadline and time.time() > deadline:
+                result = ClaudeRun(ok=False,
+                                   error=f"codex call timed out after {timeout_s}s")
+                break
+
+            time.sleep(_POLL_INTERVAL_S)
+    finally:
+        spawn.finish_codex_tab(codex_id, label=label, success=success)
+
+    return result if result is not None else ClaudeRun(
+        ok=False, error="codex call ended unexpectedly")
+
+
 # ─────────────────────────── Fusion (optional, opt-in) ─────────────────────
 # A panel of per-provider scripts (run in parallel) answers the SAME prompt;
 # the local `claude` CLI then JUDGES them into one synthesis. The judge is free
