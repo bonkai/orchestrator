@@ -187,6 +187,17 @@ class TestSettingsReadModel(unittest.TestCase):
         self.assertEqual(ctx["preset"], "budget")
         self.assertEqual(ctx["active_count"], 1)
 
+    def test_verify_enabled_surfaced(self):
+        # F11.c.1: default (no verify key) is False; an explicit verify=True surfaces.
+        self.assertFalse(self._ctx()["verify_enabled"])
+        fcfg = dict(self.FCFG, verify=True)
+        with mock.patch.object(app_module.config, "fusion_config", return_value=fcfg), \
+                mock.patch.object(app_module.config, "active_providers", return_value={"glm": {}}), \
+                mock.patch.object(app_module.config, "get_provider_key", side_effect=lambda n: None), \
+                mock.patch.object(app_module.config, "is_fusion_available", return_value=True), \
+                mock.patch.object(app_module.config, "claude_cli_available", return_value=True):
+            self.assertTrue(app_module._settings_ctx()["verify_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

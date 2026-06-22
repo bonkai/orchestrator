@@ -83,6 +83,28 @@ class TestRewriterFusionRouting(unittest.TestCase):
         self.assertTrue(r.ok)
         self.assertEqual(r.rewritten_prompt, "local")
 
+    def test_verify_forwards_and_surfaces_verdict(self):
+        # F11.c.1: verify=True reaches run_brain_json, and the verifier verdict in
+        # run.raw["verifier"] surfaces on RewriteResult.verifier.
+        verdict = {"ran": True, "defect": True, "rejudged": True, "issues": ["X"]}
+        fake = ClaudeRun(ok=True, text='{"rewritten_prompt":"R"}',
+                         parsed_json={"rewritten_prompt": "R"}, model="opus",
+                         raw={"panel": [{"name": "g", "ok": True}], "verifier": verdict})
+        with mock.patch.object(claude_runner, "run_brain_json", return_value=fake) as rbj:
+            r = rewriter.rewrite("task", str(self.tmp),
+                                 fusion=True, panel=["gemini", "gemini2"], verify=True)
+        self.assertTrue(r.ok)
+        self.assertTrue(rbj.call_args.kwargs["verify"])      # forwarded
+        self.assertEqual(r.verifier, verdict)                # surfaced from run.raw
+
+    def test_verify_defaults_false_and_verdict_empty(self):
+        fake = ClaudeRun(ok=True, text='{"rewritten_prompt":"R"}',
+                         parsed_json={"rewritten_prompt": "R"})
+        with mock.patch.object(claude_runner, "run_brain_json", return_value=fake) as rbj:
+            r = rewriter.rewrite("task", str(self.tmp))
+        self.assertFalse(rbj.call_args.kwargs["verify"])
+        self.assertEqual(r.verifier, {})                     # no verdict ⇒ empty
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
