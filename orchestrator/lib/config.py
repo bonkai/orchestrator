@@ -201,6 +201,16 @@ def fusion_config() -> dict:
             if isinstance(text, str) and text.strip():
                 lenses[name] = text
 
+    # profiles: named, full panel configs (Claude + provider seats with lenses)
+    # the dispatch picker saves and re-applies. Pure user data — NO seeds, so no
+    # merge; each is normalized so a hand-edited file can't break the picker.
+    profiles: dict = {}
+    file_profiles = fcfg.get("profiles")
+    if isinstance(file_profiles, dict):
+        for name, prof in file_profiles.items():
+            if isinstance(name, str) and name.strip() and isinstance(prof, dict):
+                profiles[name] = _normalize_profile(prof)
+
     return {
         "preset": fcfg.get("preset") or DEFAULT_FUSION_PRESET,
         "timeout_s": fcfg.get("timeout_s") or DEFAULT_FUSION_TIMEOUT_S,
@@ -208,6 +218,7 @@ def fusion_config() -> dict:
         "providers": providers,
         "presets": presets,
         "lenses": lenses,
+        "profiles": profiles,
     }
 
 
@@ -216,6 +227,14 @@ def fusion_lenses() -> dict:
     fusion.lenses merged over it (per-name override/extend, like presets). Each
     value is a per-seat prompt prefix used for §5 decorrelation (F8.4)."""
     return fusion_config()["lenses"]
+
+
+def fusion_profiles() -> dict:
+    """The saved Fusion PROFILES (name → {claude_seats, provider_seats}) — named,
+    full panel configs the dispatch picker saves and re-applies. Pure user data
+    read from config.json's fusion.profiles (→ {} when absent/garbage); unlike
+    presets/lenses there are no built-in defaults, so this is a plain read."""
+    return fusion_config()["profiles"]
 
 
 def resolve_lens(value: Optional[str], lenses: Optional[dict] = None) -> str:
