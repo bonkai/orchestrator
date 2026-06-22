@@ -57,6 +57,9 @@ class RewriteResult:
     fusion_panel: list = field(default_factory=list)
     fusion_preset: str = ""
     fusion_seats: list = field(default_factory=list)  # readable seat labels
+    # F11.c.1: the verifier seat's verdict when fusion.verify ran for this rewrite —
+    # {ran, defect, rejudged, issues[]}; empty ⇒ verifier did not run.
+    verifier: dict = field(default_factory=dict)
 
 
 def _coerce_list_of_str(v) -> list[str]:
@@ -70,7 +73,8 @@ def _coerce_list_of_str(v) -> list[str]:
 
 def rewrite(user_task: str, project_path: str,
             fusion: bool = False, panel: Optional[list] = None,
-            judge_model: str = "opus", judge_effort: str = "high") -> RewriteResult:
+            judge_model: str = "opus", judge_effort: str = "high",
+            verify: bool = False) -> RewriteResult:
     """Build the project bundle, ask claude to rewrite the task, return result.
 
     fusion=False is byte-for-byte the original single-claude path. fusion=True
@@ -82,7 +86,10 @@ def rewrite(user_task: str, project_path: str,
     `judge_model`/`judge_effort` drive the FUSION judge (the synthesis seat) so the
     dispatch's UI model/effort picker controls it ("one knob"). They do NOT touch
     the non-fusion brain or the single-model fallback/retry, which stay opus/high
-    by design — there is no judge on those paths to steer."""
+    by design — there is no judge on those paths to steer.
+
+    `verify` (F11.c.1) forwards to the fusion judge's opt-in verifier seat; it is a
+    no-op on the non-fusion path (no judge to verify)."""
     user_task = (user_task or "").strip()
     if not user_task:
         return RewriteResult(ok=False, error="empty task")
@@ -109,7 +116,7 @@ def rewrite(user_task: str, project_path: str,
     run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion,
                                        panel=panel, model="opus", effort="high",
                                        judge_model=judge_model, judge_effort=judge_effort,
-                                       label="rewriter")
+                                       verify=verify, label="rewriter")
     # F5: capture the fusion panel breakdown BEFORE the auto-retry (which swaps
     # `run` for a single-model claude call). A fused run carries the panel under
     # run.raw["panel"]; a plain/fallback claude run does not, so this stays empty
@@ -118,12 +125,13 @@ def rewrite(user_task: str, project_path: str,
     f_panel = fmeta.get("panel") or []
     f_preset = fmeta.get("preset") or ""
     f_seats = fmeta.get("seats") or []
+    f_verifier = fmeta.get("verifier") or {}     # F11.c.1: verdict, if verify ran
     if not run.ok:
         return RewriteResult(ok=False, error=run.error,
                              cost_usd=run.cost_usd, model=run.model,
                              bundle_chars=pack.total_chars,
                              fusion_panel=f_panel, fusion_preset=f_preset,
-                             fusion_seats=f_seats)
+                             fusion_seats=f_seats, verifier=f_verifier)
 
     data = run.parsed_json
     rewritten = (str(data.get("rewritten_prompt", "")).strip()
@@ -171,6 +179,7 @@ def rewrite(user_task: str, project_path: str,
             cost_usd=total_cost, duration_s=total_duration, model=run.model,
             bundle_chars=pack.total_chars,
             fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
+            verifier=f_verifier,
         )
 
     if not rewritten:
@@ -183,6 +192,7 @@ def rewrite(user_task: str, project_path: str,
             cost_usd=total_cost, duration_s=total_duration, model=run.model,
             bundle_chars=pack.total_chars,
             fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
+            verifier=f_verifier,
         )
 
     # Parse proposed_edits — pre-validate each so the UI can show invalid
@@ -222,4 +232,5 @@ def rewrite(user_task: str, project_path: str,
         bundle_chars=pack.total_chars,
         similar_hits=hits,
         fusion_panel=f_panel, fusion_preset=f_preset, fusion_seats=f_seats,
+        verifier=f_verifier,
     )
