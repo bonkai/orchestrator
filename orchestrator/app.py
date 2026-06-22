@@ -1678,5 +1678,4 @@ async def playbook(request: Request):
         content = _render_markdown(path.read_text(encoding="utf-8"))
     except OSError:
         content = "<p>Playbook not found.</p>"
-    return templates.TemplateResponse("playbook.html",
-                                      {"request": request, "content": content})
+    return templates.TemplateResponse(request, "playbook.html", {"content": content})
