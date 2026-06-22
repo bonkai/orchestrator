@@ -63,7 +63,7 @@
           <tbody>
           {% for s in rewrite.panel_breakdown %}
             <tr>
-              <td>{{ s.name }}</td>
+              <td>{{ s.name }}{% if s.lens %} <span class="muted" title="this seat answered through the {{ s.lens }} lens (decorrelation); the judge saw the original task verbatim" style="font-size:10px;">· {{ s.lens }}</span>{% endif %}</td>
               <td><code>{{ s.model or '—' }}</code></td>
               <td style="text-align:right;" class="muted">{{ s.prompt_tokens }}</td>
               <td style="text-align:right;" class="muted">{{ s.completion_tokens }}</td>
