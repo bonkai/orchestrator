@@ -638,7 +638,9 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
 
     `panel` is a list whose entries are either a provider NAME (str — an external
     seat) or a dict {"kind":"claude_cli","model","effort"} (a local Claude seat);
-    duplicate Claude seats (same model+effort) are allowed. F8.4: any entry may
+    duplicate Claude seats (same model+effort) are allowed. F12: duplicate cross-lab
+    provider seats are allowed too (e.g. 3× glm) — each becomes its own seat with a
+    unique key (glm, glm#2, glm#3) and may carry its own lens. F8.4: any entry may
     also carry a "lens" (a configured lens NAME or literal text) — Claude seats as
     {"kind":"claude_cli",...,"lens"} and external seats as the dict form
     {"name":<provider>,"lens":...}; each lensed seat answers the SAME task through
@@ -667,12 +669,33 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     active = config.active_providers()
     claude_ok = config.claude_cli_available()
     lenses_cfg = cfg.get("lenses") or config.FUSION_LENSES_SEED  # F8.4 name→text map
-    prov_names: list = []          # external providers (fan out via scripts)
-    prov_lenses: dict = {}         # provider name → resolved lens TEXT (fan-out)
-    prov_lens_names: dict = {}     # provider name → lens NAME (surface/tagging)
+    prov_names: list = []          # UNIQUE seat keys (fan out via scripts)
+    prov_providers: dict = {}      # seat key → its provider config (script/model/prices)
+    prov_lenses: dict = {}         # seat key → resolved lens TEXT (fan-out)
+    prov_lens_names: dict = {}     # seat key → lens NAME (surface/tagging)
+    prov_seat_counts: dict = {}    # base provider name → seats so far (for #2,#3 keys)
     claude_seats: list = []        # local claude CLI seats
     seats_desc: list = []          # readable seat labels (raw / diagnostics)
     lenses_used: list = []         # [{"seat","lens"}] for lensed seats — raw surface
+
+    def _add_provider_seat(base: str, lens_name: str) -> None:
+        # F12: a cross-lab provider may appear MORE THAN ONCE in a panel (e.g. 3×
+        # glm, each a distinct sample or lens — the provider analogue of duplicate
+        # Claude seats). Give every seat a UNIQUE key (glm, glm#2, glm#3) so the
+        # name-keyed fan-out (the per-seat providers/lenses maps AND each answer's
+        # `name`) never collapses two seats into one. The provider CONFIG —
+        # script/model/prices — is resolved from the base registry name; only the
+        # SEAT identity is suffixed, so pricing and the tab body stay correct.
+        prov_seat_counts[base] = prov_seat_counts.get(base, 0) + 1
+        key = base if prov_seat_counts[base] == 1 else f"{base}#{prov_seat_counts[base]}"
+        prov_names.append(key)
+        prov_providers[key] = providers[base]
+        seats_desc.append(key + (f" [lens:{lens_name}]" if lens_name else ""))
+        if lens_name:
+            prov_lenses[key] = config.resolve_lens(lens_name, lenses_cfg)
+            prov_lens_names[key] = lens_name
+            lenses_used.append({"seat": key, "lens": lens_name})
+
     for s in panel:
         if isinstance(s, dict) and s.get("kind") == "claude_cli":
             if not claude_ok:
@@ -689,19 +712,11 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
             if lens_name:
                 lenses_used.append({"seat": name, "lens": lens_name})
         elif isinstance(s, str) and s in active:
-            prov_names.append(s)
-            seats_desc.append(s)
+            _add_provider_seat(s, "")
         elif (isinstance(s, dict) and isinstance(s.get("name"), str)
               and s["name"].strip() in active):
             # External seat carrying a lens: {"name": <provider>, "lens": ...}.
-            nm = s["name"].strip()
-            lens_name = (s.get("lens") or "").strip()
-            prov_names.append(nm)
-            seats_desc.append(nm + (f" [lens:{lens_name}]" if lens_name else ""))
-            if lens_name:
-                prov_lenses[nm] = config.resolve_lens(lens_name, lenses_cfg)
-                prov_lens_names[nm] = lens_name
-                lenses_used.append({"seat": nm, "lens": lens_name})
+            _add_provider_seat(s["name"].strip(), (s.get("lens") or "").strip())
     total = len(prov_names) + len(claude_seats)
     if total < 2:
         return ClaudeRun(ok=False,
@@ -719,7 +734,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     answers: list = []
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=(len(claude_seats) + (1 if prov_names else 0)) or 1) as ex:
-        prov_future = (ex.submit(_panel_answers, prompt, prov_names, providers,
+        prov_future = (ex.submit(_panel_answers, prompt, prov_names, prov_providers,
                                  timeout_s, cwd_eff, prov_lenses) if prov_names else None)
         claude_futures = [ex.submit(_anthropic_seat_answer, cs, prompt, cwd_eff)
                           for cs in claude_seats]
