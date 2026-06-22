@@ -40,27 +40,44 @@ This is a phased *plan*, not a built feature. When nothing opts into codex, beha
 
 ---
 
-## 0. Verification status — READ FIRST *(checked live 2026-06-22)*
+## 0. Verification status — READ FIRST *(C0 EXECUTED live 2026-06-22, codex-cli 0.141.0)*
 
-The repo's discipline ("always verify the live `claude --help` before claiming what flags
-exist") applies doubly to codex, whose flags have churned hard across its rewrite. What
-**was** checkable on this machine, and what was not:
+C0 was **run end-to-end on this laptop**: `npm install -g @openai/codex` → `codex login`
+(ChatGPT browser flow, done by the operator) → a real `env -u OPENAI_API_KEY codex exec
+--json` round-trip. **Verdict: BRANCH A — the $0 premise holds.** Facts are version-pinned to
+**codex-cli 0.141.0**; codex churns flags, so re-verify on upgrade.
 
 | Claim | How checked | Verdict (2026-06-22) |
 |-------|-------------|----------------------|
-| `codex` CLI is installed | `which codex`, `type codex`, `codex-cli`, `openai-codex`, every `$PATH` dir, `~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `npm ls -g`, `brew list` | ❌ **NOT installed** — nothing found, anywhere |
-| `~/.codex/` exists (auth/config) | `ls ~/.codex` | ❌ absent (no prior codex use) |
-| `OPENAI_API_KEY` in env | `[ -n "$OPENAI_API_KEY" ]` | ❌ not set *(good — no lurking paid path)* |
-| `codex` non-interactive mode / flags / auth / event schema | would require a live `codex --help` + `codex exec --help` + an auth probe + a captured event JSONL | ⚠ **UNVERIFIABLE** — binary absent. **See §3 for what to confirm in C0.** |
-| Claude parity flags (for the mirror) | `claude --help` | ✅ `--effort <level>`, `--model <model>`, `--output-format` (with `--print`), `--dangerously-skip-permissions` all present |
-| Loop watchdog is live | `app.py:406` (`loop_watchdog.record`/`trigger_kill`) fed by `bin/notify_tool_use.sh` PreToolUse hook | ✅ **LIVE** — **CLAUDE.md is STALE** ("loop watchdog … planned; not in MVP"). The PreToolUse half of the hook gap (§5) is therefore real, not moot. |
-| Hooks are Claude-bound | `bin/install.sh` merges `notify_*.sh` into **`~/.claude/settings.json`** `.hooks.{Stop,PreToolUse,PostToolUse}`, each gated on `ORCHESTRATOR_RUN_ID` | ✅ confirmed — they fire for `claude`, **never** `codex` (§5) |
+| `codex` CLI installed | `npm install -g @openai/codex` → `codex --version` | ✅ **0.141.0** (`~/.nvm/.../bin/codex`) |
+| Non-interactive mode | `codex exec --help` | ✅ `codex exec [PROMPT]` ("Run Codex non-interactively", alias `e`) — the `claude -p` analogue |
+| **$0 ChatGPT-sub auth, headless** | `codex login status` → `env -u OPENAI_API_KEY codex exec --json …` round-tripped | ✅ **"Logged in using ChatGPT"; returned with NO `OPENAI_API_KEY` → BRANCH A** |
+| Structured output | `codex exec --json` (JSONL) + `-o/--output-last-message` + `--output-schema` | ✅ all present; final text in `item.completed`/`agent_message`, usage in `turn.completed` |
+| Token usage present | the `turn.completed` event | ✅ `input_tokens`/`cached_input_tokens`/`output_tokens`/`reasoning_output_tokens` (a hypothetical paid seat is priceable — no dead end) |
+| No-hang dispatch flag | `codex exec --help` | ✅ `--dangerously-bypass-approvals-and-sandbox` + `-s read-only\|workspace-write\|danger-full-access` (NB: `-a/--ask-for-approval` is **interactive-only**, NOT on `exec`) |
+| stdin gotcha | the probe hung until fixed | ⚠ `codex exec` **blocks "Reading additional input from stdin…"** in a non-TTY → **must run `< /dev/null`** (exactly like `brain_run.sh` does for `claude -p`) |
+| Auth-state probe (not PATH) | `codex login status` / `codex doctor` | ✅ both report auth; `codex_cli_available()` must call one of these (a ChatGPT token can expire) |
+| Per-seat state isolation | `codex exec --help` | ✅ `--ephemeral` (no session files) + `CODEX_HOME` (isolate `~/.codex/` per seat) |
+| Claude parity flags (mirror) | `claude --help` | ✅ `--effort`, `--model`, `--output-format`, `--dangerously-skip-permissions` |
+| Loop watchdog is live | `app.py:406` fed by `bin/notify_tool_use.sh` | ✅ **LIVE — CLAUDE.md STALE** ("planned; not in MVP"); the PreToolUse half of the hook gap (§5) is real |
+| Hooks are Claude-bound | `bin/install.sh` merges `notify_*.sh` into `~/.claude/settings.json`, gated on `ORCHESTRATOR_RUN_ID` | ✅ fire for `claude`, **never** `codex` (§5) |
 
-**Consequence:** this document **asserts no codex CLI fact as established.** It (1) records
-the verified repo/host facts above, (2) gives a precise C0 checklist of what to verify and
-*why each fact gates the design* (§2–§3), and (3) designs both auth branches so the plan is
-actionable the moment C0 returns — exactly the "degrade to *here is what to verify and why*"
-posture the brief asked for.
+**Real terminal-event schema captured (codex-cli 0.141.0 — what `_build_codex_run` parses):**
+
+```jsonl
+{"type":"thread.started","thread_id":"019ef12d-…"}          // thread_id = the resume/session handle
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"…final answer…"}}
+{"type":"turn.completed","usage":{"input_tokens":15026,"cached_input_tokens":12032,"output_tokens":9,"reasoning_output_tokens":0}}
+```
+- **Discriminator is `type`** (`thread.started`/`turn.started`/`item.completed`/`turn.completed`) — **NOT** claude's `system/init`/`assistant`/`result`. The two parsers (§4) key off these.
+- **Final text** = the **last** `item.completed` whose `item.type=="agent_message"` → `item.text`. **Terminal event** = `turn.completed`.
+- **No `model` field** in `--json` output → `_build_codex_run` falls back to the model we pass via `-m` (pass it EXPLICITLY anyway — dispatch #3).
+- **~15k input-token base overhead per call** (codex's system prompt; mostly cached). $0 on the subscription, but relevant to the per-model **cap/quota** math in §2.
+
+**Consequence:** the central viability question is **answered — Branch A.** §2's Branch B is
+retained for reference only; C6 (the executor) is **un-gated.** What remains (C1–C6) is
+engineering. §3 records the per-fact C0 results the design keys off.
 
 ---
 
