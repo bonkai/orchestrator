@@ -17,6 +17,18 @@ internal to the orchestrator, not on FAPO.
 > "yes, build it" silently assumes we can cheaply manufacture the first two. We cannot — at
 > least not validly. That gap, not FAPO's integration seam, is the whole decision.
 
+> **DECISION — 2026-06-22: NO-GO.** The operator declined **any** human in the loop — neither
+> the active approval gate (§9 Fa3) nor passive capture of the accept/edit/reject signal the
+> human already produces at dispatch (§8). That human judgment was the **only valid scorer**
+> available (§1, §5): without it, a candidate prompt can be scored only by Claude-grading-Claude
+> (circular — converges on prompts that flatter the judge) or by `outcomes.outcome` (confounded
+> process status). An unattended optimizer would therefore drift toward self-pleasing prompts —
+> precisely the failure FAPO's guardrail layer exists to prevent. The §9 human-gated MVP is
+> declined and the overall verdict resolves to **no-go**. §1–§11 stand as the rationale of
+> record; **revisit only if a valid, non-circular, non-human scorer becomes available** (none
+> exists today). The §3 finding still holds and is worth remembering: FAPO is *not* dead at the
+> integration seam (its optimizer is already a `claude`-CLI agent) — the blocker is internal.
+
 ---
 
 ## 1. The lead ambiguity — the dataset + scorer gap *(this is the decision)*
