@@ -565,6 +565,103 @@
               saveProviderSeats();
             });
           }
+
+          // ── Saved profiles: quick-switch the whole panel (models + lenses) ──
+          var PROFILES = {};
+          (function(src) { for (var k in src) if (src.hasOwnProperty(k)) PROFILES[k] = src[k]; })(FUSION_PROFILES || {});
+          var profileSelect = document.getElementById('fusion-profile-select');
+
+          function refreshProfileSelect(selected) {
+            if (!profileSelect) return;
+            var names = Object.keys(PROFILES).sort();
+            profileSelect.innerHTML = '';
+            if (!names.length) {
+              var o = document.createElement('option');
+              o.value = ''; o.textContent = '— no saved profiles —';
+              o.disabled = true; o.selected = true;
+              profileSelect.appendChild(o);
+              return;
+            }
+            names.forEach(function(nm) {
+              var op = document.createElement('option');
+              op.value = nm; op.textContent = nm;
+              if (nm === selected) op.selected = true;
+              profileSelect.appendChild(op);
+            });
+          }
+
+          function applyProfile(name) {
+            var p = PROFILES[name];
+            if (!p) return;
+            claudeSeatsEl.innerHTML = '';
+            providerSeatsEl.innerHTML = '';
+            (p.claude_seats || []).forEach(function(s) { addClaudeSeatRow(s.model, s.effort, s.lens); });
+            (p.provider_seats || []).forEach(function(s) {
+              if (isActiveProvider(s.name)) addProviderSeatRow(s.name, s.lens);
+            });
+            saveClaudeSeats(); saveProviderSeats();
+            flashStatus('applied profile “' + name + '”');
+          }
+
+          function profilePayload() {
+            return { claude_seats: claudeSeats(), provider_seats: providerSeats() };
+          }
+
+          // POST a form-encoded body; on success refresh PROFILES from the response.
+          function postProfile(url, body, onOk) {
+            fetch(url, { method: 'POST',
+                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                         body: new URLSearchParams(body).toString() })
+              .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+              .then(function(res) {
+                if (res.ok && res.j && res.j.ok) { PROFILES = res.j.profiles || {}; onOk(); }
+                else { flashStatus((res.j && res.j.error) || 'profile request failed', true); }
+              })
+              .catch(function() { flashStatus('profile request failed', true); });
+          }
+
+          if (profileSelect) {
+            profileSelect.addEventListener('change', function() {
+              if (profileSelect.value) applyProfile(profileSelect.value);
+            });
+          }
+          var pApply = document.getElementById('profile-apply');
+          if (pApply) pApply.addEventListener('click', function() {
+            if (profileSelect && profileSelect.value) applyProfile(profileSelect.value);
+            else flashStatus('no profile selected', true);
+          });
+          var pSave = document.getElementById('profile-save');
+          if (pSave) pSave.addEventListener('click', function() {
+            var seats = profilePayload();
+            if (!seats.claude_seats.length && !seats.provider_seats.length) {
+              flashStatus('add at least one seat before saving', true); return;
+            }
+            var name = (window.prompt('Save current panel as profile name:') || '').trim();
+            if (!name) return;
+            postProfile('/fusion/profile', { name: name, profile: JSON.stringify(seats) },
+              function() { refreshProfileSelect(name); flashStatus('saved profile “' + name + '”'); });
+          });
+          var pUpdate = document.getElementById('profile-update');
+          if (pUpdate) pUpdate.addEventListener('click', function() {
+            var name = profileSelect ? profileSelect.value : '';
+            if (!name) { flashStatus('no profile selected', true); return; }
+            var seats = profilePayload();
+            if (!seats.claude_seats.length && !seats.provider_seats.length) {
+              flashStatus('add at least one seat before updating', true); return;
+            }
+            postProfile('/fusion/profile', { name: name, profile: JSON.stringify(seats) },
+              function() { refreshProfileSelect(name); flashStatus('updated profile “' + name + '”'); });
+          });
+          var pDelete = document.getElementById('profile-delete');
+          if (pDelete) pDelete.addEventListener('click', function() {
+            var name = profileSelect ? profileSelect.value : '';
+            if (!name) { flashStatus('no profile selected', true); return; }
+            if (!window.confirm('Delete profile “' + name + '”?')) return;
+            postProfile('/fusion/profile/remove', { name: name },
+              function() { refreshProfileSelect(); flashStatus('deleted profile “' + name + '”'); });
+          });
+          refreshProfileSelect();
+
           updateFusionCount();
         }
 
