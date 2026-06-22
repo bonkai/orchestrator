@@ -187,28 +187,30 @@ orchestrator will use — not just that `codex login` works in a TUI.
 
 ---
 
-## 3. What we EXPECT C0 to find *(UNVERIFIED — training-knowledge hints, confirm live)*
+## 3. C0 results — VERIFIED *(2026-06-22, codex-cli 0.141.0; re-verify on upgrade)*
 
-> ⚠️ **Everything in this section is an UNVERIFIED hypothesis** drawn from general knowledge
-> of the `codex` CLI as of ~Jan 2026, included **only as a seed for the C0 checklist**. The
-> codex CLI (a Rust rewrite of the original) churns its flags heavily — this is *precisely*
-> why the repo insists on a live `--help`. **The design in §4–§6 does not depend on any of
-> these being correct**; it keys off "whatever C0 actually finds." Do not copy these into code
-> or treat them as settled. Confirm each, live, in a visible tab, and **date-stamp + pin the
-> codex VERSION** in the C0 result (auto-push commits this doc live within seconds — unverified
-> claims would become durable with no review window).
+> ✅ Run live on this laptop. Each row is a confirmed fact the design keys off, **not** a
+> hypothesis. Flags churn — **pinned to 0.141.0.**
 
-| Hypothesis to confirm in C0 | Why it gates the design |
-|---|---|
-| A non-interactive subcommand exists (expected `codex exec "<prompt>"`, the analogue of `claude -p`) | No headless mode ⇒ no executor and no seat at all |
-| Subscription login flow (expected `codex login` → "Sign in with ChatGPT", token in `~/.codex/auth.json`) **works in that non-interactive mode** | This *is* the $0 premise — Branch A vs B (§2) |
-| A structured/streaming output flag (expected `--json`, emitting JSONL events) — the analogue of `--output-format stream-json --verbose` | The sidecar parser (§4) keys off it; absent ⇒ scrape plain text |
-| The **terminal event schema** — capture a real event JSONL; note the field names for final text, model, and **token/cost usage** | `_build_codex_run` parses it; usage absence breaks Branch B pricing |
-| An auto-approve / sandbox-bypass flag (expected `--dangerously-bypass-approvals-and-sandbox`, or `--ask-for-approval never --sandbox danger-full-access`) — the analogue of `--dangerously-skip-permissions` | An **unwatched** dispatched executor will **HANG** on a mid-run approval/sandbox prompt without it (§6) |
-| `--model`/`-m` and any effort/reasoning knob | Seats/dispatch must pass model **EXPLICITLY** (dispatch #3 lesson); a default that omits it risks a silent downgrade |
-| Whether `~/.codex/config.toml` has a `notify` hook, and that it is **GLOBAL** | Bears on the hook-gap fix (§5) — a global notify would fire for the user's manual codex sessions |
-| A non-billing auth-state probe (whoami/status) | `codex_cli_available()` must check auth, not just PATH (§2) |
-| A resume/session model (expected `codex resume` or session ids) | Needed only if a codex analogue of `spawn_iterm2_resume` is ever wanted (left out of MVP) |
+| Fact (verified) | Result | Design consequence |
+|---|---|---|
+| Non-interactive subcommand | `codex exec [PROMPT]` (alias `e`); also `codex review` | the `run_codex_json` core; `claude -p` analogue |
+| **$0 subscription auth, headless** | `codex login status` → "Logged in using ChatGPT"; `env -u OPENAI_API_KEY codex exec` returned OK | **BRANCH A** — seat + judge + executor all buildable, zero hard-rule breach |
+| stdin must be closed | hangs "Reading additional input from stdin…" on a non-TTY | `codex_run.sh` MUST use `< /dev/null` (like `brain_run.sh`) |
+| JSONL events | `codex exec --json` | parser #1 reads it; `-o <file>` gives just the final message; `--output-schema <file>` pins the judge's JSON shape |
+| Event schema | `type` ∈ {`thread.started`,`turn.started`,`item.completed`,`turn.completed`} | §0 block; final text = last `agent_message` item's `.text`, usage on `turn.completed` |
+| Token usage | present on `turn.completed` (`input/cached_input/output/reasoning_output`) | $0 (don't bill); a Branch B seat would still be priceable — no dead end |
+| No-hang flag | `--dangerously-bypass-approvals-and-sandbox` + `-s <mode>` (exec has **no** `-a`) | dispatched executor won't hang (§6) |
+| Model flag | `-m/--model` (no `--effort` like claude; reasoning via `-c model_reasoning_effort=…`) | pass `-m` EXPLICITLY (dispatch #3) |
+| Auth-state probe | `codex login status` / `codex doctor` (✗/✓ auth) | `codex_cli_available()` calls this, not just `which` |
+| State isolation | `--ephemeral` + `CODEX_HOME` | per-seat isolation for a fan-out (§2 concurrency) |
+| Resume/session | `thread_id` on `thread.started`; `codex resume` / `codex exec resume` | a `spawn_iterm2_resume` analogue is feasible (deferred) |
+| Config + hooks | `~/.codex/config.toml`; codex has its OWN hook system w/ a trust model (`--dangerously-bypass-hook-trust`) | §5 fix (ii) "codex notify" would be global — prefer fix (iii) |
+
+**Deferred (not blocking):** exact `~/.codex/config.toml` `notify` mechanics (moot — §5 chose
+the in-band fix iii); any reasoning/effort knob beyond `-c model_reasoning_effort=…` (the `-c`
+override suffices). Environment note: `codex doctor` warned `websocket … HTTPS fallback may
+still work` — `exec` worked regardless; watch for proxy/VPN flakiness.
 
 ---
 
