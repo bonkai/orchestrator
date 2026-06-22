@@ -15,14 +15,14 @@ This is a phased *plan*, not a built feature. When nothing opts into codex, beha
 **byte-for-byte identical to today**. It mirrors the proven Fusion seams (see
 `FUSION_PLAN.md`) rather than inventing new plumbing.
 
-> 🛑 **THE LOAD-BEARING PREMISE — flagged, not assumed.** The brief framed this as
-> "*$0, exactly like Claude Code.*" That is a **premise to test, not a given.** It holds
-> **only if** `codex`'s **non-interactive** mode authenticates against a **ChatGPT
-> subscription** (Plus/Pro/Team/Edu/Enterprise), not *only* a paid `OPENAI_API_KEY`.
-> **This was NOT verifiable on this machine** (see §0) — `codex` is **not installed**.
-> The entire design therefore forks on **Phase C0** (§2). Until C0 passes, treat every
-> codex-CLI-specific flag, auth claim, and event-schema field in this doc as
-> **UNVERIFIED** (§3).
+> ✅ **THE LOAD-BEARING PREMISE — VERIFIED 2026-06-22 (codex-cli 0.141.0): BRANCH A holds.**
+> The brief framed this as "*$0, exactly like Claude Code.*" It is **confirmed**: `codex exec
+> --json` runs **non-interactively at $0 on a ChatGPT subscription** (`codex login status` →
+> "Logged in using ChatGPT"; a real `codex exec` round-tripped with **no `OPENAI_API_KEY`**).
+> C0 was executed live on this laptop — binary installed, ChatGPT login completed, event
+> schema captured (§0/§3). The design below is therefore **un-gated on its central premise**;
+> what remains (C1–C6) is engineering, not viability. Flags + event schema are **version-pinned
+> to 0.141.0** — codex churns them, so re-verify on upgrade.
 
 > ⚠️ **Hard rules, extended to codex (mirror of CLAUDE.md's Claude rules):**
 > - **NO OpenAI API calls / no hidden HTTP.** Codex runs on the **subscription via the
