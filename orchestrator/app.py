@@ -1,6 +1,9 @@
 """FastAPI app — orchestrator UI + dispatch endpoints + Stop hook receiver."""
 
 import asyncio
+import html
+import json
+import re
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -110,6 +113,9 @@ def _view_ctx() -> dict:
     # F8.4: named lenses offered as an (optional) per-seat dropdown in the picker.
     # Names + text travel; the form sends only the chosen NAME per seat (or none).
     fusion_lenses = [{"name": n, "text": t} for n, t in fcfg.get("lenses", {}).items()]
+    # Saved profiles (name → {claude_seats, provider_seats}); the picker offers
+    # them as a quick-switch dropdown that re-populates the seats in one click.
+    fusion_profiles = fcfg.get("profiles", {})
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -122,6 +128,7 @@ def _view_ctx() -> dict:
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
         "fusion_lenses": fusion_lenses,
+        "fusion_profiles": fusion_profiles,
         "verify_default": fcfg.get("verify", False),   # F11.c.1: pre-check the checkbox
     }
 
