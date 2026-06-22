@@ -276,6 +276,10 @@
         // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
         var FUSION_LENSES = {{ fusion_lenses | tojson }};
         var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
+        // name → full lens text, so the picker can show what each lens DOES on hover
+        // (names alone — first-principles, precedent, … — aren't self-explanatory).
+        var LENS_TEXT = {};
+        (FUSION_LENSES || []).forEach(function (l) { LENS_TEXT[l.name] = l.text; });
         // F12: cross-lab providers are now ADDED as seats (like Claude seats) so the
         // same provider can appear multiple times, each with its own lens. Only
         // active (keyed) providers are selectable; the server re-validates.
