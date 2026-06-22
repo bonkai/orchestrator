@@ -752,8 +752,44 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd_eff,
                             model=judge_model, effort=judge_effort, label="fusion-judge")
     judge.cost_usd = sum(a.get("cost", 0.0) for a in ok)   # out-of-pocket = external seats only
+
+    # F11.c.1: opt-in VERIFIER seat. A $0 local-CLI critic checks the judge's
+    # synthesis against the panel; on a concrete defect it triggers ONE re-judge
+    # (also $0). Fail-safe at every step — a verifier shortfall NEVER worsens or fails
+    # the result, it just keeps the original synthesis. cost_usd is untouched (verifier
+    # + re-judge are subscription, NO Anthropic API), so the §2 cost rule holds.
+    verifier_info: Optional[dict] = None
+    if verify and judge.ok:
+        verifier_info = {"ran": True, "defect": False, "rejudged": False, "issues": []}
+        vrun = run_claude_json(prompt=_verify_prompt(prompt, judge.text, ok),
+                               cwd=cwd_eff, model=verify_model, effort=verify_effort,
+                               label="fusion-verify")
+        verdict = vrun.parsed_json if (vrun.ok and isinstance(vrun.parsed_json, dict)) else None
+        if verdict is None and vrun.ok:                    # parsed_json may be None; retry
+            try:
+                verdict = json.loads(_strip_fences(vrun.text or ""))
+            except (ValueError, TypeError):
+                verdict = None
+        if isinstance(verdict, dict) and verdict.get("defect"):
+            issues = verdict.get("issues") or []
+            if not isinstance(issues, list):
+                issues = [str(issues)]
+            issues = [str(i).strip() for i in issues if str(i).strip()][:10]
+            verifier_info.update(defect=True, issues=issues)
+            rejudge = run_claude_json(
+                prompt=_rejudge_prompt(prompt, ok, judge.text, issues),
+                cwd=cwd_eff, model=judge_model, effort=judge_effort,
+                label="fusion-rejudge")
+            if rejudge.ok and (rejudge.text or "").strip():
+                judge.text = rejudge.text                  # corrected synthesis
+                judge.parsed_json = rejudge.parsed_json
+                verifier_info["rejudged"] = True
+            # else: re-judge fell short → keep the original synthesis (fail-safe).
+
     judge.raw = {"panel": answers, "preset": preset, "seats": seats_desc,
                  "lenses": lenses_used}
+    if verifier_info is not None:
+        judge.raw["verifier"] = verifier_info
     return judge
 
 
