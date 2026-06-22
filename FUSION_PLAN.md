@@ -627,6 +627,7 @@ class FusionResult:                   # in fusion.py — distinct from ClaudeRun
   - **`app.py`** — `/send` reads an optional per-seat `lens` (capped, resolved seat-side); `_view_ctx`/`_settings_ctx` surface the configured lenses; `/settings/lens` + `/settings/lens/{name}/remove` routes; the rewrite breakdown carries each seat's `lens`.
   - **templates** — a per-seat lens `<select>` on each Claude seat + active provider in the dispatch picker (localStorage-persisted, default "no lens"); a lens CRUD section in `settings.html`.
   - **tests** — `tests/test_fusion_lenses.py` (28 offline cases: config merge/resolve/CRUD, `_apply_lens` + standalone-twin parity, `_run_panel`/`_anthropic_seat_answer`/`_run_fusion_in_tab`/`fusion_call.py` threading, `run_fusion_json` end-to-end + lens-free back-compat, settings surface). · *verify:* a seat's lens prefix is applied on the next fusion call.
+  - **usage guide** — [`FUSION_LENS_PLAYBOOK.md`](FUSION_LENS_PLAYBOOK.md): per-scenario lens→seat assignment (which lens on which model, how many seats) for architecture, debugging, data analysis, UIs, security, refactoring, … plus the capability-tiering + dominant-failure-mode rules. *(Seed lens set expanded 3 → 10 on 2026-06-22; see §11.c.3.)*
 
 ### Phase F9 — Claude Code panel seats *(✅ implemented 2026-06-18)*
 
