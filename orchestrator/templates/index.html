@@ -607,11 +607,11 @@
             if (s.lens) seat.lens = s.lens;       // F8.4: per-seat lens (optional)
             fusionSeats.push(seat);
           });
-          checkedProviders().forEach(function(n) {
-            var seat = { type: 'provider', name: n };
-            var lensSel = fusionPanel &&
-              fusionPanel.querySelector('select.fusion-prov-lens[data-prov="' + n + '"]');
-            if (lensSel && lensSel.value) seat.lens = lensSel.value;
+          // F12: one entry per provider SEAT (duplicates allowed), each with its
+          // own optional lens. The server gives same-provider seats unique keys.
+          providerSeats().forEach(function(s) {
+            var seat = { type: 'provider', name: s.name };
+            if (s.lens) seat.lens = s.lens;
             fusionSeats.push(seat);
           });
           fd.append('fusion_seats', JSON.stringify(fusionSeats));
