@@ -458,13 +458,32 @@
         }
 
         if (fusionCheckbox) {
-          // Restore external-provider checks (saved set, else preset default).
-          var savedPanel = null;
-          try { savedPanel = JSON.parse(localStorage.getItem(FUSION_PANEL_KEY)); } catch (e) {}
-          var wanted = Array.isArray(savedPanel) ? savedPanel : fusionDefaultPanel;
-          fusionProvCbs().forEach(function(cb) {
-            if (!cb.disabled) cb.checked = wanted.indexOf(cb.value) !== -1;
-          });
+          // F12: restore cross-lab provider seats (saved set, else the configured
+          // preset's active members as one seat each — preserving the prior default
+          // panel). Inactive/unknown provider names are dropped.
+          function isActiveProvider(n) {
+            for (var i = 0; i < ACTIVE_PROVIDERS.length; i++) {
+              if (ACTIVE_PROVIDERS[i].name === n) return true;
+            }
+            return false;
+          }
+          var savedProvSeats = null;
+          try { savedProvSeats = JSON.parse(localStorage.getItem(PROVIDER_SEATS_KEY)); } catch (e) {}
+          if (Array.isArray(savedProvSeats)) {
+            savedProvSeats.forEach(function(s) {
+              if (s && isActiveProvider(s.name)) addProviderSeatRow(s.name, s.lens);
+            });
+          } else {
+            (fusionDefaultPanel || []).forEach(function(n) {
+              if (isActiveProvider(n)) addProviderSeatRow(n, '');
+            });
+          }
+          // No keyed providers ⇒ hide the add button, show the settings hint.
+          var noProvHint = document.getElementById('no-providers-hint');
+          if (!ACTIVE_PROVIDERS.length) {
+            if (addProviderSeatBtn) addProviderSeatBtn.style.display = 'none';
+            if (noProvHint) noProvHint.style.display = '';
+          }
           // Restore Claude seats (saved set, else two Opus seats at high+medium —
           // a valid $0 panel out of the box).
           var savedSeats = null;
