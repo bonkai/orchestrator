@@ -304,18 +304,18 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 | **C3** | **Selectable judge** | `judge_engine` param + `_JUDGE_ENGINES` map; routes judge **and** verifier **and** re-judge; default `"claude"` | ◻ design only |
 | **C4** | Config SEEDS | codex engine/seat config in `config.py` SEEDS (**design only — do NOT add in this task; import, don't redefine**) | ◻ design only |
 | **C5** | Dispatch-form engine+model picker | engine selector (claude\|codex) + **per-engine model** id; threads through `/send` → `_send_in_background`; default carries the model EXPLICITLY | ◻ design only |
-| **C6** | **$0 executor** *(Branch A only; build last)* | `spawn_codex_dispatch` + codex `run.sh` branch + the §5 hook-gap convergence (iii) + PID file + auto-bypass flag | ◻ design only — **gated on C0=Branch A** |
+| **C6** | **$0 executor** *(Branch A only; build last)* | `spawn_codex_dispatch` + codex `run.sh` branch + the §5 hook-gap convergence (iii) + PID file + auto-bypass flag | ◻ design only — **un-gated: C0=Branch A ✅** |
 
 Build strictly in order; the seat (C2) is the first shippable thing and is hook-gap-free.
-**C6 does not start unless C0 returns Branch A.**
+**C0 returned Branch A ✅ (2026-06-22) — C6 is un-gated.**
 
-### Phase C0 — Verification gate *(no code; a visible-tab probe)*
-*Goal: turn every §3 hypothesis into a verified fact (or a confirmed absence), and return the §2 branch verdict.*
-- [ ] **C0.1** Install codex (record how + version) and run **`codex --help`** and **`codex exec --help`** (or whatever the non-interactive subcommand is) in a **visible iTerm2 tab**; capture the flag list verbatim, dated + version-pinned. · *verify:* the help text is pasted into the C0 result, not paraphrased.
-- [ ] **C0.2** Auth probe: complete the **ChatGPT subscription** login and confirm a **non-interactive** `codex exec` call **succeeds with $0 / no API key** (scrub `OPENAI_API_KEY` first). · *verify:* a non-interactive run completes on the subscription with **no** `OPENAI_API_KEY` in the env → **Branch A**; if it demands a key → **Branch B** (§2).
-- [ ] **C0.3** Capture a real terminal-event **JSONL** from a `--json` (or equiv) run; record the field names for final text, model, and **token/cost usage**. · *verify:* the captured event names are listed; "usage present?" answered yes/no (gates Branch-B pricing).
-- [ ] **C0.4** Confirm the **auto-approve/sandbox-bypass** flag and a **non-billing auth-state** probe. · *verify:* a dispatched run won't hang on approval; `codex_cli_available()` has a real auth check to mirror.
-- [ ] **C0.5** Confirm whether `~/.codex/config.toml` `notify` exists and is **global**. · *verify:* the §5 fix choice (iii vs ii) is settled.
+### Phase C0 — Verification gate ✅ *(DONE 2026-06-22 — BRANCH A, codex-cli 0.141.0)*
+*Goal: turn every §3 hypothesis into a verified fact, and return the §2 branch verdict. **Result: all of C0.1–C0.5 confirmed; details in §0/§3.***
+- [x] **C0.1** Installed `@openai/codex` (0.141.0); captured `codex --help` + `codex exec --help` verbatim. ✅
+- [x] **C0.2** ChatGPT login done; `env -u OPENAI_API_KEY codex exec --json` round-tripped at **$0** → **Branch A**. ✅
+- [x] **C0.3** Real event JSONL captured; schema in §0 (`type` discriminator; `agent_message.text`; `turn.completed.usage` with token counts). ✅
+- [x] **C0.4** `--dangerously-bypass-approvals-and-sandbox` (no-hang) + `codex login status`/`codex doctor` (auth probe) confirmed. ✅ Also found: `codex exec` needs `< /dev/null`.
+- [x] **C0.5** `~/.codex/config.toml` + codex's own trust-gated hook system noted; §5 picks the in-band fix (iii), so a global `notify` is moot. ✅
 
 ### Phase C1 — The codex CLI invoker
 *Goal: `run_codex_json(prompt, cwd, model, …)` returning a `ClaudeRun`, in a watchable tab — the codex twin of `run_claude_json`.*
