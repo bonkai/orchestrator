@@ -1568,3 +1568,114 @@ async def settings_lens_remove(name: str):
         return _settings_redirect(ok=f"removed lens {name}")
     except config.ConfigWriteError as e:
         return _settings_redirect(err=str(e))
+
+
+# ── Fusion PROFILES (saveable named panels) + the lens playbook page ─────────
+@app.post("/fusion/profile")
+async def fusion_save_profile(name: str = Form(...), profile: str = Form(...)):
+    """Save (or overwrite) a named Fusion profile — the picker POSTs the current
+    seats as a JSON string. Returns the updated profiles map as JSON so the picker
+    can refresh its dropdown without a page reload."""
+    try:
+        data = json.loads(profile or "{}")
+    except (ValueError, TypeError):
+        return JSONResponse({"ok": False, "error": "profile is not valid JSON"}, status_code=400)
+    try:
+        fcfg = config.save_profile(name, data if isinstance(data, dict) else {})
+        return JSONResponse({"ok": True, "profiles": fcfg.get("profiles", {})})
+    except config.ConfigWriteError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/fusion/profile/remove")
+async def fusion_remove_profile(name: str = Form(...)):
+    """Delete a saved profile (NAME in the form body, not the URL path, so a
+    profile named anything works). Returns the updated profiles map."""
+    try:
+        fcfg = config.remove_profile(name)
+        return JSONResponse({"ok": True, "profiles": fcfg.get("profiles", {})})
+    except config.ConfigWriteError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+def _md_inline(text: str) -> str:
+    """Inline markdown → HTML for the playbook page: links, `code`, **bold**.
+    HTML-escapes FIRST so the doc can't inject markup; the markdown delimiters
+    survive escaping."""
+    s = html.escape(text, quote=False)
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
+               lambda m: f'<a href="{html.escape(m.group(2), quote=True)}">{m.group(1)}</a>', s)
+    s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+    s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+    return s
+
+
+def _render_markdown(md: str) -> str:
+    """A SMALL markdown→HTML renderer scoped to FUSION_LENS_PLAYBOOK.md's syntax
+    (headings, ---, > quotes, pipe tables, - lists, paragraphs + inline). Not a
+    general renderer — just enough to serve our own doc with no dependency."""
+    lines = md.split("\n")
+    out: list = []
+    i, n, in_list = 0, len(lines), False
+
+    def close_list():
+        nonlocal in_list
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+
+    while i < n:
+        line = lines[i].strip()
+        if not line:
+            close_list(); i += 1; continue
+        if re.match(r"^-{3,}$", line):
+            close_list(); out.append("<hr>"); i += 1; continue
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if m:
+            close_list(); lvl = len(m.group(1))
+            out.append(f"<h{lvl}>{_md_inline(m.group(2))}</h{lvl}>"); i += 1; continue
+        # pipe table: a |row| followed by a |---|--- separator
+        if (line.startswith("|") and i + 1 < n
+                and "-" in lines[i + 1] and re.match(r"^\|?[\s:|-]+\|?$", lines[i + 1].strip())):
+            close_list()
+            t = ["<table><thead><tr>"]
+            t += [f"<th>{_md_inline(c.strip())}</th>" for c in line.strip("|").split("|")]
+            t.append("</tr></thead><tbody>")
+            i += 2
+            while i < n and lines[i].strip().startswith("|"):
+                cells = lines[i].strip().strip("|").split("|")
+                t.append("<tr>" + "".join(f"<td>{_md_inline(c.strip())}</td>" for c in cells) + "</tr>")
+                i += 1
+            t.append("</tbody></table>")
+            out.append("".join(t)); continue
+        if line.startswith(">"):
+            close_list(); buf = []
+            while i < n and lines[i].strip().startswith(">"):
+                buf.append(lines[i].strip()[1:].strip()); i += 1
+            out.append(f"<blockquote>{_md_inline(' '.join(buf))}</blockquote>"); continue
+        if re.match(r"^[-*]\s+", line):
+            if not in_list:
+                out.append("<ul>"); in_list = True
+            out.append(f"<li>{_md_inline(re.sub(r'^[-*][ \t]+', '', line))}</li>"); i += 1; continue
+        # paragraph: gather consecutive plain lines
+        close_list(); para = [line]; i += 1
+        while (i < n and lines[i].strip()
+               and not re.match(r"^(#{1,6}\s|[-*]\s|>|\|)", lines[i].strip())
+               and not re.match(r"^-{3,}$", lines[i].strip())):
+            para.append(lines[i].strip()); i += 1
+        out.append(f"<p>{_md_inline(' '.join(para))}</p>")
+    close_list()
+    return "\n".join(out)
+
+
+@app.get("/playbook", response_class=HTMLResponse)
+async def playbook(request: Request):
+    """Render FUSION_LENS_PLAYBOOK.md (repo root) as a themed page — the in-UI
+    'lens guide' linked from the dispatch picker + settings. Read-only."""
+    path = BASE_DIR.parent / "FUSION_LENS_PLAYBOOK.md"
+    try:
+        content = _render_markdown(path.read_text(encoding="utf-8"))
+    except OSError:
+        content = "<p>Playbook not found.</p>"
+    return templates.TemplateResponse("playbook.html",
+                                      {"request": request, "content": content})
