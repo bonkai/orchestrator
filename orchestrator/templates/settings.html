@@ -48,6 +48,22 @@
       </div>
     </div>
 
+    <!-- ── Verifier ──────────────────────────────────────────────────── -->
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">verifier
+        <span class="muted" style="font-size:12px;">— check the fusion judge, re-judge on defect</span>
+      </h3>
+      <form method="post" action="/settings/verify" style="display:flex; gap:0.5rem; align-items:center;">
+        <input type="hidden" name="verify_enabled" value="{{ 'false' if verify_enabled else 'true' }}">
+        <button type="submit" class="link small" title="toggle verifier">
+          {{ 'on' if verify_enabled else 'off' }}</button>
+        <span class="muted" style="font-size:12px;">
+          when ON, every fusion send adds a $0 Claude-CLI verifier seat after the judge
+          (it re-judges once if it finds a defect). The per-dispatch "verify" checkbox overrides this.
+        </span>
+      </form>
+    </div>
+
     <!-- ── Registered providers ──────────────────────────────────────── -->
     <div class="pane reveal">
       <h3 style="margin-top:0;">registered providers</h3>
