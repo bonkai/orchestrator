@@ -950,3 +950,207 @@ def finish_fusion_tab(fusion_id: str, success: bool = False):
         except Exception:
             pass
     cleanup_fusion_files(fusion_id)
+
+
+# ─── codex calls (seat / judge) in watchable tabs (mirrors the brain-tab block) ─
+# The codex twin of the brain-tab plumbing: a $0 subscription `codex exec` call
+# streamed to a sidecar JSONL the orchestrator parses back into a structured
+# result (claude_runner._build_codex_run). Engine-neutral machinery
+# (_spawn_tab_script, _spawn_osascript, _setuservar_printf,
+# close_iterm2_session_by_var, brain_auto_close_enabled) is REUSED as-is — only a
+# new sidecar dir + codex_run.sh + the `user.orch_codex` tab tag differ. Sets
+# ORCHESTRATOR_CODEX_ID, NEVER ORCHESTRATOR_RUN_ID, so the env-gated Stop hook
+# stays a no-op for codex tabs. Flags + event schema are version-pinned to
+# codex-cli 0.141.0 (CODEX_PLAN.md §0); codex churns them, so re-verify on upgrade.
+
+CODEX_DIR = DATA_DIR / "codex"
+CODEX_RUN_SH = BIN_DIR / "codex_run.sh"
+
+CODEX_RUN_SH_CONTENT = """#!/bin/bash
+# Orchestrator codex-call runner — execed inside an iTerm2 tab so a codex seat /
+# judge call is WATCHABLE live, the codex twin of brain_run.sh. codex runs with
+# `exec --json` so its events stream as JSONL; `tee` mirrors the raw stream to a
+# sidecar JSONL the orchestrator parses (claude_runner._build_codex_run) to
+# recover the structured result. A python3 pretty-printer AFTER tee renders
+# readable lines in the tab keyed off CODEX event types (not claude's
+# assistant/result) — it formats only the terminal copy; tee already wrote raw
+# JSONL to the sidecar, which the orchestrator parses unchanged. PIPESTATUS[0]
+# keeps codex's exit code (codex is first in the pipe; the formatter is last).
+#
+# codex specifics vs claude (codex-cli 0.141.0 — re-verify on upgrade):
+#   - subcommand `exec` (the `claude -p` analogue), `--json` (NOT stream-json)
+#   - `-m MODEL` passed EXPLICITLY: codex's JSON omits the model, so the parser
+#     falls back to it (dispatch #3 lesson)
+#   - `-s read-only`: a seat/judge only READS to answer — this also stops a
+#     mid-run write-approval from HANGING the non-TTY tab. The write-capable
+#     `--dangerously-bypass-approvals-and-sandbox` belongs to the C6 executor,
+#     NOT here.
+#   - reasoning effort via `-c model_reasoning_effort=<e>`, applied ONLY when an
+#     effort is given (else codex uses the model default — what C0 verified)
+#   - MUST run `< /dev/null`: codex exec otherwise blocks "Reading additional
+#     input from stdin…" on a non-TTY (exactly like claude -p). The redirect
+#     attaches to codex (first pipe stage), so PIPESTATUS[0] stays codex's exit.
+#
+# Completion signalling mirrors brain_run.sh:
+#   <id>.done — codex's exit code, written AFTER tee flushes (so .jsonl is whole)
+#   <id>.pid  — this shell's PID; lets the poller detect a closed/killed tab.
+#
+# ORCHESTRATOR_CODEX_ID (never ORCHESTRATOR_RUN_ID) so the env-gated Stop hook
+# stays a no-op for codex tabs. OPENAI_API_KEY is scrubbed before the call so the
+# $0 subscription path is used, NEVER the billed OpenAI API (CLAUDE.md hard rule).
+if [ -z "${ORCHESTRATOR_CODEX_ID:-}" ]; then
+    echo "Orchestrator codex: ORCHESTRATOR_CODEX_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_CODEX_ID"
+CODEX_DIR="$HOME/.orchestrator/codex"
+PROMPT_FILE="$CODEX_DIR/${ID}.prompt"
+OUT_FILE="$CODEX_DIR/${ID}.jsonl"
+DONE_FILE="$CODEX_DIR/${ID}.done"
+PID_FILE="$CODEX_DIR/${ID}.pid"
+MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo gpt-5-codex)
+EFFORT=$(cat "$CODEX_DIR/${ID}.effort" 2>/dev/null || echo "")
+echo $$ > "$PID_FILE"
+if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Orchestrator codex: missing prompt file $PROMPT_FILE" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+PROMPT=$(cat "$PROMPT_FILE")
+# $0 subscription path only — never route codex through the billed OpenAI API.
+unset OPENAI_API_KEY
+EFFORT_ARG=()
+if [ -n "$EFFORT" ]; then
+    EFFORT_ARG=(-c "model_reasoning_effort=$EFFORT")
+fi
+echo "---- orchestrator codex call: $ID ($MODEL${EFFORT:+ / $EFFORT}) ----"
+echo "(watching live; the structured result is captured for the orchestrator)"
+echo
+codex exec "$PROMPT" \
+    -m "$MODEL" \
+    -s read-only \
+    --json \
+    "${EFFORT_ARG[@]}" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        print(line)
+        continue
+    t = obj.get('type', '')
+    if t == 'thread.started':
+        print('[codex]', (obj.get('thread_id') or '')[:8])
+    elif t == 'item.completed':
+        item = obj.get('item') or {}
+        it = item.get('type')
+        if it == 'agent_message':
+            txt = (item.get('text') or '').strip()
+            if txt:
+                print('[assistant]', txt)
+        else:
+            print('[item]', it or '?')
+    elif t == 'turn.completed':
+        u = obj.get('usage') or {}
+        print('[done] in=%s cached=%s out=%s reasoning=%s' % (
+            u.get('input_tokens', 0), u.get('cached_input_tokens', 0),
+            u.get('output_tokens', 0), u.get('reasoning_output_tokens', 0)))
+    elif t and t != 'turn.started':
+        print('[codex:%s]' % t)
+"
+code=${PIPESTATUS[0]}
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- codex call finished (exit $code) ----"
+"""
+
+
+def ensure_codex_runner():
+    """One-time (lazy): create the codex sidecar dir and write codex_run.sh.
+    Mirrors ensure_brain_runner; called on the first codex call, so install.sh
+    needs no change."""
+    CODEX_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    CODEX_RUN_SH.write_text(CODEX_RUN_SH_CONTENT)
+    CODEX_RUN_SH.chmod(0o755)
+
+
+def _codex_tab_title(codex_id: str, label: str) -> str:
+    """Unique, readable iTerm2 tab title for a codex call; the random suffix lets
+    us close exactly this tab later."""
+    suffix = codex_id.rsplit("-", 1)[-1]
+    return f"orch codex: {label} {suffix}"
+
+
+def _codex_tab_cmd(codex_id: str, cwd: str, title: str) -> str:
+    """Shell command the codex tab runs. Sets ORCHESTRATOR_CODEX_ID (NOT
+    ORCHESTRATOR_RUN_ID — so the Stop hook stays a no-op), titles the tab, then
+    execs codex_run.sh. Pure/string-only so it's unit-testable."""
+    safe_proj = cwd.replace('"', '\\"')
+    safe_title = title.replace('"', '\\"')
+    return (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_CODEX_ID={codex_id} && '
+        f'{_setuservar_printf("orch_codex", codex_id)}'
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/codex_run.sh"'
+    )
+
+
+def cleanup_codex_files(codex_id: str):
+    """Remove all sidecar files for a codex call. The tab (and its on-screen
+    output) is unaffected — tee already wrote to the terminal."""
+    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort"):
+        try:
+            (CODEX_DIR / f"{codex_id}.{suf}").unlink()
+        except FileNotFoundError:
+            pass
+
+
+def spawn_codex_tab(codex_id: str, prompt: str, cwd: str,
+                    model: str = "gpt-5-codex", effort: str = "",
+                    label: str = "codex") -> None:
+    """Open a new iTerm2 tab and run a codex call in it via codex_run.sh.
+
+    Writes the prompt + config to CODEX_DIR sidecars (avoids shell-quoting the
+    prompt into AppleScript), then tells iTerm2 to open a tab and exec the
+    runner. The caller polls <codex_id>.done for completion. Raises on spawn
+    failure (so the caller can fall back to headless). An empty `effort` ⇒ no
+    reasoning-effort override (codex uses the model default — what C0 verified);
+    a value is applied as `-c model_reasoning_effort=<effort>` by codex_run.sh.
+    `model` is the codex model id; the codex `-m` value is a C4 SEED concern when
+    built — callers pass it EXPLICITLY (dispatch #3)."""
+    if not iterm2_installed():
+        raise RuntimeError("iTerm2 not installed")
+    ensure_codex_runner()
+    (CODEX_DIR / f"{codex_id}.prompt").write_text(prompt, encoding="utf-8")
+    (CODEX_DIR / f"{codex_id}.model").write_text((model or "gpt-5-codex").strip())
+    (CODEX_DIR / f"{codex_id}.effort").write_text((effort or "").strip())
+
+    title = _codex_tab_title(codex_id, label)
+    safe_title = title.replace('"', '\\"')
+    cmd = _codex_tab_cmd(codex_id, cwd, title)
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+
+    script = _spawn_tab_script(safe_title, apple_cmd)
+    try:
+        _spawn_osascript(script)
+    except Exception:
+        cleanup_codex_files(codex_id)
+        raise
+
+
+def finish_codex_tab(codex_id: str, label: str = "codex", success: bool = False):
+    """Post-call teardown for a codex tab. Closes the tab when the call
+    succeeded AND auto-close is enabled (failed calls stay open for inspection);
+    always removes the sidecar files. Never raises."""
+    if success and brain_auto_close_enabled():
+        try:
+            if not close_iterm2_session_by_var("orch_codex", codex_id):
+                close_iterm2_tab_by_title(_codex_tab_title(codex_id, label))
+        except Exception:
+            pass
+    cleanup_codex_files(codex_id)
