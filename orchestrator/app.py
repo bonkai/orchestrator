@@ -122,6 +122,7 @@ def _view_ctx() -> dict:
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
         "fusion_lenses": fusion_lenses,
+        "verify_default": fcfg.get("verify", False),   # F11.c.1: pre-check the checkbox
     }
 
 
@@ -1494,6 +1495,17 @@ async def settings_set_preset(preset: str = Form(...)):
     try:
         config.set_preset(preset)
         return _settings_redirect(ok=f"preset → {preset}")
+    except config.ConfigWriteError as e:
+        return _settings_redirect(err=str(e))
+
+
+@app.post("/settings/verify")
+async def settings_set_verify(verify_enabled: str = Form("false")):
+    """F11.c.1: toggle the opt-in verifier seat (fusion.verify) on/off."""
+    try:
+        on = verify_enabled.lower() in ("1", "true", "yes", "on")
+        config.set_verify(on)
+        return _settings_redirect(ok=f"verifier {'enabled' if on else 'disabled'}")
     except config.ConfigWriteError as e:
         return _settings_redirect(err=str(e))
 
