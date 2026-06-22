@@ -361,6 +361,43 @@ class TestRunFusionJsonLenses(unittest.TestCase):
         by = {a["name"]: a for a in run.raw["panel"]}
         self.assertEqual(by["gemini"]["lens"], "risks")    # tagged after the fan-out
 
+    def test_duplicate_provider_seats_get_unique_keys_and_lenses(self):
+        # F12: the SAME cross-lab provider may appear N times, each its own seat
+        # with its own lens (the provider analogue of duplicate Claude seats).
+        # Each must get a UNIQUE key (gemini, gemini#2, gemini#3) so the name-keyed
+        # fan-out (per-seat providers map, lenses map, and each answer's name)
+        # never collapses two seats into one — which would silently drop seats and
+        # let only the LAST lens win.
+        active = {"gemini": dict(PROV)}
+        panel_ans = [{"name": "gemini", "ok": True, "cost": 0.001, "text": "A"},
+                     {"name": "gemini#2", "ok": True, "cost": 0.002, "text": "B"},
+                     {"name": "gemini#3", "ok": True, "cost": 0.003, "text": "C"}]
+        panel = [{"name": "gemini", "lens": "risks"},      # seat 1 — risk lens
+                 {"name": "gemini", "lens": "simplest"},   # seat 2 — simplicity lens
+                 "gemini"]                                  # seat 3 — no lens (bare name)
+        with self._env(active, panel_ans, {}) as (rp, asa, rcj):
+            run = claude_runner.run_fusion_json("q", cwd="/tmp", panel=panel)
+        self.assertTrue(run.ok)
+        # Three distinct seat keys fanned out — NOT deduped to a single "gemini".
+        self.assertEqual(rp.call_args.args[1], ["gemini", "gemini#2", "gemini#3"])
+        # Every key resolves to the same provider config (script/model/prices),
+        # so pricing and the tab body stay correct for each duplicate seat.
+        seat_providers = rp.call_args.args[2]
+        self.assertEqual(set(seat_providers), {"gemini", "gemini#2", "gemini#3"})
+        for prov in seat_providers.values():
+            self.assertEqual(prov["model"], PROV["model"])
+        # Per-seat lenses are keyed by the UNIQUE seat key — no collision, so two
+        # gemini seats carry two different lenses (the un-lensed 3rd carries none).
+        self.assertEqual(rp.call_args.args[5],
+                         {"gemini": "RISK-TEXT", "gemini#2": "SIMPLE-TEXT"})
+        self.assertIn({"seat": "gemini", "lens": "risks"}, run.raw["lenses"])
+        self.assertIn({"seat": "gemini#2", "lens": "simplest"}, run.raw["lenses"])
+        # Each answer is tagged back by its unique key — #2 stays distinct.
+        by = {a["name"]: a for a in run.raw["panel"]}
+        self.assertEqual(by["gemini"]["lens"], "risks")
+        self.assertEqual(by["gemini#2"]["lens"], "simplest")
+        self.assertEqual(by["gemini#3"]["lens"], "")       # no lens → blank
+
     def test_judge_sees_original_prompt_not_the_lensed_one(self):
         active = {"gemini": dict(PROV)}
         panel_ans = [{"name": "gemini", "ok": True, "cost": 0.0, "text": "A"}]
