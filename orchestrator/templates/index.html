@@ -388,9 +388,68 @@
           try { localStorage.setItem(CLAUDE_SEATS_KEY, JSON.stringify(claudeSeats())); } catch (e) {}
           updateFusionCount();
         }
+
+        // -- Cross-lab provider seats: provider + optional lens; duplicates allowed
+        // (F12). Same add/remove/persist shape as Claude seats, so the panel can
+        // hold e.g. 3× glm, each through a different lens.
+        function makeProviderSelect(val) {
+          var sel = document.createElement('select');
+          sel.className = 'provider-seat-name';
+          sel.style.fontSize = '11px';
+          ACTIVE_PROVIDERS.forEach(function(p) {
+            var op = document.createElement('option');
+            op.value = p.name;
+            op.textContent = p.name + (p.model ? ' (' + p.model + ')' : '');
+            if (p.name === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          return sel;
+        }
+        function makeProviderLensSelect(val) {
+          var sel = document.createElement('select');
+          sel.className = 'provider-seat-lens';
+          sel.style.fontSize = '10px';
+          var none = document.createElement('option');
+          none.value = ''; none.textContent = 'no lens';
+          sel.appendChild(none);
+          LENS_NAMES.forEach(function(name) {
+            var op = document.createElement('option');
+            op.value = name; op.textContent = name;
+            if (name === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          return sel;
+        }
+        function addProviderSeatRow(name, lens) {
+          if (!providerSeatsEl || !ACTIVE_PROVIDERS.length) return;
+          var row = document.createElement('div');
+          row.className = 'provider-seat-row';
+          row.style.cssText = 'display:flex; align-items:center; gap:0.35rem; padding:2px 0; font-size:12px;';
+          var pSel = makeProviderSelect(name || ACTIVE_PROVIDERS[0].name);
+          var rm = document.createElement('button');
+          rm.type = 'button'; rm.className = 'link provider-seat-rm';
+          rm.textContent = '×'; rm.title = 'remove this seat';
+          rm.style.cssText = 'margin-left:0.25rem; padding:0 6px;';
+          rm.addEventListener('click', function() { row.remove(); saveProviderSeats(); });
+          pSel.addEventListener('change', saveProviderSeats);
+          row.appendChild(pSel);
+          if (LENS_NAMES.length) {
+            var lSel = makeProviderLensSelect(lens || '');
+            lSel.addEventListener('change', saveProviderSeats);
+            row.appendChild(document.createTextNode(' · lens '));
+            row.appendChild(lSel);
+          }
+          row.appendChild(rm);
+          providerSeatsEl.appendChild(row);
+        }
+        function saveProviderSeats() {
+          try { localStorage.setItem(PROVIDER_SEATS_KEY, JSON.stringify(providerSeats())); } catch (e) {}
+          updateFusionCount();
+        }
+
         function updateFusionCount() {
           if (!fusionCountEl) return;
-          var c = claudeSeats().length, p = checkedProviders().length, total = c + p;
+          var c = claudeSeats().length, p = providerSeats().length, total = c + p;
           fusionCountEl.textContent = 'panel: ' + total + ' seat' + (total === 1 ? '' : 's') +
             ' (' + c + ' Claude · ' + p + ' cross-lab)' + (total < 2 ? ' — need ≥2' : '');
           var anyOn = (fusionCheckbox && fusionCheckbox.checked) ||
