@@ -630,7 +630,7 @@ def _fusion_panel_breakdown(result) -> list[dict]:
     return out
 
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
@@ -675,12 +675,12 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             # send asked for it. fusion/panel/judge_* are passed positionally
             # (run_in_executor takes *args, not kwargs) — rewriter.rewrite's
             # signature is (user_task, project_path, fusion, panel, judge_model,
-            # judge_effort). With do_fusion=False this is byte-for-byte the
-            # original single-claude path (panel + judge_* are inert downstream
-            # when fusion is off).
+            # judge_effort, verify). With do_fusion=False this is byte-for-byte the
+            # original single-claude path (panel + judge_*/verify are inert
+            # downstream when fusion is off).
             result = await loop.run_in_executor(
                 None, rewriter.rewrite, task_for_rewriter, proj["path"],
-                do_fusion, panel, judge_model, judge_effort,
+                do_fusion, panel, judge_model, judge_effort, do_verify,
             )
             if result.ok and result.rewritten_prompt:
                 final_task = result.rewritten_prompt
@@ -701,6 +701,7 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                     "fusion_preset": result.fusion_preset,
                     "fusion_seats": result.fusion_seats,
                     "panel_breakdown": _fusion_panel_breakdown(result),
+                    "verifier": result.verifier,   # F11.c.1: verdict (empty if off)
                 }
             else:
                 reason = result.error or "rewrite returned empty prompt"
@@ -726,6 +727,7 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                     "fusion_preset": result.fusion_preset,
                     "fusion_seats": result.fusion_seats,
                     "panel_breakdown": _fusion_panel_breakdown(result),
+                    "verifier": result.verifier,   # F11.c.1: verdict (empty if off)
                 }
                 rewrite_failed = True
                 rewrite_error = reason
@@ -767,7 +769,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             fres = await loop.run_in_executor(
                 None, lambda: fusion_mod.enrich(
                     final_task, proj["path"], panel,
-                    judge_model=judge_model, judge_effort=judge_effort))
+                    judge_model=judge_model, judge_effort=judge_effort,
+                    verify=do_verify))
             if fres.ok and fres.enrichment_md:
                 final_task = final_task + "\n\n" + fres.enrichment_md
                 rewrite_cost += fres.cost_usd                    # add to dispatch spend
@@ -815,6 +818,7 @@ async def send(
     fusion_panel: str = Form(""),
     fusion_seats: str = Form(""),
     fusion_enrich: str = Form("false"),
+    fusion_verify: str = Form("false"),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
@@ -879,15 +883,17 @@ async def send(
     # to the executor prompt (separate from the rewrite). Reuses the same panel
     # selection; needs the panel to be usable (>=2 seats) or it self-skips.
     do_enrich = fusion_enrich.lower() in ("1", "true", "yes", "on")
+    do_verify = fusion_verify.lower() in ("1", "true", "yes", "on")
     if do_fusion or do_enrich:
         print(f"[orchestrator] /send fusion={'on' if do_fusion else 'off'} "
-              f"enrich={'on' if do_enrich else 'off'}, panel={panel or '(preset)'}")
+              f"enrich={'on' if do_enrich else 'off'} "
+              f"verify={'on' if do_verify else 'off'}, panel={panel or '(preset)'}")
 
     # Strong-ref the task so Python's GC can't drop the rewrite+dispatch
     # mid-run when the browser tab disconnects after the immediate response.
     task = asyncio.create_task(_send_in_background(
         project_id, task, wall_cap_s, do_rewrite, effort, model,
-        do_fusion=do_fusion, panel=panel, do_enrich=do_enrich,
+        do_fusion=do_fusion, panel=panel, do_enrich=do_enrich, do_verify=do_verify,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -1468,6 +1474,7 @@ def _settings_ctx(err: str = "", ok: str = "") -> dict:
         "providers": providers,
         "lenses": lenses,
         "active_count": len(active),
+        "verify_enabled": fcfg.get("verify", False),   # F11.c.1: verifier toggle state
         "err": err, "ok": ok,
     }
 
