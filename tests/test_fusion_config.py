@@ -145,6 +145,34 @@ class TestFusionConfig(_IsolatedConfig):
         self.assertEqual(fc["preset"], "budget")
         self.assertEqual(set(fc["providers"]), set(config.FUSION_PROVIDERS_SEED))
 
+    def test_verify_defaults_false(self):
+        self.assertFalse(config.fusion_config()["verify"])
+
+    def test_verify_true_in_file_is_read(self):
+        self._write_config({"fusion": {"verify": True}})
+        self.assertTrue(config.fusion_config()["verify"])
+
+
+# ──────────────── F11.c.1: set_verify() writer ──────────────────────────────
+
+class TestSetVerify(_IsolatedConfig):
+    def test_round_trips_on_and_off(self):
+        config.set_verify(True)
+        self.assertTrue(config.fusion_config()["verify"])
+        config.set_verify(False)
+        self.assertFalse(config.fusion_config()["verify"])
+
+    def test_preserves_api_keys_and_other_fusion(self):
+        self._write_config({"fusion": {
+            "preset": "max",
+            "providers": {"deepseek": {"api_key": "sk-keepme"}},
+        }})
+        config.set_verify(True)
+        raw = json.loads(config.CONFIG_PATH.read_text())["fusion"]
+        self.assertTrue(raw["verify"])                 # flag flips on …
+        self.assertEqual(raw["preset"], "max")         # … preset untouched …
+        self.assertEqual(raw["providers"]["deepseek"]["api_key"], "sk-keepme")  # … key kept
+
 
 # ──────────────── F0.1: get_provider_key() precedence ──────────────────────
 
