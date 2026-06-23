@@ -230,6 +230,17 @@ def fusion_config() -> dict:
             if isinstance(text, str) and text.strip():
                 lenses[name] = text
 
+    # C4: codex ENGINE config — CODEX_ENGINE_SEED with config.json's fusion.codex
+    # merged over it (per-key override, like the lens/preset merges above). The
+    # mutable seed values (the probe + the seat list) are re-copied so a caller
+    # mutating the returned config can't corrupt the module seed.
+    codex = {**CODEX_ENGINE_SEED,
+             "auth_probe": list(CODEX_ENGINE_SEED["auth_probe"]),
+             "seats": [dict(s) for s in CODEX_ENGINE_SEED["seats"]]}
+    file_codex = fcfg.get("codex")
+    if isinstance(file_codex, dict):
+        codex.update(file_codex)
+
     # profiles: named, full panel configs (Claude + provider seats with lenses)
     # the dispatch picker saves and re-applies. Pure user data — NO seeds, so no
     # merge; each is normalized so a hand-edited file can't break the picker.
@@ -248,6 +259,7 @@ def fusion_config() -> dict:
         "presets": presets,
         "lenses": lenses,
         "profiles": profiles,
+        "codex": codex,
     }
 
 
@@ -256,6 +268,16 @@ def fusion_lenses() -> dict:
     fusion.lenses merged over it (per-name override/extend, like presets). Each
     value is a per-seat prompt prefix used for §5 decorrelation (F8.4)."""
     return fusion_config()["lenses"]
+
+
+def codex_engine() -> dict:
+    """The effective codex ENGINE config: CODEX_ENGINE_SEED with config.json's
+    `fusion.codex` merged over it (per-key override, mirror of fusion_lenses()).
+    The codex CLI's single source of truth — the `-m` model id, the exec/-s/--json
+    flag set, the auth-probe command, the C6 auto-bypass flag, and a default seat
+    panel. claude_runner imports the model/flags from here rather than redefining
+    them; a config.json `fusion.codex.<key>` override wins (proven in tests)."""
+    return fusion_config()["codex"]
 
 
 def fusion_profiles() -> dict:
@@ -371,7 +393,7 @@ def codex_cli_available() -> bool:
     env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
     try:
         proc = subprocess.run(
-            ["codex", "login", "status"],
+            list(CODEX_ENGINE_SEED["auth_probe"]),   # C4: the seeded auth-probe command
             capture_output=True,
             text=True,
             timeout=_CODEX_PROBE_TIMEOUT_S,

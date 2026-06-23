@@ -354,11 +354,14 @@ def run_claude_json(
 # Schema + flags are version-pinned to 0.141.0; codex churns them, so the parser
 # is fail-soft (ok=False, never a raise) and should be re-verified on upgrade.
 
-# Placeholder codex model id. The authoritative `-m` value is a C4 SEED concern
-# (deferred); callers pass it EXPLICITLY (dispatch #3), so this is only a default
-# safety net. C1 has no live caller (C2/C3/C6 are the callers), so its exact
-# value doesn't affect C1's offline tests.
-DEFAULT_CODEX_MODEL = "gpt-5-codex"
+# The codex model id, IMPORTED from the config SEED (C4) — single source of truth,
+# no duplicate literal here (this re-points the old inline "gpt-5-codex"). It is the
+# default-param / safety-net value (callers pass `-m` EXPLICITLY — dispatch #3); the
+# RUNTIME judge path reads the MERGED model (config.codex_engine()), so a config.json
+# `fusion.codex.model` override wins there. Reading the SEED (not the merged config)
+# here keeps this a static module constant — the headless flag set below pulls from
+# the same seed, so neither does a config-file read on the fallback path.
+DEFAULT_CODEX_MODEL = config.CODEX_ENGINE_SEED["model"]
 
 
 def _codex_envelope_from_lines(lines) -> Optional[dict]:
