@@ -307,12 +307,27 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
     def test_model_fallback_matches_seed(self):
         self.assertIn(self.SEED["model"], self.SH)
 
-    def test_does_not_use_seat_read_only_sandbox(self):
-        # The executor must NOT run the seat's read-only sandbox (it WRITES the project).
-        self.assertNotIn(f"-s {self.SEED['sandbox']}", self.SH)
+    def _codex_cmd_line(self) -> str:
+        # The ACTUAL `codex exec "$PROMPT" …` invocation line (not the doc comments,
+        # which mention the seat's `-s read-only` descriptively).
+        for ln in self.SH.splitlines():
+            if f"codex {self.SEED['exec_subcmd']} " in ln and "$PROMPT" in ln:
+                return ln
+        return ""
+
+    def test_command_uses_executor_sandbox_not_read_only(self):
+        # The actual codex invocation must run the WRITE-capable executor_sandbox, never
+        # the seat's read-only `sandbox` (it WRITES the project).
+        cmd = self._codex_cmd_line()
+        self.assertTrue(cmd, "codex exec invocation line not found in the executor run.sh")
+        self.assertIn(f"-s {self.SEED['executor_sandbox']}", cmd)
+        self.assertNotIn(f"-s {self.SEED['sandbox']}", cmd)
 
     def test_does_not_emit_auto_bypass_flag(self):
-        # C6.0: the bypass flag OVERRIDES -s to full-access; the confined executor omits it.
+        # C6.0: the bypass flag OVERRIDES -s to full-access; the confined executor omits
+        # it (the operator-chosen workspace-write confinement). Checked on the command line
+        # AND whole-file (the full flag string never appears in the doc comments either).
+        self.assertNotIn(self.SEED["auto_bypass_flag"], self._codex_cmd_line())
         self.assertNotIn(self.SEED["auto_bypass_flag"], self.SH)
 
     def test_pid_written_to_claude_path_not_codex_dir(self):
