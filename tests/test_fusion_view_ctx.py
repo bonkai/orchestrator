@@ -41,11 +41,18 @@ FCFG = {
     "presets": {"budget": ["deepseek", "xai", "gemini"]},
 }
 
+# C5.2: _view_ctx also surfaces codex availability + the codex model list (sourced
+# from the codex ENGINE config). Stub config.codex_engine so _codex_seat_models()
+# doesn't read the real ~/.orchestrator/config.json; the single seed model suffices.
+CODEX_ENGINE = {"model": "gpt-5-codex",
+                "seats": [{"kind": "codex_cli", "model": "gpt-5-codex"}]}
+
 
 class TestViewCtxFusion(unittest.TestCase):
-    def _ctx(self, active):
+    def _ctx(self, active, codex_available=False):
         """_view_ctx() with the DB + config seams mocked. `active` is the
-        active_providers() return (name → merged entry; only the names matter)."""
+        active_providers() return (name → merged entry; only the names matter);
+        `codex_available` drives the (mocked) codex_cli_available()."""
         # Disable the local CLI seats: post-F9 the `claude` CLI alone satisfies
         # is_fusion_available(), and post-C2.1 a logged-in `codex` does too — but
         # this test verifies the EXTERNAL-provider gating (>=2 active keyed
@@ -55,7 +62,8 @@ class TestViewCtxFusion(unittest.TestCase):
                 mock.patch.object(app_module.db, "list_projects", return_value=[]), \
                 mock.patch.object(app_module.config, "fusion_config", return_value=FCFG), \
                 mock.patch.object(app_module.config, "claude_cli_available", return_value=False), \
-                mock.patch.object(app_module.config, "codex_cli_available", return_value=False), \
+                mock.patch.object(app_module.config, "codex_cli_available", return_value=codex_available), \
+                mock.patch.object(app_module.config, "codex_engine", return_value=CODEX_ENGINE), \
                 mock.patch.object(app_module.config, "active_providers", return_value=active):
             return app_module._view_ctx()
 
@@ -86,8 +94,20 @@ class TestViewCtxFusion(unittest.TestCase):
     def test_keys_present_so_template_never_hits_undefined(self):
         # The template/JS reference these unconditionally; guarantee they exist.
         ctx = self._ctx({})
-        for key in ("fusion_providers", "fusion_available", "fusion_default_panel"):
+        for key in ("fusion_providers", "fusion_available", "fusion_default_panel",
+                    "codex_cli_available", "codex_seat_models"):
             self.assertIn(key, ctx)
+
+    def test_view_ctx_exposes_codex_availability_and_models(self):
+        # C5.2: the dispatch-form engine picker reads codex_cli_available to grey the
+        # codex <option>, and codex_seat_models to populate the codex model select.
+        off = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=False)
+        self.assertFalse(off["codex_cli_available"])
+        # Sourced from the codex SEED — a codex id, never a Claude id.
+        self.assertEqual(off["codex_seat_models"], ["gpt-5-codex"])
+        self.assertNotIn("opus", off["codex_seat_models"])
+        on = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=True)
+        self.assertTrue(on["codex_cli_available"])
 
 
 if __name__ == "__main__":
