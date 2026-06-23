@@ -61,6 +61,9 @@ def _codex_seat_models() -> set[str]:
 async def lifespan(app: FastAPI):
     db.init_db()
     spawn.ensure_runner()
+    # C6: inject the codex poller factory BEFORE resume so boot re-attach can recreate
+    # the in-band finalizer for codex dispatches that were running at restart.
+    watchdog.set_codex_poller_factory(_codex_dispatch_poller)
     watchdog.resume_watchers_on_boot()
     idle_task = asyncio.create_task(idle_notifier.run_idle_checker())
     _background_tasks.add(idle_task)
@@ -78,6 +81,8 @@ async def lifespan(app: FastAPI):
     reaper_task.cancel()
     for did in list(watchdog._watchers.keys()):
         watchdog.cancel(did)
+    for did in list(watchdog._codex_pollers.keys()):   # C6: stop in-band codex pollers
+        watchdog.cancel_codex_poller(did)
     for t in list(_background_tasks):
         t.cancel()
 
@@ -300,21 +305,38 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
         "attachments": len(moved_atts),
     })
 
-    # C5 SEAM (C6 fills it): the $0 codex EXECUTOR — spawn_codex_dispatch + the §5
-    # hook-gap convergence — is C6 and NOT built yet. A codex dispatch is rejected
-    # as a VISIBLE failed row; it is NEVER silently spawned as a `claude` executor
-    # (that engine downgrade is the dispatch #3 hazard). engine+model were validated
-    # in /send. C6 replaces THIS block with the codex spawn (using executor_model for
-    # `codex -m`); spawn.py is untouched in C5.
+    # C6: the $0 codex EXECUTOR. engine+model were validated in /send. This branch
+    # spawns a watchable codex tab (writes confined to the project via -s
+    # workspace-write) and NEVER falls through to the `claude` spawn below — a codex
+    # pick must never become a silent claude executor (the dispatch #3 downgrade). A
+    # spawn failure is a VISIBLE failed row, still no claude fallback. The §5 hook-gap
+    # convergence: the cap watcher uses the codex branch (hard-kill, no pause-resume)
+    # and the in-band poller is the SOLE finalizer (codex has no Stop hook).
     if executor_engine == "codex":
-        reason = "codex executor not yet available (C6)"
-        db.mark_failed_to_spawn(dispatch_id, reason)
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None, spawn.spawn_codex_dispatch, proj["path"], dispatch_id, task,
+                executor_model,
+            )
+        except Exception as e:
+            db.mark_failed_to_spawn(dispatch_id, str(e))
+            db.record_event(dispatch_id, "stage", {
+                "stage": "spawn_failed", "error": str(e),
+                "engine": "codex", "model": executor_model,
+            })
+            spawn.cleanup_dispatch_files(dispatch_id)
+            return None, f"codex spawn failed: {e}"
         db.record_event(dispatch_id, "stage", {
-            "stage": "spawn_failed", "error": reason,
-            "engine": "codex", "model": executor_model,
-        })
-        spawn.cleanup_dispatch_files(dispatch_id)
-        return None, reason
+            "stage": "iterm2_spawned", "engine": "codex", "model": executor_model})
+        pid = await loop.run_in_executor(None, spawn.read_claude_pid, dispatch_id, 5.0)
+        db.mark_started(dispatch_id, terminal_pid=None, claude_pid=pid)
+        db.touch_project(project_id)
+        watchdog.schedule(dispatch_id, pid, wall_cap_s, engine="codex")
+        watchdog.schedule_codex_poller(dispatch_id)   # §5 fix iii: the SOLE finalizer
+        db.record_event(dispatch_id, "stage", {
+            "stage": "running", "pid": pid, "engine": "codex"})
+        return dispatch_id, ""
 
     loop = asyncio.get_running_loop()
     try:
