@@ -1,13 +1,19 @@
-# Orchestrator — OpenAI `codex` CLI Integration Plan *(C0–C4 BUILT + TESTED; C5–C6 design only)*
+# Orchestrator — OpenAI `codex` CLI Integration Plan *(C0–C5 BUILT + TESTED; C6 design only)*
 
-> 🟢 **BUILD STATUS (2026-06-23): C0–C4 are BUILT + TESTED — not "design only."**
+> 🟢 **BUILD STATUS (2026-06-23): C0–C5 are BUILT + TESTED — not "design only."**
 > C0 (gate, Branch A), C1 (codex CLI invoker + parsers), C2 (Fusion codex seat),
-> C3 (selectable judge), and C4 (config SEEDS — `CODEX_ENGINE_SEED` in `config.py`,
-> IMPORTED by `claude_runner`) all shipped with offline tests. **C5 (dispatch
-> engine+model picker) and C6 (the $0 executor) remain design-only.** The "◻ design
-> only" / "`- [ ]`" marks in the per-phase sections below are HISTORICAL — trust this
-> banner and the §6 status table; per-phase detail lives in the `codex-c*-built`
-> session memories. (Lesson baked in: keep this status honest the moment a phase lands.)
+> C3 (selectable judge), C4 (config SEEDS — `CODEX_ENGINE_SEED` in `config.py`,
+> IMPORTED by `claude_runner`), and C5 (dispatch-form engine+model picker — the codex
+> SEAT parse + the executor engine picker + codex availability gating) all shipped
+> with offline tests. **Only C6 (the $0 codex EXECUTOR — `spawn_codex_dispatch` + the
+> §5 hook-gap convergence) remains design-only.** Honest scope of C5: the codex *seat*
+> is live and the executor *engine+model* is validated and threaded, but the codex
+> executor SPAWN is C6 — selecting engine=codex today is a validated, INERT seam that
+> reports "codex executor not yet available (C6)", NEVER a silent claude fallback (the
+> dispatch #3 downgrade). The "◻ design only" / "`- [ ]`" marks in the per-phase
+> sections below are HISTORICAL — trust this banner and the §6 status table; per-phase
+> detail lives in the `codex-c*-built` session memories. (Lesson baked in: keep this
+> status honest the moment a phase lands.)
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:
@@ -312,11 +318,11 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 | **C2** | Fusion **codex seat** *(ships first after C1)* | `_codex_seat_answer` + `kind:"codex_cli"`; `codex_cli_available()` (auth-probing); panel splits 3 ways (provider / claude_cli / codex_cli) | ✅ built + tested |
 | **C3** | **Selectable judge** | `judge_engine` param + in-function engine map; routes judge **and** verifier **and** re-judge; default `"claude"` | ✅ built + tested |
 | **C4** | Config SEEDS | `CODEX_ENGINE_SEED` + `codex_engine()` in `config.py`, merged from `config.json`; IMPORTED by `claude_runner` (no redefinition). Residual: spawn's bash heredoc still dup'd (guard-tested; bash→seed interp deferred to C6) | ✅ built + tested (2026-06-23) |
-| **C5** | Dispatch-form engine+model picker | engine selector (claude\|codex) + **per-engine model** id; threads through `/send` → `_send_in_background`; default carries the model EXPLICITLY | ◻ design only |
+| **C5** | Dispatch-form engine+model picker | engine selector (claude\|codex) + **per-engine model** id threaded `/send` → `_send_in_background`; codex SEAT parse (`{type:"codex"}`→`kind:"codex_cli"`); codex availability in `_view_ctx` + UI gating. Executor SPAWN deferred to C6 (validated, INERT seam) | ✅ **built + tested (2026-06-23)** |
 | **C6** | **$0 executor** *(Branch A only; build last)* | `spawn_codex_dispatch` + codex `run.sh` branch + the §5 hook-gap convergence (iii) + PID file + auto-bypass flag | ◻ design only — **un-gated: C0=Branch A ✅** |
 
 Build strictly in order; the seat (C2) is the first shippable thing and is hook-gap-free.
-**C0–C4 are BUILT + TESTED (2026-06-23); C5 is next, then C6 (un-gated — C0=Branch A ✅).**
+**C0–C5 are BUILT + TESTED (2026-06-23); C6 is next (un-gated — C0=Branch A ✅).**
 
 ### Phase C0 — Verification gate ✅ *(DONE 2026-06-22 — BRANCH A, codex-cli 0.141.0)*
 *Goal: turn every §3 hypothesis into a verified fact, and return the §2 branch verdict. **Result: all of C0.1–C0.5 confirmed; details in §0/§3.***
