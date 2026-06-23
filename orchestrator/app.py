@@ -936,7 +936,9 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             fusion_event = {"stage": "fusion_skipped", "reason": f"exception: {e}"}
             print(f"[orchestrator] /send enrich crashed (dispatching un-enriched): {e}")
 
-    dispatch_id, err = await _run_dispatch(project_id, final_task, wall_cap_s, effort, model)
+    dispatch_id, err = await _run_dispatch(
+        project_id, final_task, wall_cap_s, effort, model,
+        executor_engine=executor_engine, executor_model=executor_model)
     if err:
         print(f"[orchestrator] /send dispatch failed: {err}")
         return
@@ -963,6 +965,8 @@ async def send(
     fusion_seats: str = Form(""),
     fusion_enrich: str = Form("false"),
     fusion_verify: str = Form("false"),
+    executor_engine: str = Form("claude"),
+    executor_model: str = Form(""),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
