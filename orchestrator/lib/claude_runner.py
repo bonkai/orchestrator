@@ -916,21 +916,24 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     verify: Optional[bool] = None, verify_model: str = "opus",
                     verify_effort: str = "high") -> ClaudeRun:
     """Fusion sibling of run_claude_json. Runs a PANEL — any mix of external
-    per-provider scripts AND local Claude Code seats (effort-differentiated
-    `claude` CLI calls; $0, NO Anthropic API) — in parallel, then synthesizes via
-    the local `claude` CLI judge (run_claude_json — a visible brain tab, free on
-    the subscription). Returns the SAME ClaudeRun the brain callers expect, with
-    cost_usd = Σ EXTERNAL panel cost (Claude seats are subscription → $0). NEVER
-    raises — any shortfall returns ok=False so run_brain_json can fall back to the
-    plain claude call.
+    per-provider scripts, local Claude Code seats (effort-differentiated `claude`
+    CLI calls; $0, NO Anthropic API), AND local codex seats (C2: `codex exec` on
+    the ChatGPT subscription; $0, NO OpenAI API) — in parallel, then synthesizes
+    via the local `claude` CLI judge (run_claude_json — a visible brain tab, free
+    on the subscription). Returns the SAME ClaudeRun the brain callers expect, with
+    cost_usd = Σ EXTERNAL panel cost (Claude AND codex seats are subscription →
+    $0). NEVER raises — any shortfall returns ok=False so run_brain_json can fall
+    back to the plain claude call.
 
     `panel` is a list whose entries are either a provider NAME (str — an external
-    seat) or a dict {"kind":"claude_cli","model","effort"} (a local Claude seat);
-    duplicate Claude seats (same model+effort) are allowed. F12: duplicate cross-lab
+    seat), a dict {"kind":"claude_cli","model","effort"} (a local Claude seat), or
+    a dict {"kind":"codex_cli","model","effort"} (a local codex seat — C2.3); the
+    codex kind is purely ADDITIVE and never touches the claude_cli path. Duplicate
+    Claude/codex seats (same model+effort) are allowed. F12: duplicate cross-lab
     provider seats are allowed too (e.g. 3× glm) — each becomes its own seat with a
     unique key (glm, glm#2, glm#3) and may carry its own lens. F8.4: any entry may
-    also carry a "lens" (a configured lens NAME or literal text) — Claude seats as
-    {"kind":"claude_cli",...,"lens"} and external seats as the dict form
+    also carry a "lens" (a configured lens NAME or literal text) — CLI seats as
+    {"kind":"claude_cli"|"codex_cli",...,"lens"} and external seats as the dict form
     {"name":<provider>,"lens":...}; each lensed seat answers the SAME task through
     that perspective (§5 decorrelation). The judge still sees the original prompt
     verbatim. No lens anywhere ⇒ byte-for-byte the pre-F8.4 behavior.
@@ -956,6 +959,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     # <2 usable seats" falls back instead of erroring.
     active = config.active_providers()
     claude_ok = config.claude_cli_available()
+    codex_ok = config.codex_cli_available()   # C2.3: mirror claude_ok (PATH + auth probe)
     lenses_cfg = cfg.get("lenses") or config.FUSION_LENSES_SEED  # F8.4 name→text map
     prov_names: list = []          # UNIQUE seat keys (fan out via scripts)
     prov_providers: dict = {}      # seat key → its provider config (script/model/prices)
@@ -963,6 +967,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     prov_lens_names: dict = {}     # seat key → lens NAME (surface/tagging)
     prov_seat_counts: dict = {}    # base provider name → seats so far (for #2,#3 keys)
     claude_seats: list = []        # local claude CLI seats
+    codex_seats: list = []         # local codex CLI seats (C2.3)
     seats_desc: list = []          # readable seat labels (raw / diagnostics)
     lenses_used: list = []         # [{"seat","lens"}] for lensed seats — raw surface
 
