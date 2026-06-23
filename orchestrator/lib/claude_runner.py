@@ -1097,10 +1097,30 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
         return ClaudeRun(ok=False,
                          error=f"fusion panel: only {len(ok)} seat(s) answered ({errs})")
 
+    # C3: the judge / verifier / re-judge engine is SELECTABLE (claude | codex).
+    # The map is built HERE, not at module level: a module-level
+    # `{"claude": run_claude_json, ...}` literal would bind the function OBJECTS at
+    # import, so the tests' mock.patch.object(claude_runner, "run_claude_json")
+    # wouldn't reach it and every fusion call would fire a REAL tab. Building it
+    # in-function resolves each name from the module namespace at CALL TIME, so
+    # monkeypatching still intercepts. An unknown engine fails SAFE to claude
+    # (reversible, no surprise tab) — and keeps the "never raises" contract.
+    engine_fn = {"claude": run_claude_json,
+                 "codex": run_codex_json}.get(judge_engine, run_claude_json)
+    # judge_model/verify_model default to "opus" (a Claude id). With the codex
+    # engine, feeding that to `codex -m` is the dispatch #3 'no silent downgrade'
+    # trap — resolve a codex-appropriate model instead. C3 is WIRING ONLY: full
+    # per-engine model CONFIG (honoring an explicit codex judge model) is C4/C5,
+    # and no caller passes one yet, so the codex path uses DEFAULT_CODEX_MODEL.
+    judge_engine_model = DEFAULT_CODEX_MODEL if judge_engine == "codex" else judge_model
+    verify_engine_model = DEFAULT_CODEX_MODEL if judge_engine == "codex" else verify_model
+
     # The judge synthesizes from the ORIGINAL prompt verbatim — lenses bias only
-    # the panel seats (decorrelation), never the synthesis (§5 / F9.e).
-    judge = run_claude_json(prompt=_judge_prompt(prompt, ok), cwd=cwd_eff,
-                            model=judge_model, effort=judge_effort, label="fusion-judge")
+    # the panel seats (decorrelation), never the synthesis (§5 / F9.e). C3: routed
+    # through engine_fn with ONLY the kwargs BOTH engines accept (prompt/cwd/model/
+    # effort/label — never max_turns; run_codex_json has no such param).
+    judge = engine_fn(prompt=_judge_prompt(prompt, ok), cwd=cwd_eff,
+                      model=judge_engine_model, effort=judge_effort, label="fusion-judge")
     judge.cost_usd = sum(a.get("cost", 0.0) for a in ok)   # out-of-pocket = external seats only
 
     # F11.c.1: opt-in VERIFIER seat. A $0 local-CLI critic checks the judge's
@@ -1111,9 +1131,9 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     verifier_info: Optional[dict] = None
     if verify and judge.ok:
         verifier_info = {"ran": True, "defect": False, "rejudged": False, "issues": []}
-        vrun = run_claude_json(prompt=_verify_prompt(prompt, judge.text, ok),
-                               cwd=cwd_eff, model=verify_model, effort=verify_effort,
-                               label="fusion-verify")
+        vrun = engine_fn(prompt=_verify_prompt(prompt, judge.text, ok),
+                         cwd=cwd_eff, model=verify_engine_model, effort=verify_effort,
+                         label="fusion-verify")
         verdict = vrun.parsed_json if (vrun.ok and isinstance(vrun.parsed_json, dict)) else None
         if verdict is None and vrun.ok:                    # parsed_json may be None; retry
             try:
@@ -1126,9 +1146,9 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                 issues = [str(issues)]
             issues = [str(i).strip() for i in issues if str(i).strip()][:10]
             verifier_info.update(defect=True, issues=issues)
-            rejudge = run_claude_json(
+            rejudge = engine_fn(
                 prompt=_rejudge_prompt(prompt, ok, judge.text, issues),
-                cwd=cwd_eff, model=judge_model, effort=judge_effort,
+                cwd=cwd_eff, model=judge_engine_model, effort=judge_effort,
                 label="fusion-rejudge")
             if rejudge.ok and (rejudge.text or "").strip():
                 judge.text = rejudge.text                  # corrected synthesis
