@@ -914,7 +914,8 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
                     judge_model: str = "opus", judge_effort: str = "high",
                     verify: Optional[bool] = None, verify_model: str = "opus",
-                    verify_effort: str = "high") -> ClaudeRun:
+                    verify_effort: str = "high",
+                    judge_engine: str = "claude") -> ClaudeRun:
     """Fusion sibling of run_claude_json. Runs a PANEL — any mix of external
     per-provider scripts, local Claude Code seats (effort-differentiated `claude`
     CLI calls; $0, NO Anthropic API), AND local codex seats (C2: `codex exec` on
@@ -939,7 +940,16 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     verbatim. No lens anywhere ⇒ byte-for-byte the pre-F8.4 behavior.
 
     ⚠ run_claude_json defaults to sonnet, so the judge model is passed
-    EXPLICITLY (default opus/high; a summarizer caller can pass sonnet)."""
+    EXPLICITLY (default opus/high; a summarizer caller can pass sonnet).
+
+    C3: `judge_engine` ("claude" default | "codex") selects the engine for the
+    judge AND verifier AND re-judge in one knob. "claude" is byte-for-byte today's
+    behavior (opt-in, reversible); "codex" synthesizes on the ChatGPT subscription
+    via run_codex_json. It is INDEPENDENT of the panel seats — a codex judge can
+    synthesize a claude/provider panel and vice-versa (codex_cli_available() gates
+    seats, not the judge). The codex path resolves a codex-appropriate model: the
+    judge/verify defaults are Claude ids, and routing one to `codex -m` would be a
+    silent downgrade (dispatch #3). Full per-engine model config is C4/C5."""
     cfg = config.fusion_config()
     providers = cfg["providers"]
     presets = cfg["presets"]
