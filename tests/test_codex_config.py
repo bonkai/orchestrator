@@ -36,7 +36,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from orchestrator.lib import claude_runner, config
+from orchestrator.lib import claude_runner, config, spawn
 from orchestrator.lib.claude_runner import ClaudeRun
 
 
@@ -243,6 +243,40 @@ class TestCodexJudgeResolvesSeededModel(unittest.TestCase):
         rcj.assert_called_once()
         self.assertEqual(rcj.call_args.kwargs.get("model"), "opus")
         rcx.assert_not_called()
+
+
+# ── C4 drift guard: spawn's codex run.sh heredoc stays pinned to the seed ────
+
+class TestSpawnCodexRunShPinnedToSeed(unittest.TestCase):
+    """The codex run.sh heredoc (spawn.CODEX_RUN_SH_CONTENT) still DUPLICATES the
+    codex flag set + model fallback in bash — deduping it needs seed→bash
+    interpolation at spawn time (bash can't import Python), which is C6's
+    codex-dispatch-runner work. Until then, pin those copies to the seed here.
+
+    Direction this guards (the realistic drift): the SEED is now the source of
+    truth, so a flag/model change ORIGINATES there. After editing the seed (e.g. a
+    codex upgrade renames `--json`), the assertion looks for the NEW seed value in
+    the heredoc; it isn't there until the runner is updated too → RED test instead
+    of a silently stale flag shipping in the watchable tab. (The values also live
+    in this heredoc's prose, so the reverse — editing the command but not the seed
+    — is not fully caught; that's an anti-pattern post-C4: edit the seed, not the
+    runner. The seed→runner direction is the one that matters.)"""
+
+    SH = spawn.CODEX_RUN_SH_CONTENT
+    SEED = config.CODEX_ENGINE_SEED
+
+    def test_exec_subcommand_matches_seed(self):
+        self.assertIn(f"codex {self.SEED['exec_subcmd']}", self.SH)
+
+    def test_sandbox_flag_matches_seed(self):
+        self.assertIn(f"-s {self.SEED['sandbox']}", self.SH)
+
+    def test_json_flag_matches_seed(self):
+        self.assertIn(self.SEED["json_flag"], self.SH)
+
+    def test_model_fallback_matches_seed(self):
+        # the bash `... || echo <model>` fallback must be the seed model id.
+        self.assertIn(self.SEED["model"], self.SH)
 
 
 if __name__ == "__main__":

@@ -1118,7 +1118,7 @@ def cleanup_codex_files(codex_id: str):
 
 
 def spawn_codex_tab(codex_id: str, prompt: str, cwd: str,
-                    model: str = "gpt-5-codex", effort: str = "",
+                    model: str = config.CODEX_ENGINE_SEED["model"], effort: str = "",
                     label: str = "codex") -> None:
     """Open a new iTerm2 tab and run a codex call in it via codex_run.sh.
 
@@ -1128,13 +1128,14 @@ def spawn_codex_tab(codex_id: str, prompt: str, cwd: str,
     failure (so the caller can fall back to headless). An empty `effort` ⇒ no
     reasoning-effort override (codex uses the model default — what C0 verified);
     a value is applied as `-c model_reasoning_effort=<effort>` by codex_run.sh.
-    `model` is the codex model id; the codex `-m` value is a C4 SEED concern when
-    built — callers pass it EXPLICITLY (dispatch #3)."""
+    `model` is the codex model id, defaulting to config.CODEX_ENGINE_SEED["model"]
+    (C4 — single source of truth); callers pass it EXPLICITLY (dispatch #3)."""
     if not iterm2_installed():
         raise RuntimeError("iTerm2 not installed")
     ensure_codex_runner()
     (CODEX_DIR / f"{codex_id}.prompt").write_text(prompt, encoding="utf-8")
-    (CODEX_DIR / f"{codex_id}.model").write_text((model or "gpt-5-codex").strip())
+    (CODEX_DIR / f"{codex_id}.model").write_text(
+        (model or config.CODEX_ENGINE_SEED["model"]).strip())
     (CODEX_DIR / f"{codex_id}.effort").write_text((effort or "").strip())
 
     title = _codex_tab_title(codex_id, label)
