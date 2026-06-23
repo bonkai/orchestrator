@@ -1004,13 +1004,35 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                               + (f" [lens:{lens_name}]" if lens_name else ""))
             if lens_name:
                 lenses_used.append({"seat": name, "lens": lens_name})
+        elif isinstance(s, dict) and s.get("kind") == "codex_cli":
+            # C2.3: a THIRD seat kind, ADDITIVE — the claude_cli branch above is
+            # untouched. A local codex seat ($0 subscription, NO OpenAI API), run
+            # like the Claude seat but via run_codex_json. Gated on codex_ok (PATH
+            # + auth probe), so a logged-out/absent codex is silently skipped (the
+            # <2-seat fallback then handles it). Codex divergences from the Claude
+            # seat: model defaults to DEFAULT_CODEX_MODEL; effort defaults to ""
+            # (codex's own model default — no injected 'high'); and an empty-effort
+            # name omits the trailing '-'.
+            if not codex_ok:
+                continue
+            cs_model = (s.get("model") or DEFAULT_CODEX_MODEL).strip()
+            cs_effort = (s.get("effort") or "").strip()
+            lens_name = (s.get("lens") or "").strip()
+            name = f"{cs_model}-{cs_effort}" if cs_effort else cs_model
+            codex_seats.append({"model": cs_model, "effort": cs_effort, "name": name,
+                                "lens": lens_name,
+                                "lens_text": config.resolve_lens(lens_name, lenses_cfg)})
+            seats_desc.append(f"{name} (codex)"
+                              + (f" [lens:{lens_name}]" if lens_name else ""))
+            if lens_name:
+                lenses_used.append({"seat": name, "lens": lens_name})
         elif isinstance(s, str) and s in active:
             _add_provider_seat(s, "")
         elif (isinstance(s, dict) and isinstance(s.get("name"), str)
               and s["name"].strip() in active):
             # External seat carrying a lens: {"name": <provider>, "lens": ...}.
             _add_provider_seat(s["name"].strip(), (s.get("lens") or "").strip())
-    total = len(prov_names) + len(claude_seats)
+    total = len(prov_names) + len(claude_seats) + len(codex_seats)
     if total < 2:
         return ClaudeRun(ok=False,
                          error=f"fusion: need >=2 usable panel seats, have {total}")
