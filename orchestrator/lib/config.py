@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from typing import Optional
 
 from orchestrator.lib.db import DATA_DIR
@@ -302,11 +303,71 @@ def claude_cli_available() -> bool:
     return shutil.which("claude") is not None
 
 
+# How long the codex auth probe may run before we treat codex as unavailable.
+# `codex login status` reads local auth state and returns near-instantly; this
+# finite cap exists only so a wedged probe can't hang a UI render / dispatch
+# (we also close its stdin — codex blocks reading stdin in a non-TTY otherwise).
+_CODEX_PROBE_TIMEOUT_S = 10
+
+
+def codex_cli_available() -> bool:
+    """True only if the `codex` CLI is on PATH AND a current ChatGPT login is
+    present — the codex twin of claude_cli_available(), but it CANNOT be a bare
+    `shutil.which`. Unlike the `claude` CLI, a codex login EXPIRES: its ChatGPT
+    token in ~/.codex/auth.json is not permanent, so a PATH-only check would
+    mis-gate — it would report "available", then every seat/dispatch would fail at
+    run time (CODEX_PLAN.md §2). So this ALSO runs a cheap, NON-BILLING auth probe
+    (`codex login status`) and returns False when logged out/expired even though
+    the binary is present.
+
+    Hard guarantees (it gates the Fusion toggle and every codex seat, and runs on
+    UI-render paths):
+      - NEVER raises — fail-safe to False on anything unexpected (missing binary,
+        non-zero/odd exit, timeout, OSError).
+      - NEVER escalates to a real `codex exec`/model call — only the local status
+        probe, and with OPENAI_API_KEY scrubbed from the child env, so there is no
+        OpenAI API egress AND the probe reflects the $0 SUBSCRIPTION login rather
+        than a billed API key (CLAUDE.md hard rule, extended to codex: a key in the
+        env must not make codex look "available" — using it would be the billed
+        path the rule forbids).
+      - CANNOT hang — a finite timeout + closed stdin.
+
+    Interprets the EXIT CODE (more version-robust than parsing "Logged in using
+    ChatGPT"); pinned to codex-cli 0.141.0's `login status`, and — like the C1
+    parsers — a re-verify-on-upgrade surface."""
+    if shutil.which("codex") is None:
+        return False
+    # Scrub OPENAI_API_KEY so the probe checks the SUBSCRIPTION login only (mirror
+    # of run_codex_headless's scrub). subprocess.run(env=...) replaces the whole
+    # environment, so this is the full env minus the one key (PATH etc. preserved).
+    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
+    try:
+        proc = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=_CODEX_PROBE_TIMEOUT_S,
+            stdin=subprocess.DEVNULL,
+            env=env,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
+
+
 def is_fusion_available() -> bool:
-    """True when a >=2-seat panel is buildable: either the local `claude` CLI is
-    present (you can always add >=2 free Claude Code seats — no key needed), OR
-    >=2 external providers are active. Below that the Fusion toggle is disabled."""
-    return claude_cli_available() or len(active_providers()) >= 2
+    """True when a >=2-seat panel is buildable: the local `claude` CLI is present
+    (you can always add >=2 free Claude Code seats — no key needed), OR the `codex`
+    CLI is present AND logged in (same — >=2 free codex seats), OR >=2 external
+    providers are active. Below that the Fusion toggle is disabled.
+
+    Order is by cost: the `which`-cheap claude check and the file-read
+    active_providers() short-circuit BEFORE codex_cli_available(), so codex's
+    auth-probe SUBPROCESS only runs when neither claude nor >=2 providers are
+    present."""
+    return (claude_cli_available()
+            or len(active_providers()) >= 2
+            or codex_cli_available())
 
 
 # ── F8: registry/preset writes (the browser Settings UI) ────────────────────
