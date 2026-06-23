@@ -778,6 +778,16 @@ def cleanup_dispatch_files(dispatch_id: int):
         TASKS_DIR / f"{dispatch_id}.effort",
         TASKS_DIR / f"{dispatch_id}.model",
         PIDS_DIR / f"{dispatch_id}.pid",
+        # C6: codex EXECUTOR sidecars (int-keyed by dispatch_id in CODEX_DIR). A
+        # codex dispatch shares the PID path above (note 2) but its prompt/stream/
+        # done/model/fifo live here. Safe to clear: the completion core copies the
+        # .jsonl transcript to TRANSCRIPTS_DIR BEFORE calling cleanup, so the
+        # summary/artifact survive this delete (a no-op for a claude dispatch).
+        CODEX_DIR / f"{dispatch_id}.prompt",
+        CODEX_DIR / f"{dispatch_id}.model",
+        CODEX_DIR / f"{dispatch_id}.jsonl",
+        CODEX_DIR / f"{dispatch_id}.done",
+        CODEX_DIR / f"{dispatch_id}.fifo",
     ]:
         try:
             p.unlink()
