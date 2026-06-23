@@ -505,6 +505,9 @@ The run.sh was validated end-to-end live (`.done`=0, real workspace write, all t
 + turn.completed). Full suite 451 / skipped=4. See the top-of-file build-status banner +
 the §6 table. Remaining open questions are operational (Q7 caps/concurrency — Plus is the
 tightest tier, a codex fan-out / big agentic run can exhaust the shared 5h window, and rapid
-calls DID transiently rate-limit during testing → handled as honest failed rows; consider a
-codex-concurrency guard / a pre-flight `/status` check; Q9 judge calibration; Q10 ToS; Q11
-resume) — NOT blockers.**
+calls DID transiently rate-limit during testing → handled as honest failed rows. **A codex
+DISPATCH concurrency cap is now BUILT** (`CODEX_ENGINE_SEED.max_concurrent_dispatches`,
+default 2, soft cap; excess codex dispatches are rejected as visible failed rows, never a
+claude fallback; override via `fusion.codex.max_concurrent_dispatches`) — it does NOT bound
+a single Fusion codex PANEL (bounded per-call by seat count) nor many concurrent panels (a
+possible follow-up). Q9 judge calibration; Q10 ToS; Q11 resume remain) — NOT blockers.**
