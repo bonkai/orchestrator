@@ -553,54 +553,16 @@ async def api_complete(payload: dict):
         })
         return {"ok": True, "note": "pausing", "dispatch_id": dispatch_id}
 
-    # Mark completed FIRST (atomic; loser of a race sees changed=False).
-    # That way only the winning POST does the transcript copy / artifact row.
-    watchdog.cancel(dispatch_id)
-    changed = db.complete_dispatch(
-        dispatch_id,
-        session_id=session_id,
-        transcript_path=src_transcript,
-        exit_reason=exit_reason,
-        outcome="completed",
-    )
-    if not changed:
+    # Mark completed FIRST (atomic; loser of a race sees changed=False), then copy
+    # the transcript + fire the summarizer — all via the shared completion CORE, which
+    # C6 extracted so the codex in-band poller finalizes identically without the Claude
+    # hooks (§5 fix iii). For the claude Stop-hook path the transcript source is the
+    # hook's transcript_path; the behavior here is byte-for-byte the pre-C6 inline code.
+    won = await _finalize_dispatch(
+        dispatch_id, session_id=session_id, transcript_src=src_transcript,
+        exit_reason=exit_reason, outcome="completed")
+    if not won:
         return {"ok": True, "note": "already finalized"}
-
-    # Now safe to copy transcript and insert artifact — we're the winner.
-    if src_transcript:
-        src = Path(src_transcript).expanduser()
-        if src.is_file():
-            dest = db.TRANSCRIPTS_DIR / f"{dispatch_id}.jsonl"
-            try:
-                shutil.copyfile(src, dest)
-                with db.conn() as c:
-                    c.execute(
-                        "INSERT OR IGNORE INTO artifacts(dispatch_id, kind, path) "
-                        "VALUES (?, 'transcript', ?)",
-                        (dispatch_id, str(dest)),
-                    )
-                    c.execute(
-                        "UPDATE dispatches SET transcript_path = ? WHERE id = ?",
-                        (str(dest), dispatch_id),
-                    )
-            except Exception as e:
-                print(f"[orchestrator] transcript copy failed: {e}")
-
-    spawn.cleanup_dispatch_files(dispatch_id)
-    # Drop loop-watchdog state — dispatch is done
-    loop_watchdog.clear(dispatch_id)
-    idle_notifier.clear(dispatch_id)
-    db.record_event(dispatch_id, "stage", {"stage": "completed",
-                                           "exit_reason": exit_reason or "stop"})
-
-    # Fire-and-forget summarizer. Backgrounded so the Stop hook gets its
-    # quick 200 — Claude shouldn't wait on the orchestrator's internal work.
-    # IMPORTANT: store the task reference; without it Python may GC the
-    # task mid-run (see asyncio.create_task docs).
-    task = asyncio.create_task(_run_summarizer(dispatch_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
     return {"ok": True, "dispatch_id": dispatch_id}
 
 
