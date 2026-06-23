@@ -89,6 +89,17 @@
               <option value="haiku">haiku 4.5</option>
             </select>
           </label>
+          <label title="which CLI runs the dispatched task. codex is the $0 ChatGPT-subscription executor; its dispatch tab is C6 and not built yet, so picking codex today reports 'codex executor not yet available (C6)'. The codex option is greyed when codex is absent / logged out.">engine:
+            <select name="executor_engine" id="executor-engine">
+              <option value="claude" selected>claude</option>
+              <option value="codex" {% if not codex_cli_available %}disabled{% endif %}>codex{% if not codex_cli_available %} (unavailable){% endif %}</option>
+            </select>
+          </label>
+          <label id="executor-codex-model-label" style="display:none;">codex model:
+            <select name="executor_model" id="executor-model">
+              {% for m in codex_seat_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+            </select>
+          </label>
           <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
             <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
             fusion (multi-model) ⚡
