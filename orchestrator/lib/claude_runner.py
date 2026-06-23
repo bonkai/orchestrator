@@ -959,8 +959,11 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     seats, not the judge). The codex path resolves a codex-appropriate model: the
     judge/verify defaults are Claude ids, and routing one to `codex -m` would be a
     silent downgrade (dispatch #3). C4: that codex model comes from the config SEED
-    (config.codex_engine()["model"]) so a config.json override wins; a per-CALL
-    explicit codex judge model is C5."""
+    (config.codex_engine()["model"]) so a config.json override wins. (C5 reviewed
+    adding a per-CALL codex judge model and DECLINED: the C5 dispatch picker selects
+    the EXECUTOR engine + codex SEATS, not a per-dispatch judge model, so the
+    merged-config model stays the single source of truth — a per-call override would
+    be an unused param. Override the codex judge model via `fusion.codex.model`.)"""
     cfg = config.fusion_config()
     providers = cfg["providers"]
     presets = cfg["presets"]
@@ -1123,8 +1126,10 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     # trap — resolve a codex model instead. C4: that model is the config SEED's,
     # read from the ALREADY-loaded `cfg` (cfg["codex"]["model"], no extra file read)
     # so a config.json `fusion.codex.model` override wins; it falls back to the seed
-    # (DEFAULT_CODEX_MODEL) when unset. (Honoring a per-CALL explicit codex judge
-    # model is C5; no caller passes one yet.)
+    # (DEFAULT_CODEX_MODEL) when unset. (C5 DECLINED a per-CALL codex judge model: no
+    # dispatch surface selects one — C5 ships the executor engine + codex seats, not
+    # a per-dispatch judge — so the merged-config model stays the single source of
+    # truth; override it via config.json `fusion.codex.model`.)
     codex_model = (cfg.get("codex") or {}).get("model") or DEFAULT_CODEX_MODEL
     judge_engine_model = codex_model if judge_engine == "codex" else judge_model
     verify_engine_model = codex_model if judge_engine == "codex" else verify_model
