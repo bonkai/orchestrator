@@ -139,6 +139,15 @@ def _view_ctx() -> dict:
     # Saved profiles (name → {claude_seats, provider_seats}); the picker offers
     # them as a quick-switch dropdown that re-populates the seats in one click.
     fusion_profiles = fcfg.get("profiles", {})
+    # C5.2: codex availability + model list for the dispatch-form engine picker.
+    # codex_cli_available mirrors claude_cli_available, but it runs an auth-probe
+    # SUBPROCESS (`codex login status`; near-instant, finite-timeout) rather than a
+    # bare `which`. is_fusion_available() above short-circuits PAST that probe when
+    # claude or >=2 providers exist, so this is the one deliberate codex probe per
+    # render — the template greys the codex executor <option> when it's False
+    # (logged-out/absent). codex_seat_models seeds that picker (sourced from the
+    # codex SEED via config — no codex-id literal in the template).
+    codex_available = config.codex_cli_available()
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -147,6 +156,8 @@ def _view_ctx() -> dict:
         "fusion_providers": fusion_providers,
         "fusion_available": config.is_fusion_available(),
         "claude_cli_available": config.claude_cli_available(),
+        "codex_cli_available": codex_available,
+        "codex_seat_models": sorted(_codex_seat_models()),
         "claude_seat_models": CLAUDE_SEAT_MODELS,
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
