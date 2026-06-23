@@ -194,6 +194,7 @@ async def manual_kill(dispatch_id: int, reason: str = "manual") -> bool:
     if not d or d["status"] != "running":
         return False
     cancel(dispatch_id)
+    cancel_codex_poller(dispatch_id)   # C6: stop the in-band finalizer if it's a codex dispatch (no-op otherwise)
     pid = d.get("claude_pid")
     if not pid:
         pid = spawn.read_pid_now(dispatch_id)
@@ -279,4 +280,14 @@ def resume_watchers_on_boot():
         started = d.get("started_at") or d.get("created_at") or now_ts
         cap = d.get("wall_clock_cap_s", 1800)
         remaining = max(60, cap - (now_ts - started))
-        schedule(d["id"], d.get("claude_pid"), remaining)
+        if spawn.is_codex_dispatch(d["id"]):
+            # C6: a still-running codex dispatch. Re-attach BOTH the cap watcher (codex
+            # branch — distinct hard-kill reason, no pause-resume) AND the in-band
+            # poller (the SOLE finalizer; without it the dispatch sits 'running' until
+            # the reaper marks it 'orphaned' with NO summary). tail_only=True so the
+            # poller skips the already-consumed sidecar prefix — a restart must not
+            # re-emit timeline events or re-trip the loop watchdog on old tool calls.
+            schedule(d["id"], d.get("claude_pid"), remaining, engine="codex")
+            schedule_codex_poller(d["id"], tail_only=True)
+        else:
+            schedule(d["id"], d.get("claude_pid"), remaining)
