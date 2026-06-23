@@ -64,6 +64,11 @@ class TestRunFusionVerify(unittest.TestCase):
                 claude_runner.config, "fusion_config", return_value=cfg))
             es.enter_context(mock.patch.object(
                 claude_runner.config, "active_providers", return_value=self.ACTIVE))
+            # C2.3: run_fusion_json now probes codex_cli_available() unconditionally;
+            # mock it False so these tests stay fully offline (no real codex probe)
+            # and codex contributes no seat — verifier behavior is unchanged.
+            es.enter_context(mock.patch.object(
+                claude_runner.config, "codex_cli_available", return_value=False))
             es.enter_context(mock.patch.object(
                 claude_runner.spawn, "ensure_fusion_providers"))
             rp = es.enter_context(mock.patch.object(claude_runner, "_panel_answers"))

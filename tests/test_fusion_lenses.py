@@ -427,6 +427,10 @@ class TestRunFusionJsonLenses(unittest.TestCase):
                                                return_value=active))
             es.enter_context(mock.patch.object(claude_runner.config,
                                                "claude_cli_available", return_value=True))
+            # C2.3: keep these lens tests offline — mock the new codex probe False so
+            # no real `codex login status` runs and codex adds no seat.
+            es.enter_context(mock.patch.object(claude_runner.config,
+                                               "codex_cli_available", return_value=False))
             es.enter_context(mock.patch.object(claude_runner.spawn,
                                                "ensure_fusion_providers"))
             rp = es.enter_context(mock.patch.object(claude_runner, "_panel_answers",
