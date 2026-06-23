@@ -1,4 +1,13 @@
-# Orchestrator — OpenAI `codex` CLI Integration Plan *(DESIGN ONLY — not approved, not built)*
+# Orchestrator — OpenAI `codex` CLI Integration Plan *(C0–C4 BUILT + TESTED; C5–C6 design only)*
+
+> 🟢 **BUILD STATUS (2026-06-23): C0–C4 are BUILT + TESTED — not "design only."**
+> C0 (gate, Branch A), C1 (codex CLI invoker + parsers), C2 (Fusion codex seat),
+> C3 (selectable judge), and C4 (config SEEDS — `CODEX_ENGINE_SEED` in `config.py`,
+> IMPORTED by `claude_runner`) all shipped with offline tests. **C5 (dispatch
+> engine+model picker) and C6 (the $0 executor) remain design-only.** The "◻ design
+> only" / "`- [ ]`" marks in the per-phase sections below are HISTORICAL — trust this
+> banner and the §6 status table; per-phase detail lives in the `codex-c*-built`
+> session memories. (Lesson baked in: keep this status honest the moment a phase lands.)
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:
@@ -299,7 +308,7 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
 | **C0** | **Verification gate** | live `codex --help`/`codex exec --help` + ChatGPT-login auth probe + captured event JSONL + the §2 verdict | ✅ **DONE 2026-06-22 — BRANCH A (0.141.0)** |
-| **C1** | The codex CLI invoker | `run_codex_json` (+ headless fallback) + `spawn_codex_tab`/`codex_run.sh`/`ensure_codex_runner` + the two parsers (§4) | ◻ design only |
+| **C1** | The codex CLI invoker | `run_codex_json` (+ headless fallback) + `spawn_codex_tab`/`codex_run.sh`/`ensure_codex_runner` + the two parsers (§4) | ✅ built + tested |
 | **C2** | Fusion **codex seat** *(ships first after C1)* | `_codex_seat_answer` + `kind:"codex_cli"`; `codex_cli_available()` (auth-probing); panel splits 3 ways (provider / claude_cli / codex_cli) | ◻ design only |
 | **C3** | **Selectable judge** | `judge_engine` param + `_JUDGE_ENGINES` map; routes judge **and** verifier **and** re-judge; default `"claude"` | ◻ design only |
 | **C4** | Config SEEDS | codex engine/seat config in `config.py` SEEDS (**design only — do NOT add in this task; import, don't redefine**) | ◻ design only |
