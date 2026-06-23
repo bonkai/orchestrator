@@ -332,10 +332,10 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 | **C3** | **Selectable judge** | `judge_engine` param + in-function engine map; routes judge **and** verifier **and** re-judge; default `"claude"` | ✅ built + tested |
 | **C4** | Config SEEDS | `CODEX_ENGINE_SEED` + `codex_engine()` in `config.py`, merged from `config.json`; IMPORTED by `claude_runner` (no redefinition). Residual: spawn's bash heredoc still dup'd (guard-tested; bash→seed interp deferred to C6) | ✅ built + tested (2026-06-23) |
 | **C5** | Dispatch-form engine+model picker | engine selector (claude\|codex) + **per-engine model** id threaded `/send` → `_send_in_background`; codex SEAT parse (`{type:"codex"}`→`kind:"codex_cli"`); codex availability in `_view_ctx` + UI gating. Executor SPAWN deferred to C6 (validated, INERT seam) | ✅ **built + tested (2026-06-23)** |
-| **C6** | **$0 executor** *(Branch A only; build last)* | `spawn_codex_dispatch` + codex `run.sh` branch + the §5 hook-gap convergence (iii) + PID file + auto-bypass flag — **see the C6 PRE-FLIGHT + IMPLEMENTATION NOTES block** (grounded, added 2026-06-23) | ◻ design only — **un-gated: C0=Branch A ✅** |
+| **C6** | **$0 executor** *(Branch A only; build last)* | `spawn.spawn_codex_dispatch` + a write-capable `codex_dispatch_run.sh` (`-s workspace-write`, FIFO so codex's REAL pid is the kill target, PID at the CLAUDE path) + the §5 in-band poller (`app._codex_dispatch_poller`) + the extracted completion core (`app._finalize_dispatch`) + codex cap hard-kill + the summarizer codex branch | ✅ **built + tested (2026-06-23)** |
 
 Build strictly in order; the seat (C2) is the first shippable thing and is hook-gap-free.
-**C0–C5 are BUILT + TESTED (2026-06-23); C6 is next (un-gated — C0=Branch A ✅).**
+**C0–C6 are ALL BUILT + TESTED (2026-06-23); the codex integration is complete.**
 
 ### Phase C0 — Verification gate ✅ *(DONE 2026-06-22 — BRANCH A, codex-cli 0.141.0)*
 *Goal: turn every §3 hypothesis into a verified fact, and return the §2 branch verdict. **Result: all of C0.1–C0.5 confirmed; details in §0/§3.***
