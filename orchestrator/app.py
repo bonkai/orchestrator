@@ -235,11 +235,16 @@ async def project_remove(project_id: int):
 
 # ─── dispatch ─────────────────────────────────────────────────────────────
 
-async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max", model: str = "") -> tuple[int | None, str]:
+async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max", model: str = "", executor_engine: str = "claude", executor_model: str = "") -> tuple[int | None, str]:
     """Core dispatch flow shared by `/dispatch` (sync redirect) and `/send`
     (background task). Returns (dispatch_id, error). On any failure, returns
     (None, reason) — never raises HTTPException, since the background-task
-    caller has no HTTP response to fail."""
+    caller has no HTTP response to fail.
+
+    `executor_engine` (claude | codex) + `executor_model` (the codex `-m` id) are
+    the C5.1 picker, already validated in /send. engine="claude" (the default) is
+    the unchanged path. engine="codex" hits the C5 SEAM below — the codex executor
+    is C6, so it is rejected, never silently run as claude."""
     proj = db.get_project(project_id)
     if not proj:
         return None, "unknown project"
@@ -283,6 +288,22 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
         "task_chars": len(task),
         "attachments": len(moved_atts),
     })
+
+    # C5 SEAM (C6 fills it): the $0 codex EXECUTOR — spawn_codex_dispatch + the §5
+    # hook-gap convergence — is C6 and NOT built yet. A codex dispatch is rejected
+    # as a VISIBLE failed row; it is NEVER silently spawned as a `claude` executor
+    # (that engine downgrade is the dispatch #3 hazard). engine+model were validated
+    # in /send. C6 replaces THIS block with the codex spawn (using executor_model for
+    # `codex -m`); spawn.py is untouched in C5.
+    if executor_engine == "codex":
+        reason = "codex executor not yet available (C6)"
+        db.mark_failed_to_spawn(dispatch_id, reason)
+        db.record_event(dispatch_id, "stage", {
+            "stage": "spawn_failed", "error": reason,
+            "engine": "codex", "model": executor_model,
+        })
+        spawn.cleanup_dispatch_files(dispatch_id)
+        return None, reason
 
     loop = asyncio.get_running_loop()
     try:
