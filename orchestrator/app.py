@@ -661,7 +661,99 @@ def _fusion_panel_breakdown(result) -> list[dict]:
     return out
 
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False):
+def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
+                        codex_models: set) -> list:
+    """Normalize the dispatch form's panel selection into the seat list
+    run_fusion_json consumes. `fusion_seats` is the F9 JSON shape — a list of
+    {type:"claude"|"codex"|"provider", ...}; `fusion_panel` is the legacy comma
+    fallback (provider names). Each seat is validated and unhonorable ones are
+    DROPPED, so a stale UI selection can never force an unusable seat:
+      - claude   → {"kind":"claude_cli","model","effort"[,"lens"]}; model/effort
+                   against the CLAUDE_SEAT_* whitelists.
+      - codex    → {"kind":"codex_cli","model"[,"lens"]} (C5.1); model against the
+                   codex whitelist (a codex id, NEVER a Claude id). NO effort —
+                   _codex_seat_answer lets codex use the model's own reasoning
+                   default; a blank/unknown model is dropped (no silent downgrade).
+                   run_fusion_json already consumes this third kind (C2.3), so the
+                   transform here is purely additive and never touches claude_cli.
+      - provider → the bare name (or {"name","lens"} when lensed) if key-active.
+    Pure (no config reads) so it is unit-testable offline; /send passes in `active`
+    and `codex_models`. An empty result lets run_fusion_json fall back to the
+    configured preset.
+
+    NB: no UI button emits a codex seat yet (only +claude / +provider) — the codex
+    seat is a server-accepted forward seam, reachable via the saved-profile/JSON
+    path or a future picker button. The claude/provider branches are byte-for-byte
+    the pre-C5 /send loop."""
+    panel: list = []
+    raw_seats = (fusion_seats or "").strip()
+    if raw_seats:
+        try:
+            decoded = json.loads(raw_seats)
+        except (ValueError, TypeError):
+            decoded = []
+        for s in decoded if isinstance(decoded, list) else []:
+            if not isinstance(s, dict):
+                continue
+            # F8.4: an optional per-seat lens (a configured lens NAME or literal
+            # text) decorrelates the panel; capped + stripped, resolved seat-side by
+            # config.resolve_lens. Empty ⇒ the seat gets the prompt verbatim.
+            seat_lens = str(s.get("lens", "")).strip()[:_MAX_LENS_CHARS]
+            if s.get("type") == "claude":
+                # NB: seat_model/seat_effort — NOT the `model`/`effort` Form params,
+                # which govern the EXECUTOR. Shadowing them here silently rewrote the
+                # dispatched session's model/effort to the last Claude seat's.
+                seat_model = str(s.get("model", "")).strip()
+                seat_effort = str(s.get("effort", "")).strip()
+                if seat_model in CLAUDE_SEAT_MODELS and seat_effort in CLAUDE_SEAT_EFFORTS:
+                    seat = {"kind": "claude_cli", "model": seat_model, "effort": seat_effort}
+                    if seat_lens:
+                        seat["lens"] = seat_lens
+                    panel.append(seat)
+            elif s.get("type") == "codex":
+                seat_model = str(s.get("model", "")).strip()
+                if seat_model in codex_models:
+                    seat = {"kind": "codex_cli", "model": seat_model}
+                    if seat_lens:
+                        seat["lens"] = seat_lens
+                    panel.append(seat)
+            elif s.get("type") == "provider":
+                name = str(s.get("name", "")).strip()
+                if name in active:
+                    # A lens turns the bare-name seat into the dict form
+                    # run_fusion_json also accepts; no lens ⇒ stays a plain name.
+                    panel.append({"name": name, "lens": seat_lens} if seat_lens else name)
+    else:
+        panel = [p for p in fusion_panel.split(",") if p in active]
+    return panel
+
+
+def _validate_executor_engine(engine: str, model: str, codex_models: set) -> tuple[str, str]:
+    """Validate the dispatch EXECUTOR engine + (for codex) its model — the C5.1
+    server gate behind the UI's engine picker. The disabled codex <option> (C5.2)
+    is cosmetic; a crafted POST is rejected HERE. Returns (engine, model).
+
+    Raises ValueError on an unknown engine, or a codex engine with a blank or
+    unknown model. The two codex rejections are DISTINCT (per C5.1 "a default that
+    omits the model is rejected" vs an unknown id): a missing model is the
+    no-downgrade guard, an out-of-whitelist model is a bad id — both reject. A codex
+    executor NEVER falls back to a Claude id, nor silently to the claude engine
+    (dispatch #3). engine="claude" (the default) ignores `model` and returns
+    ("claude", ""), so the no-codex path is byte-for-byte unchanged."""
+    engine = (engine or "claude").strip() or "claude"
+    if engine not in ("claude", "codex"):
+        raise ValueError(f"unknown executor engine: {engine!r}")
+    if engine == "claude":
+        return "claude", ""
+    model = (model or "").strip()
+    if not model:
+        raise ValueError("codex executor requires an explicit codex model (no silent downgrade)")
+    if model not in codex_models:
+        raise ValueError(f"unknown codex executor model: {model!r}")
+    return "codex", model
+
+
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False, executor_engine: str = "claude", executor_model: str = ""):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
