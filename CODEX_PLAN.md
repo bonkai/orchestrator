@@ -10,10 +10,11 @@
 > is live and the executor *engine+model* is validated and threaded, but the codex
 > executor SPAWN is C6 — selecting engine=codex today is a validated, INERT seam that
 > reports "codex executor not yet available (C6)", NEVER a silent claude fallback (the
-> dispatch #3 downgrade). The "◻ design only" / "`- [ ]`" marks in the per-phase
-> sections below are HISTORICAL — trust this banner and the §6 status table; per-phase
-> detail lives in the `codex-c*-built` session memories. (Lesson baked in: keep this
-> status honest the moment a phase lands.)
+> dispatch #3 downgrade). The per-phase checkboxes below now MATCH this banner — C0–C5
+> are `[x]`, only C6 is still `◻` / `- [ ]` (accurately) — but trust this banner and the
+> §6 status table as the source of truth either way; per-phase detail lives in the
+> `codex-c*-built` session memories. (Lesson baked in: keep this status honest the
+> moment a phase lands.)
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:
