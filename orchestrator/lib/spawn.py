@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+from orchestrator.lib import config
 from orchestrator.lib.db import DATA_DIR
 
 # Serializes iTerm2 tab CREATION across threads. Tab spawns go through
@@ -990,6 +991,12 @@ CODEX_RUN_SH_CONTENT = """#!/bin/bash
 #   - MUST run `< /dev/null`: codex exec otherwise blocks "Reading additional
 #     input from stdin…" on a non-TTY (exactly like claude -p). The redirect
 #     attaches to codex (first pipe stage), so PIPESTATUS[0] stays codex's exit.
+#
+# ⚠ The codex flag set + model fallback in the command below DUPLICATE
+#   config.CODEX_ENGINE_SEED (C4). Deduping them needs seed→bash interpolation at
+#   spawn time (bash can't import Python) = C6 work; until then they are PINNED to
+#   the seed by tests/test_codex_config.py (TestSpawnCodexRunShPinnedToSeed), so a
+#   seed change that forgets this runner fails LOUDLY. Edit the SEED, then here.
 #
 # Completion signalling mirrors brain_run.sh:
 #   <id>.done — codex's exit code, written AFTER tee flushes (so .jsonl is whole)
