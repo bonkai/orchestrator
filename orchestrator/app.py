@@ -40,7 +40,7 @@ def _codex_seat_models() -> set[str]:
     config.json's `fusion.codex` (C4: IMPORT the codex model, never redefine it; no
     codex-id literal lives in app.py). Returns the engine's default model plus every
     model in its default seat panel, so a `fusion.codex` override is honored and the
-    set grows as codex adds models (today this is the degenerate {"gpt-5-codex"}).
+    set grows as codex adds models (today this is the degenerate {"gpt-5.5"}).
 
     Deliberately SEPARATE from CLAUDE_SEAT_MODELS: a codex model is a codex id,
     NEVER a Claude id. A shared/merged list would let a Claude id (e.g. "opus") pass

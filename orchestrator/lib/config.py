@@ -169,8 +169,8 @@ CODEX_ENGINE_SEED = {
     # so the judge sees genuinely different angles). Unused until C5 — here so the
     # picker's default lives in config, not code, like FUSION_PRESETS_SEED.
     "seats": [
-        {"kind": "codex_cli", "model": "gpt-5-codex", "lens": "risks"},
-        {"kind": "codex_cli", "model": "gpt-5-codex", "lens": "simplest"},
+        {"kind": "codex_cli", "model": "gpt-5.5", "lens": "risks"},
+        {"kind": "codex_cli", "model": "gpt-5.5", "lens": "simplest"},
     ],
 }
 

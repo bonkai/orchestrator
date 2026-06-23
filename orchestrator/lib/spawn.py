@@ -1025,7 +1025,7 @@ PROMPT_FILE="$CODEX_DIR/${ID}.prompt"
 OUT_FILE="$CODEX_DIR/${ID}.jsonl"
 DONE_FILE="$CODEX_DIR/${ID}.done"
 PID_FILE="$CODEX_DIR/${ID}.pid"
-MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo gpt-5-codex)
+MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo gpt-5.5)
 EFFORT=$(cat "$CODEX_DIR/${ID}.effort" 2>/dev/null || echo "")
 echo $$ > "$PID_FILE"
 if [ ! -f "$PROMPT_FILE" ]; then

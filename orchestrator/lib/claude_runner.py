@@ -356,7 +356,7 @@ def run_claude_json(
 # is fail-soft (ok=False, never a raise) and should be re-verified on upgrade.
 
 # The codex model id, IMPORTED from the config SEED (C4) — single source of truth,
-# no duplicate literal here (this re-points the old inline "gpt-5-codex"). It is the
+# no duplicate literal here (this re-points the old inline model literal). It is the
 # default-param / safety-net value (callers pass `-m` EXPLICITLY — dispatch #3); the
 # RUNTIME judge path reads the MERGED model (config.codex_engine()), so a config.json
 # `fusion.codex.model` override wins there. Reading the SEED (not the merged config)
