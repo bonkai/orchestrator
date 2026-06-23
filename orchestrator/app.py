@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from orchestrator.lib import attachments as attachments_mod
 from orchestrator.lib import bundle as bundle_mod
-from orchestrator.lib import config, db, edits as edits_mod, embeddings, fusion as fusion_mod, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
+from orchestrator.lib import claude_runner, config, db, edits as edits_mod, embeddings, fusion as fusion_mod, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
 
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
