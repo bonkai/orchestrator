@@ -56,6 +56,13 @@ class _IsolatedConfig(unittest.TestCase):
         cli_patch = mock.patch.object(config, "claude_cli_available", return_value=False)
         cli_patch.start()
         self.addCleanup(cli_patch.stop)
+        # C2.1: is_fusion_available() now ALSO consults codex_cli_available(), which
+        # shells out to a real `codex login status` probe — host-dependent (it is
+        # True on a laptop where codex is logged in), so the assertFalse cases below
+        # would flip. Disable codex too for the same host-independent baseline.
+        codex_patch = mock.patch.object(config, "codex_cli_available", return_value=False)
+        codex_patch.start()
+        self.addCleanup(codex_patch.stop)
 
     def tearDown(self):
         config.CONFIG_PATH = self._orig_config_path

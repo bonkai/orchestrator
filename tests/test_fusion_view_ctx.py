@@ -46,13 +46,16 @@ class TestViewCtxFusion(unittest.TestCase):
     def _ctx(self, active):
         """_view_ctx() with the DB + config seams mocked. `active` is the
         active_providers() return (name → merged entry; only the names matter)."""
-        # Disable the local CLI seat: post-F9 it alone satisfies
-        # is_fusion_available(), but this test verifies the EXTERNAL-provider
-        # gating (>=2 active keyed providers), so isolate that path.
+        # Disable the local CLI seats: post-F9 the `claude` CLI alone satisfies
+        # is_fusion_available(), and post-C2.1 a logged-in `codex` does too — but
+        # this test verifies the EXTERNAL-provider gating (>=2 active keyed
+        # providers), so isolate that path (codex_cli_available would otherwise
+        # shell out to a real, host-dependent probe).
         with mock.patch.object(app_module.db, "list_tabs", return_value=[]), \
                 mock.patch.object(app_module.db, "list_projects", return_value=[]), \
                 mock.patch.object(app_module.config, "fusion_config", return_value=FCFG), \
                 mock.patch.object(app_module.config, "claude_cli_available", return_value=False), \
+                mock.patch.object(app_module.config, "codex_cli_available", return_value=False), \
                 mock.patch.object(app_module.config, "active_providers", return_value=active):
             return app_module._view_ctx()
 

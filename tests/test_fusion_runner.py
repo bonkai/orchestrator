@@ -116,6 +116,12 @@ class TestRunFusionJson(unittest.TestCase):
                 claude_runner.config, "fusion_config", return_value=cfg))
             es.enter_context(mock.patch.object(
                 claude_runner.config, "active_providers", return_value=active))
+            # C2.3: run_fusion_json now probes codex_cli_available() unconditionally
+            # (mirror of claude_ok). Mock it False so these provider-panel tests stay
+            # fully offline (no real `codex login status` subprocess) and codex never
+            # contributes a seat — keeping behavior byte-for-byte pre-C2.
+            es.enter_context(mock.patch.object(
+                claude_runner.config, "codex_cli_available", return_value=False))
             es.enter_context(mock.patch.object(
                 claude_runner.spawn, "ensure_fusion_providers"))
             # Mock at the panel SEAM (_panel_answers) — run_fusion_json calls it,
