@@ -452,6 +452,54 @@ def _build_codex_run(envelope: dict, requested_model: str) -> ClaudeRun:
     )
 
 
+def _codex_tool_event(obj: dict) -> Optional[dict]:
+    """Map ONE codex `exec --json` stream event (C6.0 schema, codex-cli 0.141.0) to
+    a normalized tool event the C6 EXECUTOR poller feeds to the UI timeline + the
+    loop watchdog — or None for a non-tool event (agent_message / thread / turn /
+    anything else). The codex twin of the PreToolUse/PostToolUse hook payloads the
+    claude executor gets for free; codex has no hooks (§5), so the poller derives
+    this from the streamed JSONL instead.
+
+    Returns {"id","phase":'start'|'end',"tool_name","input_hash","detail"}.
+      - `command_execution` → tool_name="command_execution", fingerprint over the
+        full `item.command` string; detail carries the command + exit_code + a
+        bounded aggregated_output preview.
+      - `file_change` → tool_name="file_change", fingerprint over the sorted
+        changed `kind:path` pairs; detail carries those paths.
+    `tool_name`+`input_hash` mirror claude's PreToolUse fingerprint so
+    loop_watchdog.record treats codex identically (N consecutive identical calls →
+    kill). C6.0 confirmed both event types emit `item.started` THEN `item.completed`
+    (agent_message emits only `item.completed`); the poller dedups by `item.id` so a
+    tool call is fingerprinted ONCE (first sighting), the PreToolUse analogue.
+    Never raises — returns None on any malformed shape."""
+    if not isinstance(obj, dict):
+        return None
+    ttype = obj.get("type")
+    if ttype not in ("item.started", "item.completed"):
+        return None
+    item = obj.get("item")
+    if not isinstance(item, dict):
+        return None
+    itype = item.get("type")
+    if itype not in ("command_execution", "file_change"):
+        return None
+    phase = "start" if ttype == "item.started" else "end"
+    item_id = str(item.get("id") or "")
+    if itype == "command_execution":
+        cmd = str(item.get("command") or "")
+        input_hash = hashlib.sha1(cmd.encode("utf-8", "replace")).hexdigest()[:16]
+        detail = {"command": cmd[:400], "exit_code": item.get("exit_code"),
+                  "output_preview": str(item.get("aggregated_output") or "")[:400]}
+    else:  # file_change
+        changes = item.get("changes") or []
+        norm = sorted(f"{c.get('kind', '')}:{c.get('path', '')}"
+                      for c in changes if isinstance(c, dict))
+        input_hash = hashlib.sha1("\n".join(norm).encode("utf-8", "replace")).hexdigest()[:16]
+        detail = {"changes": norm[:20]}
+    return {"id": item_id, "phase": phase, "tool_name": itype,
+            "input_hash": input_hash, "detail": detail}
+
+
 def run_codex_headless(
     prompt: str,
     cwd: str,
