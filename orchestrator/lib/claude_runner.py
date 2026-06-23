@@ -465,7 +465,13 @@ def run_codex_headless(
     missing binary). Scrubs OPENAI_API_KEY (so codex never routes through the
     billed API — CLAUDE.md hard rule) and ORCHESTRATOR_RUN_ID (so no Stop hook
     fires), and closes stdin (codex exec hangs reading stdin otherwise)."""
-    cmd = ["codex", "exec", prompt, "-m", model, "-s", "read-only", "--json"]
+    # C4: the exec/-s/--json flag set comes from the config SEED (single source of
+    # truth, no inline literals). The seed (not the merged codex_engine()) keeps this
+    # fallback path free of a config-file read; these flags are version-pinned codex
+    # protocol constants, while the swappable bit — `model` — is passed in explicitly.
+    eng = config.CODEX_ENGINE_SEED
+    cmd = ["codex", eng["exec_subcmd"], prompt, "-m", model, "-s", eng["sandbox"],
+           eng["json_flag"]]
     if effort:
         cmd += ["-c", f"model_reasoning_effort={effort}"]
     # $0 subscription path only: drop the billed-API key AND the Stop-hook trigger
@@ -952,7 +958,9 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     synthesize a claude/provider panel and vice-versa (codex_cli_available() gates
     seats, not the judge). The codex path resolves a codex-appropriate model: the
     judge/verify defaults are Claude ids, and routing one to `codex -m` would be a
-    silent downgrade (dispatch #3). Full per-engine model config is C4/C5."""
+    silent downgrade (dispatch #3). C4: that codex model comes from the config SEED
+    (config.codex_engine()["model"]) so a config.json override wins; a per-CALL
+    explicit codex judge model is C5."""
     cfg = config.fusion_config()
     providers = cfg["providers"]
     presets = cfg["presets"]
@@ -1112,11 +1120,14 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                  "codex": run_codex_json}.get(judge_engine, run_claude_json)
     # judge_model/verify_model default to "opus" (a Claude id). With the codex
     # engine, feeding that to `codex -m` is the dispatch #3 'no silent downgrade'
-    # trap — resolve a codex-appropriate model instead. C3 is WIRING ONLY: full
-    # per-engine model CONFIG (honoring an explicit codex judge model) is C4/C5,
-    # and no caller passes one yet, so the codex path uses DEFAULT_CODEX_MODEL.
-    judge_engine_model = DEFAULT_CODEX_MODEL if judge_engine == "codex" else judge_model
-    verify_engine_model = DEFAULT_CODEX_MODEL if judge_engine == "codex" else verify_model
+    # trap — resolve a codex model instead. C4: that model is the config SEED's,
+    # read from the ALREADY-loaded `cfg` (cfg["codex"]["model"], no extra file read)
+    # so a config.json `fusion.codex.model` override wins; it falls back to the seed
+    # (DEFAULT_CODEX_MODEL) when unset. (Honoring a per-CALL explicit codex judge
+    # model is C5; no caller passes one yet.)
+    codex_model = (cfg.get("codex") or {}).get("model") or DEFAULT_CODEX_MODEL
+    judge_engine_model = codex_model if judge_engine == "codex" else judge_model
+    verify_engine_model = codex_model if judge_engine == "codex" else verify_model
 
     # The judge synthesizes from the ORIGINAL prompt verbatim — lenses bias only
     # the panel seats (decorrelation), never the synthesis (§5 / F9.e). C3: routed
