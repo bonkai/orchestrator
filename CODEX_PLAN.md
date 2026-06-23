@@ -1,20 +1,32 @@
-# Orchestrator — OpenAI `codex` CLI Integration Plan *(C0–C5 BUILT + TESTED; C6 design only)*
+# Orchestrator — OpenAI `codex` CLI Integration Plan *(C0–C6 BUILT + TESTED)*
 
-> 🟢 **BUILD STATUS (2026-06-23): C0–C5 are BUILT + TESTED — not "design only."**
+> 🟢 **BUILD STATUS (2026-06-23): C0–C6 are ALL BUILT + TESTED — the codex integration is complete.**
 > C0 (gate, Branch A), C1 (codex CLI invoker + parsers), C2 (Fusion codex seat),
 > C3 (selectable judge), C4 (config SEEDS — `CODEX_ENGINE_SEED` in `config.py`,
-> IMPORTED by `claude_runner`), and C5 (dispatch-form engine+model picker — the codex
-> SEAT parse + the executor engine picker + codex availability gating) all shipped
-> with offline tests. **Only C6 (the $0 codex EXECUTOR — `spawn_codex_dispatch` + the
-> §5 hook-gap convergence) remains design-only.** Honest scope of C5: the codex *seat*
-> is live and the executor *engine+model* is validated and threaded, but the codex
-> executor SPAWN is C6 — selecting engine=codex today is a validated, INERT seam that
-> reports "codex executor not yet available (C6)", NEVER a silent claude fallback (the
-> dispatch #3 downgrade). The per-phase checkboxes below now MATCH this banner — C0–C5
-> are `[x]`, only C6 is still `◻` / `- [ ]` (accurately) — but trust this banner and the
-> §6 status table as the source of truth either way; per-phase detail lives in the
-> `codex-c*-built` session memories. (Lesson baked in: keep this status honest the
-> moment a phase lands.)
+> IMPORTED by `claude_runner`), C5 (dispatch-form engine+model picker — the codex
+> SEAT parse + the executor engine picker + codex availability gating), and **C6 (the $0
+> codex EXECUTOR — `spawn.spawn_codex_dispatch` + a write-capable run.sh + the §5 in-band
+> completion poller)** all shipped with offline tests (suite 451 / skipped=4).
+> **engine=codex now SPAWNS a watchable codex executor** (writes confined to the project
+> via `-s workspace-write`; killable / capped / loop-watched like a claude dispatch) — and
+> NEVER silently falls back to a `claude` executor, on success OR spawn failure (the
+> dispatch #3 downgrade). The §5 hook gap (codex has no Stop/PreToolUse hooks) is closed
+> in-band: a lifetime poller (`app._codex_dispatch_poller`, modeled on the watchdog) tails
+> the sidecar JSONL → timeline + loop-watchdog fingerprint, and on `.done` calls the SAME
+> extracted completion core (`app._finalize_dispatch`) `/api/complete` uses — no Claude
+> hooks, no self-POST. Per-phase detail lives in the `codex-c*-built` session memories;
+> this banner + the §6 table are the source of truth. (Lesson baked in: keep this status
+> honest the moment a phase lands.)
+>
+> **⚠ Two C6 deviations from this doc's earlier text, both deliberate + recorded:**
+> (1) The executor runs `-s workspace-write` ALONE (no `--dangerously-bypass-...`). C6.0
+> verified that bypass flag OVERRIDES `-s` to full-access (codex escaped to `/tmp`), and
+> that `workspace-write` alone is non-hanging (note 1's "else it HANGS" is **false** for
+> codex-cli 0.141.0 — an out-of-sandbox action is rejected + the run continues). The
+> operator chose the confined default; loosen via a `fusion.codex.executor_sandbox`
+> override (reversible, no code change). (2) The summarizer fork (note 4) = an additive
+> codex branch in `summarizer.distill_transcript` (most reversible; yields a real,
+> non-empty summary; the claude path is byte-for-byte unchanged).
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:
