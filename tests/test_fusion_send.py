@@ -286,5 +286,141 @@ class TestSendInBackgroundJudgeFromPicker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(en.call_args.kwargs["judge_effort"], "xhigh")
 
 
+# ─────────────── C5.1: codex seat parse + executor engine seam ──────────────
+
+class TestParseFusionPanelCodexSeat(unittest.TestCase):
+    """C5.1 producer side: _parse_fusion_panel turns a {type:"codex",model} seat
+    into a {kind:"codex_cli","model"} panel entry (run_fusion_json consumes that
+    third kind — C2.3). The codex model is validated against a whitelist sourced
+    from CODEX_ENGINE_SEED (a codex id, NEVER a Claude id); blank/unknown is
+    DROPPED. The claude/provider branches are unchanged. Pure/offline — no
+    TestClient, so skipped stays 4."""
+
+    CODEX = {"gpt-5-codex"}
+    ACTIVE = {"deepseek": {}, "minimax": {}}
+
+    def test_codex_seat_becomes_codex_cli_kind(self):
+        panel = app_module._parse_fusion_panel(
+            '[{"type":"codex","model":"gpt-5-codex"}]', "", self.ACTIVE, self.CODEX)
+        self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5-codex"}])
+
+    def test_codex_seat_carries_optional_lens_no_effort(self):
+        # A codex seat may carry a lens; it never carries an effort — codex uses the
+        # model's own reasoning default (_codex_seat_answer's documented divergence).
+        panel = app_module._parse_fusion_panel(
+            '[{"type":"codex","model":"gpt-5-codex","lens":"risks","effort":"high"}]',
+            "", self.ACTIVE, self.CODEX)
+        self.assertEqual(panel,
+                         [{"kind": "codex_cli", "model": "gpt-5-codex", "lens": "risks"}])
+        self.assertNotIn("effort", panel[0])
+
+    def test_model_less_codex_seat_is_dropped(self):
+        self.assertEqual(
+            app_module._parse_fusion_panel('[{"type":"codex"}]', "", self.ACTIVE, self.CODEX), [])
+
+    def test_claude_id_in_codex_seat_is_dropped(self):
+        # A Claude id must NEVER pass codex validation (it would reach `codex -m`).
+        self.assertEqual(
+            app_module._parse_fusion_panel(
+                '[{"type":"codex","model":"opus"}]', "", self.ACTIVE, self.CODEX), [])
+
+    def test_mixed_panel_keeps_claude_codex_provider(self):
+        raw = ('[{"type":"claude","model":"opus","effort":"high"},'
+               '{"type":"codex","model":"gpt-5-codex"},'
+               '{"type":"provider","name":"deepseek"}]')
+        self.assertEqual(
+            app_module._parse_fusion_panel(raw, "", self.ACTIVE, self.CODEX),
+            [{"kind": "claude_cli", "model": "opus", "effort": "high"},
+             {"kind": "codex_cli", "model": "gpt-5-codex"},
+             "deepseek"])
+
+    def test_legacy_comma_panel_unaffected(self):
+        # No fusion_seats → the legacy comma fallback still filters by active.
+        self.assertEqual(
+            app_module._parse_fusion_panel("", "deepseek,glm,minimax", self.ACTIVE, self.CODEX),
+            ["deepseek", "minimax"])
+
+
+class TestValidateExecutorEngine(unittest.TestCase):
+    """C5.1 executor gate: _validate_executor_engine. claude (default) ignores the
+    codex model; codex REQUIRES an explicit, whitelisted codex id (the two
+    rejections — blank vs unknown — are distinct, both reject). It never downgrades
+    a codex pick to a Claude id or the claude engine (dispatch #3). Pure/offline."""
+
+    CODEX = {"gpt-5-codex"}
+
+    def test_default_is_claude_and_ignores_model(self):
+        self.assertEqual(app_module._validate_executor_engine("", "", self.CODEX), ("claude", ""))
+        # A codex model riding along with claude is ignored (not an error).
+        self.assertEqual(
+            app_module._validate_executor_engine("claude", "gpt-5-codex", self.CODEX),
+            ("claude", ""))
+
+    def test_codex_with_whitelisted_model_ok(self):
+        self.assertEqual(
+            app_module._validate_executor_engine("codex", "gpt-5-codex", self.CODEX),
+            ("codex", "gpt-5-codex"))
+
+    def test_codex_blank_model_rejected(self):
+        with self.assertRaises(ValueError):
+            app_module._validate_executor_engine("codex", "", self.CODEX)
+
+    def test_codex_claude_id_rejected(self):
+        # opus is a Claude id → never valid for `codex -m`.
+        with self.assertRaises(ValueError):
+            app_module._validate_executor_engine("codex", "opus", self.CODEX)
+
+    def test_unknown_engine_rejected(self):
+        with self.assertRaises(ValueError):
+            app_module._validate_executor_engine("gpt", "", self.CODEX)
+
+
+class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
+    """C5.1 executor SEAM: an engine='codex' dispatch is rejected as a visible
+    failed row and NEVER falls back to spawning a `claude` executor (the forbidden
+    silent engine downgrade — dispatch #3). The codex executor itself is C6; this
+    proves the seam is validated-but-inert AND that the claude path is untouched.
+    db/spawn are mocked, so no real DB/iTerm2 is touched."""
+
+    def _patches(self):
+        import contextlib
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": str(REPO)}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        es.enter_context(mock.patch.object(
+            app_module.db, "create_dispatch", return_value=42))
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        mfs = es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
+        spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
+        return es, mfs, spawn_it
+
+    async def test_codex_engine_rejected_without_spawning_claude(self):
+        es, mfs, spawn_it = self._patches()
+        with es:
+            did, err = await app_module._run_dispatch(
+                1, "do the thing", 600, "max", "",
+                executor_engine="codex", executor_model="gpt-5-codex")
+        self.assertIsNone(did)
+        self.assertIn("codex", err.lower())
+        self.assertIn("c6", err.lower())
+        spawn_it.assert_not_called()        # NO silent claude executor
+        mfs.assert_called_once()            # marked as a visible failed row
+
+    async def test_claude_engine_reaches_spawn(self):
+        # The default (claude) path is NOT blocked by the seam: it reaches
+        # spawn_iterm2. (We make the spawn raise so the success-tail mocks aren't
+        # needed; the point is only that the claude branch is taken.)
+        es, mfs, spawn_it = self._patches()
+        spawn_it.side_effect = RuntimeError("boom")
+        with es:
+            did, err = await app_module._run_dispatch(1, "do the thing", 600, "max", "")
+        spawn_it.assert_called_once()       # claude path reached the spawn
+        self.assertIsNone(did)
+        self.assertIn("spawn failed", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
