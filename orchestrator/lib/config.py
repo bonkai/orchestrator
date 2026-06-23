@@ -140,7 +140,15 @@ FUSION_LENSES_SEED = {
 # Claude ids (opus), and feeding one to `codex -m` is a silent downgrade (dispatch
 # #3) — so the codex judge path resolves its model from HERE, not the Claude default.
 CODEX_ENGINE_SEED = {
-    "model": "gpt-5-codex",          # `-m` value — a codex model id (NEVER a Claude id)
+    # `-m` value codex passes. On a ChatGPT-subscription account (Branch A) the valid
+    # ids are the plain GPT models codex routes to — `gpt-5.5` (default/best), `gpt-5.4`
+    # (more 5h-window runway), `gpt-5.4-mini` (most runway, lightest) — NEVER a Claude id,
+    # and NOT the `-codex`-suffixed ids: `gpt-5-codex` is API-only/retired and a ChatGPT
+    # account REJECTS it ("model is not supported when using Codex with a ChatGPT account"
+    # — verified live 2026-06-23). Codex churns these, so re-verify on upgrade; override
+    # per-machine via config.json `fusion.codex.model` (e.g. to gpt-5.4-mini for a tight
+    # Plus cap) with no code change.
+    "model": "gpt-5.5",
     "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
     "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
