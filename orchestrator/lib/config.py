@@ -128,6 +128,34 @@ FUSION_LENSES_SEED = {
                         "from what is assumed.",
 }
 
+# ── Codex ENGINE SEED (C4): the codex CLI's model id + flag set, merged from ───
+# config.json's `fusion.codex` exactly like the provider/preset/lens seeds.
+# claude_runner IMPORTS these (the run_codex_* flag set + the selectable judge's
+# model resolution) instead of redefining the literals, so the codex `-m` id and
+# flags have ONE source of truth, swappable by a config.json edit. Flags + event
+# schema are version-pinned to codex-cli 0.141.0 (CODEX_PLAN.md §3); codex churns
+# them, so re-verify on upgrade.
+#
+# `model` is a codex id, NEVER a Claude id: the Fusion judge/verify defaults are
+# Claude ids (opus), and feeding one to `codex -m` is a silent downgrade (dispatch
+# #3) — so the codex judge path resolves its model from HERE, not the Claude default.
+CODEX_ENGINE_SEED = {
+    "model": "gpt-5-codex",          # `-m` value — a codex model id (NEVER a Claude id)
+    "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
+    "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
+    "sandbox": "read-only",          # `-s <mode>` for a $0 seat/judge (read-only — it only READS to answer)
+    "json_flag": "--json",           # structured-JSONL flag the parser reads (§3)
+    "auth_probe": ["codex", "login", "status"],   # cheap, NON-BILLING auth-state probe (§3; not just `which`)
+    "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # no-hang flag for the C6 executor (§3/§6; unused until C6)
+    # A default codex panel for the C5 dispatch picker (>=2 seats, lens-decorrelated
+    # so the judge sees genuinely different angles). Unused until C5 — here so the
+    # picker's default lives in config, not code, like FUSION_PRESETS_SEED.
+    "seats": [
+        {"kind": "codex_cli", "model": "gpt-5-codex", "lens": "risks"},
+        {"kind": "codex_cli", "model": "gpt-5-codex", "lens": "simplest"},
+    ],
+}
+
 
 def load_config() -> dict:
     """Read ~/.orchestrator/config.json and return it as a dict. Returns {} if
