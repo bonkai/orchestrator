@@ -376,11 +376,11 @@ class TestValidateExecutorEngine(unittest.TestCase):
 
 
 class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
-    """C5.1 executor SEAM: an engine='codex' dispatch is rejected as a visible
-    failed row and NEVER falls back to spawning a `claude` executor (the forbidden
-    silent engine downgrade — dispatch #3). The codex executor itself is C6; this
-    proves the seam is validated-but-inert AND that the claude path is untouched.
-    db/spawn are mocked, so no real DB/iTerm2 is touched."""
+    """C6 executor (was the C5 inert seam): an engine='codex' dispatch now SPAWNS the
+    codex executor (spawn_codex_dispatch) and NEVER spawn_iterm2 — a codex pick must
+    never become a silent claude executor (dispatch #3), on SUCCESS or on spawn FAILURE.
+    The cap watcher gets engine='codex' and the in-band poller is attached. db / spawn /
+    watchdog are mocked, so no real DB / iTerm2 / poller is touched."""
 
     def _patches(self):
         import contextlib
@@ -392,32 +392,60 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         es.enter_context(mock.patch.object(
             app_module.db, "create_dispatch", return_value=42))
         es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.db, "mark_started"))
+        es.enter_context(mock.patch.object(app_module.db, "touch_project"))
         es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        es.enter_context(mock.patch.object(
+            app_module.spawn, "read_claude_pid", return_value=4321))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule"))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule_codex_poller"))
         mfs = es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
         spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
-        return es, mfs, spawn_it
+        spawn_cx = es.enter_context(mock.patch.object(app_module.spawn, "spawn_codex_dispatch"))
+        return es, mfs, spawn_it, spawn_cx
 
-    async def test_codex_engine_rejected_without_spawning_claude(self):
-        es, mfs, spawn_it = self._patches()
+    async def test_codex_engine_spawns_codex_not_claude(self):
+        es, mfs, spawn_it, spawn_cx = self._patches()
+        with es:
+            did, err = await app_module._run_dispatch(
+                1, "do the thing", 600, "max", "",
+                executor_engine="codex", executor_model="gpt-5-codex")
+            # cap watcher took the codex branch; the in-band poller was attached.
+            self.assertEqual(
+                app_module.watchdog.schedule.call_args.kwargs.get("engine"), "codex")
+            app_module.watchdog.schedule_codex_poller.assert_called_once()
+        self.assertEqual(did, 42)
+        self.assertEqual(err, "")
+        spawn_cx.assert_called_once()        # the codex executor was spawned
+        # spawn_codex_dispatch(project_path, dispatch_id, task, executor_model)
+        self.assertEqual(spawn_cx.call_args.args[3], "gpt-5-codex")  # explicit codex model (no downgrade)
+        spawn_it.assert_not_called()         # NO silent claude executor
+        mfs.assert_not_called()
+
+    async def test_codex_spawn_failure_is_visible_never_claude_fallback(self):
+        # Even when the codex spawn FAILS, we mark a visible failed row and return an
+        # error — we do NOT fall through to the claude spawn (the dispatch #3 downgrade).
+        es, mfs, spawn_it, spawn_cx = self._patches()
+        spawn_cx.side_effect = RuntimeError("boom")
         with es:
             did, err = await app_module._run_dispatch(
                 1, "do the thing", 600, "max", "",
                 executor_engine="codex", executor_model="gpt-5-codex")
         self.assertIsNone(did)
         self.assertIn("codex", err.lower())
-        self.assertIn("c6", err.lower())
-        spawn_it.assert_not_called()        # NO silent claude executor
-        mfs.assert_called_once()            # marked as a visible failed row
+        spawn_it.assert_not_called()         # STILL no claude fallback on failure
+        mfs.assert_called_once()             # visible failed row
 
     async def test_claude_engine_reaches_spawn(self):
-        # The default (claude) path is NOT blocked by the seam: it reaches
-        # spawn_iterm2. (We make the spawn raise so the success-tail mocks aren't
-        # needed; the point is only that the claude branch is taken.)
-        es, mfs, spawn_it = self._patches()
+        # The default (claude) path is unchanged: it reaches spawn_iterm2 and NOT the
+        # codex spawn. (We make the spawn raise so the success-tail mocks aren't needed;
+        # the point is only that the claude branch is taken.)
+        es, mfs, spawn_it, spawn_cx = self._patches()
         spawn_it.side_effect = RuntimeError("boom")
         with es:
             did, err = await app_module._run_dispatch(1, "do the thing", 600, "max", "")
-        spawn_it.assert_called_once()       # claude path reached the spawn
+        spawn_it.assert_called_once()        # claude path reached the spawn
+        spawn_cx.assert_not_called()         # codex path NOT taken for a claude dispatch
         self.assertIsNone(did)
         self.assertIn("spawn failed", err)
 
