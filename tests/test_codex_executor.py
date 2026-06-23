@@ -320,5 +320,78 @@ class TestCodexExecutorFiles(unittest.TestCase):
             self.assertFalse((pids / "9.pid").exists())
 
 
+class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
+    """§2 Q7 Plus guard: a codex dispatch is rejected (VISIBLE failed row, NEVER a
+    claude fallback) once `max_concurrent_dispatches` codex dispatches are already
+    running; under the cap it proceeds; cap<=0 ⇒ unlimited; a claude dispatch is
+    unaffected (the cap lives only in the codex branch). All seams mocked — offline."""
+
+    def _patches(self, *, cap, running_codex_count):
+        import contextlib
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": str(REPO)}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        es.enter_context(mock.patch.object(app_module.db, "create_dispatch", return_value=42))
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.db, "mark_started"))
+        es.enter_context(mock.patch.object(app_module.db, "touch_project"))
+        es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        es.enter_context(mock.patch.object(
+            app_module.spawn, "read_claude_pid", return_value=4321))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule"))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule_codex_poller"))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_engine",
+            return_value={"model": "gpt-5.5", "max_concurrent_dispatches": cap}))
+        es.enter_context(mock.patch.object(
+            app_module.db, "running_dispatches",
+            return_value=[{"id": i} for i in range(running_codex_count)]))
+        es.enter_context(mock.patch.object(
+            app_module.spawn, "is_codex_dispatch", return_value=True))
+        mfs = es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
+        spawn_cx = es.enter_context(mock.patch.object(app_module.spawn, "spawn_codex_dispatch"))
+        spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
+        return es, mfs, spawn_cx, spawn_it
+
+    async def test_at_cap_rejected_no_spawn_no_claude_fallback(self):
+        es, mfs, spawn_cx, spawn_it = self._patches(cap=2, running_codex_count=2)
+        with es:
+            did, err = await app_module._run_dispatch(
+                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+        self.assertIsNone(did)
+        self.assertIn("concurrency cap", err.lower())
+        spawn_cx.assert_not_called()
+        spawn_it.assert_not_called()      # never a claude fallback
+        mfs.assert_called_once()          # visible failed row
+
+    async def test_under_cap_proceeds(self):
+        es, mfs, spawn_cx, spawn_it = self._patches(cap=2, running_codex_count=1)
+        with es:
+            did, err = await app_module._run_dispatch(
+                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+        self.assertEqual(did, 42)
+        spawn_cx.assert_called_once()
+        mfs.assert_not_called()
+
+    async def test_cap_zero_is_unlimited(self):
+        es, mfs, spawn_cx, spawn_it = self._patches(cap=0, running_codex_count=99)
+        with es:
+            did, err = await app_module._run_dispatch(
+                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+        self.assertEqual(did, 42)
+        spawn_cx.assert_called_once()
+
+    async def test_claude_dispatch_ignores_codex_cap(self):
+        # codex dispatches at cap must NOT block a claude dispatch (cap is codex-branch only).
+        es, mfs, spawn_cx, spawn_it = self._patches(cap=2, running_codex_count=5)
+        spawn_it.side_effect = RuntimeError("boom")   # short-circuit the claude success tail
+        with es:
+            did, err = await app_module._run_dispatch(1, "t", 600, "max", "")  # claude
+        spawn_it.assert_called_once()     # claude path reached its spawn despite codex at cap
+        spawn_cx.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
