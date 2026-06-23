@@ -139,6 +139,34 @@ def distill_transcript(transcript_path: str, max_chars: int = DISTILLED_MAX_CHAR
                             blocks.append(f"### TOOL_USE: {name}\n{_trunc(inp_str, PER_TOOL_INPUT_MAX)}")
                         # Intentionally skip 'thinking' — too verbose for summaries.
 
+            # C6 (note 4): a codex EXECUTOR transcript is the codex `exec --json` sidecar,
+            # NOT a claude Stop-hook JSONL — different schema (CODEX_PLAN.md §C6.0). This
+            # ADDITIVE branch distills it to the SAME markdown the claude path produces, so
+            # a codex dispatch gets a real (non-empty) summary through the unchanged
+            # summarizer pipeline. Chosen over translating the sidecar / skipping the
+            # summary because it's the most reversible (one additive branch, delete to
+            # revert) and never emits an empty summary. Keyed on `item.completed` only (not
+            # `item.started`) so each tool call appears once. Claude transcripts never carry
+            # these `type`s, so the claude path above is byte-for-byte unchanged.
+            elif ttype == "item.completed":
+                item = obj.get("item") or {}
+                itype = item.get("type")
+                if itype == "agent_message":
+                    t = item.get("text", "")
+                    if t.strip():
+                        blocks.append(f"### ASSISTANT\n{_trunc(t, PER_BLOCK_MAX)}")
+                elif itype == "command_execution":
+                    cmd = item.get("command", "")
+                    blocks.append(f"### TOOL_USE: command_execution\n{_trunc(cmd, PER_TOOL_INPUT_MAX)}")
+                    out = item.get("aggregated_output", "")
+                    if str(out).strip():
+                        blocks.append(f"### TOOL_RESULT\n{_trunc(out, PER_BLOCK_MAX)}")
+                elif itype == "file_change":
+                    changes = item.get("changes") or []
+                    paths = ", ".join(f"{c.get('kind', '')} {c.get('path', '')}"
+                                      for c in changes if isinstance(c, dict))
+                    blocks.append(f"### TOOL_USE: file_change\n{_trunc(paths, PER_TOOL_INPUT_MAX)}")
+
             # Skip permission-mode, file-history-snapshot, attachment, ai-title.
 
             total = sum(len(b) for b in blocks)
