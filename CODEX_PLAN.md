@@ -309,14 +309,14 @@ the PreToolUse hook. So fix (iii) **must** reproduce the fingerprint feed for co
 |-------|-------|-------------|--------|
 | **C0** | **Verification gate** | live `codex --help`/`codex exec --help` + ChatGPT-login auth probe + captured event JSONL + the §2 verdict | ✅ **DONE 2026-06-22 — BRANCH A (0.141.0)** |
 | **C1** | The codex CLI invoker | `run_codex_json` (+ headless fallback) + `spawn_codex_tab`/`codex_run.sh`/`ensure_codex_runner` + the two parsers (§4) | ✅ built + tested |
-| **C2** | Fusion **codex seat** *(ships first after C1)* | `_codex_seat_answer` + `kind:"codex_cli"`; `codex_cli_available()` (auth-probing); panel splits 3 ways (provider / claude_cli / codex_cli) | ◻ design only |
-| **C3** | **Selectable judge** | `judge_engine` param + `_JUDGE_ENGINES` map; routes judge **and** verifier **and** re-judge; default `"claude"` | ◻ design only |
-| **C4** | Config SEEDS | codex engine/seat config in `config.py` SEEDS (**design only — do NOT add in this task; import, don't redefine**) | ◻ design only |
+| **C2** | Fusion **codex seat** *(ships first after C1)* | `_codex_seat_answer` + `kind:"codex_cli"`; `codex_cli_available()` (auth-probing); panel splits 3 ways (provider / claude_cli / codex_cli) | ✅ built + tested |
+| **C3** | **Selectable judge** | `judge_engine` param + in-function engine map; routes judge **and** verifier **and** re-judge; default `"claude"` | ✅ built + tested |
+| **C4** | Config SEEDS | `CODEX_ENGINE_SEED` + `codex_engine()` in `config.py`, merged from `config.json`; IMPORTED by `claude_runner` (no redefinition). Residual: spawn's bash heredoc still dup'd (guard-tested; bash→seed interp deferred to C6) | ✅ built + tested (2026-06-23) |
 | **C5** | Dispatch-form engine+model picker | engine selector (claude\|codex) + **per-engine model** id; threads through `/send` → `_send_in_background`; default carries the model EXPLICITLY | ◻ design only |
 | **C6** | **$0 executor** *(Branch A only; build last)* | `spawn_codex_dispatch` + codex `run.sh` branch + the §5 hook-gap convergence (iii) + PID file + auto-bypass flag | ◻ design only — **un-gated: C0=Branch A ✅** |
 
 Build strictly in order; the seat (C2) is the first shippable thing and is hook-gap-free.
-**C0 returned Branch A ✅ (2026-06-22) — C6 is un-gated.**
+**C0–C4 are BUILT + TESTED (2026-06-23); C5 is next, then C6 (un-gated — C0=Branch A ✅).**
 
 ### Phase C0 — Verification gate ✅ *(DONE 2026-06-22 — BRANCH A, codex-cli 0.141.0)*
 *Goal: turn every §3 hypothesis into a verified fact, and return the §2 branch verdict. **Result: all of C0.1–C0.5 confirmed; details in §0/§3.***
@@ -345,9 +345,9 @@ Build strictly in order; the seat (C2) is the first shippable thing and is hook-
 - [ ] **C3.2** Route the **verifier** and **re-judge** through the same engine selection (they are also hard-wired to `run_claude_json` today). · *verify:* with `judge_engine="codex"`, no `run_claude_json` call remains in the judge/verify/rejudge path.
 > 🔭 An **engine-keyed map** is chosen over a `claude|codex` boolean deliberately: it scales to a 3rd CLI without a rewrite, while staying a one-line default. **Note:** `_strip_fences`/the strict-JSON verdict prompts (`_verify_prompt`) are tuned to Claude's output habits — a **codex judge's JSON-format fidelity may differ** (open question), and claude-judging-codex vs codex-judging-claude are **not** interchangeably calibrated (inter-rater bias).
 
-### Phase C4 — Config SEEDS *(design only — do NOT add in this task)*
-*Goal: codex engine + seat defaults live in `config.py` SEEDS, merged from `config.json` like Fusion's.*
-- [ ] **C4.1** Design (not write) a `CODEX_ENGINE_SEED` (model id, the non-interactive flag set from C0, the auto-bypass flag, auth-probe command) + any codex seat preset, merged in `fusion_config()` the way `FUSION_PROVIDERS_SEED`/`FUSION_PRESETS_SEED` are. **Per memory: `claude_runner` must IMPORT these from `config.py`, not redefine them.** · *verify (when built):* `config.json` overrides merge over the seed; no duplicate definition in `claude_runner`.
+### Phase C4 — Config SEEDS ✅ *(BUILT + TESTED 2026-06-23)*
+*Goal: codex engine defaults live in `config.py` SEEDS, merged from `config.json` like Fusion's.*
+- [x] **C4.1** `CODEX_ENGINE_SEED` in `config.py` (model id, the exec/`-s`/`--json` flag set, the auto-bypass flag, the auth-probe command, default effort, a default seat panel), merged in `fusion_config()` under a `codex` key with a `codex_engine()` accessor — the way `FUSION_PROVIDERS_SEED`/`FUSION_PRESETS_SEED`/lenses are. `claude_runner` IMPORTS the model/flags, NO redefinition: `DEFAULT_CODEX_MODEL` = the seed model; `run_codex_headless`'s flag set + (in `config.py`) `codex_cli_available()`'s probe read the seed; the selectable judge resolves its model from the MERGED `cfg["codex"]["model"]` so a `config.json` `fusion.codex.model` override wins (closes the dispatch #3 silent-downgrade). · *verified (`tests/test_codex_config.py`):* `config.json` overrides merge over the seed; no duplicate definition in `claude_runner`; a codex judge resolves a codex id, not a Claude one. **Residual (deferred to C6):** `spawn.py`'s `CODEX_RUN_SH_CONTENT` bash heredoc still duplicates the flag set + model fallback (bash can't import the Python seed); a guard test pins it to the seed so a drift fails loudly, and C6's codex run.sh work will source it via seed→bash interpolation.
 
 ### Phase C5 — Dispatch-form engine + model picker
 *Goal: a task executor can be claude **or** codex; a Fusion seat list can include codex seats.*
@@ -418,5 +418,5 @@ Build strictly in order; the seat (C2) is the first shippable thing and is hook-
 11. **Resume.** Is a codex analogue of `spawn_iterm2_resume` (tracked `claude --resume`)
     wanted, and does codex expose a session/resume model (§3)? Left out of the MVP above.
 
-**STOP — design only. No source file changed but this document. Phase C0 is the gate; nothing
-in C1–C6 is approved or built.**
+**STATUS — C0–C4 are BUILT + TESTED (2026-06-23). C5–C6 remain design-only (no source
+changed for them but this document). See the top-of-file build-status banner + the §6 table.**
