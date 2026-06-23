@@ -870,6 +870,46 @@ def _anthropic_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
             "effort": effort, "subscription": True, "lens": lens_name, "ok": True}
 
 
+def _codex_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
+    """One codex panel seat: a LOCAL `codex exec` call (visible iTerm2 tab) on the
+    ChatGPT subscription — the codex twin of _anthropic_seat_answer. Free ($0
+    out-of-pocket — it's the subscription) and makes NO OpenAI API call
+    (run_codex_json scrubs OPENAI_API_KEY on the headless path; the tab runs the
+    subscription CLI), so a codex seat keeps the extended 'No OpenAI API calls'
+    hard rule intact, exactly as a Claude seat keeps 'No Anthropic API calls'.
+
+    Returns the SAME normalized shape _panel_answer / _anthropic_seat_answer
+    return, so run_fusion_json treats codex seats, Claude seats, and provider seats
+    identically. Never raises — run_codex_json already returns ok=False on any
+    failure (auth-expired, rate-limit, closed tab, timeout).
+
+    Two codex divergences from the Claude seat that are CORRECT, not inconsistencies
+    to 'fix':
+      - model defaults to the module constant DEFAULT_CODEX_MODEL (not a literal
+        'opus'), passed EXPLICITLY to run_codex_json so a non-default seat isn't
+        silently downgraded to the placeholder (dispatch #3 lesson).
+      - effort defaults to "" — empty means codex uses the MODEL's own reasoning
+        default (C0), so we do NOT inject 'high' the way the Claude seat does; and
+        the seat name omits the trailing '-' an empty effort would otherwise add."""
+    model = (seat.get("model") or DEFAULT_CODEX_MODEL).strip()
+    effort = (seat.get("effort") or "").strip()
+    # F8.4: a per-seat lens prefixes the prompt (resolved TEXT in lens_text; the
+    # NAME in lens is carried only for the surface/breakdown). No lens ⇒ the prompt
+    # is unchanged, so an un-lensed codex seat behaves exactly as a lens-free call.
+    lens_name = (seat.get("lens") or "").strip()
+    lens_text = (seat.get("lens_text") or "").strip()
+    name = seat.get("name") or (f"{model}-{effort}" if effort else model)
+    label = f"fusion-seat:{name}" + (f"+{lens_name}" if lens_name else "")
+    run = run_codex_json(prompt=_apply_lens(prompt, lens_text), cwd=cwd or os.getcwd(),
+                         model=model, effort=effort, label=label)
+    if not run.ok:
+        return {"name": name, "ok": False, "error": run.error or "codex seat failed",
+                "lens": lens_name}
+    return {"name": name, "model": run.model or model, "text": run.text,
+            "cost": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
+            "effort": effort, "subscription": True, "lens": lens_name, "ok": True}
+
+
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
                     judge_model: str = "opus", judge_effort: str = "high",
