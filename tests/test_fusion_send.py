@@ -296,22 +296,22 @@ class TestParseFusionPanelCodexSeat(unittest.TestCase):
     DROPPED. The claude/provider branches are unchanged. Pure/offline — no
     TestClient, so skipped stays 4."""
 
-    CODEX = {"gpt-5-codex"}
+    CODEX = {"gpt-5.5"}
     ACTIVE = {"deepseek": {}, "minimax": {}}
 
     def test_codex_seat_becomes_codex_cli_kind(self):
         panel = app_module._parse_fusion_panel(
-            '[{"type":"codex","model":"gpt-5-codex"}]', "", self.ACTIVE, self.CODEX)
-        self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5-codex"}])
+            '[{"type":"codex","model":"gpt-5.5"}]', "", self.ACTIVE, self.CODEX)
+        self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5"}])
 
     def test_codex_seat_carries_optional_lens_no_effort(self):
         # A codex seat may carry a lens; it never carries an effort — codex uses the
         # model's own reasoning default (_codex_seat_answer's documented divergence).
         panel = app_module._parse_fusion_panel(
-            '[{"type":"codex","model":"gpt-5-codex","lens":"risks","effort":"high"}]',
+            '[{"type":"codex","model":"gpt-5.5","lens":"risks","effort":"high"}]',
             "", self.ACTIVE, self.CODEX)
         self.assertEqual(panel,
-                         [{"kind": "codex_cli", "model": "gpt-5-codex", "lens": "risks"}])
+                         [{"kind": "codex_cli", "model": "gpt-5.5", "lens": "risks"}])
         self.assertNotIn("effort", panel[0])
 
     def test_model_less_codex_seat_is_dropped(self):
@@ -326,12 +326,12 @@ class TestParseFusionPanelCodexSeat(unittest.TestCase):
 
     def test_mixed_panel_keeps_claude_codex_provider(self):
         raw = ('[{"type":"claude","model":"opus","effort":"high"},'
-               '{"type":"codex","model":"gpt-5-codex"},'
+               '{"type":"codex","model":"gpt-5.5"},'
                '{"type":"provider","name":"deepseek"}]')
         self.assertEqual(
             app_module._parse_fusion_panel(raw, "", self.ACTIVE, self.CODEX),
             [{"kind": "claude_cli", "model": "opus", "effort": "high"},
-             {"kind": "codex_cli", "model": "gpt-5-codex"},
+             {"kind": "codex_cli", "model": "gpt-5.5"},
              "deepseek"])
 
     def test_legacy_comma_panel_unaffected(self):
@@ -347,19 +347,19 @@ class TestValidateExecutorEngine(unittest.TestCase):
     rejections — blank vs unknown — are distinct, both reject). It never downgrades
     a codex pick to a Claude id or the claude engine (dispatch #3). Pure/offline."""
 
-    CODEX = {"gpt-5-codex"}
+    CODEX = {"gpt-5.5"}
 
     def test_default_is_claude_and_ignores_model(self):
         self.assertEqual(app_module._validate_executor_engine("", "", self.CODEX), ("claude", ""))
         # A codex model riding along with claude is ignored (not an error).
         self.assertEqual(
-            app_module._validate_executor_engine("claude", "gpt-5-codex", self.CODEX),
+            app_module._validate_executor_engine("claude", "gpt-5.5", self.CODEX),
             ("claude", ""))
 
     def test_codex_with_whitelisted_model_ok(self):
         self.assertEqual(
-            app_module._validate_executor_engine("codex", "gpt-5-codex", self.CODEX),
-            ("codex", "gpt-5-codex"))
+            app_module._validate_executor_engine("codex", "gpt-5.5", self.CODEX),
+            ("codex", "gpt-5.5"))
 
     def test_codex_blank_model_rejected(self):
         with self.assertRaises(ValueError):
@@ -409,7 +409,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         with es:
             did, err = await app_module._run_dispatch(
                 1, "do the thing", 600, "max", "",
-                executor_engine="codex", executor_model="gpt-5-codex")
+                executor_engine="codex", executor_model="gpt-5.5")
             # cap watcher took the codex branch; the in-band poller was attached.
             self.assertEqual(
                 app_module.watchdog.schedule.call_args.kwargs.get("engine"), "codex")
@@ -418,7 +418,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(err, "")
         spawn_cx.assert_called_once()        # the codex executor was spawned
         # spawn_codex_dispatch(project_path, dispatch_id, task, executor_model)
-        self.assertEqual(spawn_cx.call_args.args[3], "gpt-5-codex")  # explicit codex model (no downgrade)
+        self.assertEqual(spawn_cx.call_args.args[3], "gpt-5.5")  # explicit codex model (no downgrade)
         spawn_it.assert_not_called()         # NO silent claude executor
         mfs.assert_not_called()
 
@@ -430,7 +430,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         with es:
             did, err = await app_module._run_dispatch(
                 1, "do the thing", 600, "max", "",
-                executor_engine="codex", executor_model="gpt-5-codex")
+                executor_engine="codex", executor_model="gpt-5.5")
         self.assertIsNone(did)
         self.assertIn("codex", err.lower())
         spawn_it.assert_not_called()         # STILL no claude fallback on failure

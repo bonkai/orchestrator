@@ -63,11 +63,11 @@ class TestCodexEnvelopeParser(unittest.TestCase):
         path = self._write("ok.jsonl", CAPTURED_JSONL)
         env = claude_runner._envelope_from_codex_stream(path)
         self.assertIsNotNone(env)
-        run = claude_runner._build_codex_run(env, "gpt-5-codex")
+        run = claude_runner._build_codex_run(env, "gpt-5.5")
         self.assertTrue(run.ok)
         self.assertEqual(run.text, "WAL is fine.")
         # codex --json has no model field → fall back to the model we passed via -m
-        self.assertEqual(run.model, "gpt-5-codex")
+        self.assertEqual(run.model, "gpt-5.5")
         self.assertEqual(run.cost_usd, 0.0)       # subscription POLICY, not data absence
         self.assertEqual(run.duration_s, 0.0)
 
@@ -89,7 +89,7 @@ class TestCodexEnvelopeParser(unittest.TestCase):
         ]) + "\n"
         path = self._write("multi.jsonl", jsonl)
         run = claude_runner._build_codex_run(
-            claude_runner._envelope_from_codex_stream(path), "gpt-5-codex")
+            claude_runner._envelope_from_codex_stream(path), "gpt-5.5")
         self.assertEqual(run.text, "FINAL answer")
 
     def test_json_text_is_parsed(self):
@@ -101,7 +101,7 @@ class TestCodexEnvelopeParser(unittest.TestCase):
         ]) + "\n"
         path = self._write("json.jsonl", jsonl)
         run = claude_runner._build_codex_run(
-            claude_runner._envelope_from_codex_stream(path), "gpt-5-codex")
+            claude_runner._envelope_from_codex_stream(path), "gpt-5.5")
         self.assertTrue(run.ok)
         self.assertEqual(run.parsed_json, {"defect": False})
 
@@ -111,7 +111,7 @@ class TestCodexEnvelopeParser(unittest.TestCase):
         usage-reading parser silently pricing the subscription path."""
         path = self._write("u.jsonl", CAPTURED_JSONL)
         run = claude_runner._build_codex_run(
-            claude_runner._envelope_from_codex_stream(path), "gpt-5-codex")
+            claude_runner._envelope_from_codex_stream(path), "gpt-5.5")
         self.assertEqual(run.cost_usd, 0.0)
         self.assertEqual((run.raw or {}).get("usage", {}).get("input_tokens"), 15026)
 
@@ -132,7 +132,7 @@ class TestCodexEnvelopeParser(unittest.TestCase):
         path = self._write("empty.jsonl", '{"type":"turn.completed","usage":{}}\n')
         env = claude_runner._envelope_from_codex_stream(path)
         self.assertIsNotNone(env)
-        run = claude_runner._build_codex_run(env, "gpt-5-codex")
+        run = claude_runner._build_codex_run(env, "gpt-5.5")
         self.assertTrue(run.ok)
         self.assertEqual(run.text, "")
 
@@ -149,11 +149,11 @@ class TestCodexEnvelopeParser(unittest.TestCase):
     def test_build_codex_run_never_raises_on_weird_envelope(self):
         """_build_codex_run tolerates an empty/garbage envelope → ok=True, empty
         text, cost 0, model fallback — never an exception."""
-        run = claude_runner._build_codex_run({}, "gpt-5-codex")
+        run = claude_runner._build_codex_run({}, "gpt-5.5")
         self.assertTrue(run.ok)
         self.assertEqual(run.text, "")
         self.assertEqual(run.cost_usd, 0.0)
-        self.assertEqual(run.model, "gpt-5-codex")
+        self.assertEqual(run.model, "gpt-5.5")
 
 
 class TestCodexHeadlessFallback(unittest.TestCase):
@@ -181,7 +181,7 @@ class TestCodexHeadlessFallback(unittest.TestCase):
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-should-be-scrubbed",
                                           "ORCHESTRATOR_RUN_ID": "999"}), \
                 mock.patch.object(subprocess, "run", side_effect=fake_run):
-            run = claude_runner.run_codex_headless("hi", "/tmp", model="gpt-5-codex")
+            run = claude_runner.run_codex_headless("hi", "/tmp", model="gpt-5.5")
 
         self.assertTrue(run.ok)
         self.assertEqual(run.text, "WAL is fine.")
@@ -193,7 +193,7 @@ class TestCodexHeadlessFallback(unittest.TestCase):
         # exec subcommand + EXPLICIT model + JSONL; stdin closed (no stdin hang).
         self.assertIn("exec", captured["cmd"])
         self.assertIn("-m", captured["cmd"])
-        self.assertIn("gpt-5-codex", captured["cmd"])
+        self.assertIn("gpt-5.5", captured["cmd"])
         self.assertIn("--json", captured["cmd"])
         self.assertEqual(captured["stdin"], subprocess.DEVNULL)
 

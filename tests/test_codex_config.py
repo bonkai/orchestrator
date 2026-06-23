@@ -62,7 +62,7 @@ class _IsolatedConfig(unittest.TestCase):
 class TestCodexEngineSeedMerge(_IsolatedConfig):
     def test_seed_when_no_file(self):
         ce = config.codex_engine()
-        self.assertEqual(ce["model"], "gpt-5-codex")
+        self.assertEqual(ce["model"], "gpt-5.5")
         self.assertEqual(ce["effort"], "")
         self.assertEqual(ce["exec_subcmd"], "exec")
         self.assertEqual(ce["sandbox"], "read-only")
@@ -90,19 +90,19 @@ class TestCodexEngineSeedMerge(_IsolatedConfig):
         ce = config.codex_engine()
         self.assertEqual(ce["sandbox"], "workspace-write")
         self.assertEqual(ce["effort"], "high")
-        self.assertEqual(ce["model"], "gpt-5-codex")           # seed kept
+        self.assertEqual(ce["model"], "gpt-5.5")           # seed kept
 
     def test_no_codex_block_returns_seed(self):
         self._write({"fusion": {"preset": "max"}})             # codex absent
-        self.assertEqual(config.codex_engine()["model"], "gpt-5-codex")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
 
     def test_garbage_codex_block_ignored(self):
         self._write({"fusion": {"codex": "not-a-dict"}})
-        self.assertEqual(config.codex_engine()["model"], "gpt-5-codex")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
 
     def test_garbage_top_level_config_returns_seed(self):
         config.CONFIG_PATH.write_text("{ not valid json", encoding="utf-8")
-        self.assertEqual(config.codex_engine()["model"], "gpt-5-codex")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
 
     def test_fusion_config_codex_key_matches_accessor(self):
         # The accessor is just sugar over fusion_config()["codex"] (mirror of
@@ -208,11 +208,11 @@ class TestCodexJudgeResolvesSeededModel(unittest.TestCase):
             yield rcx, rcj
 
     def test_codex_judge_uses_seeded_model_not_a_claude_id(self):
-        with self._env({"model": "gpt-5-codex"}) as (rcx, rcj):
+        with self._env({"model": "gpt-5.5"}) as (rcx, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp", judge_engine="codex")
         self.assertTrue(run.ok)
         rcx.assert_called_once()
-        self.assertEqual(rcx.call_args.kwargs.get("model"), "gpt-5-codex")
+        self.assertEqual(rcx.call_args.kwargs.get("model"), "gpt-5.5")
         self.assertNotEqual(rcx.call_args.kwargs.get("model"), "opus")
         rcj.assert_not_called()
 

@@ -163,14 +163,14 @@ class TestCodexSeatAnswer(unittest.TestCase):
         return captured, mock.patch.object(claude_runner, "run_codex_json", side_effect=fake)
 
     def test_ok_returns_normalized_subscription_dict(self):
-        cap, p = self._capture(ClaudeRun(ok=True, text="ANS", model="gpt-5-codex"))
+        cap, p = self._capture(ClaudeRun(ok=True, text="ANS", model="gpt-5.5"))
         with p:
             ans = claude_runner._codex_seat_answer(
-                {"model": "gpt-5-codex", "effort": "high", "name": "gpt-5-codex-high"},
+                {"model": "gpt-5.5", "effort": "high", "name": "gpt-5.5-high"},
                 "TASK", "/tmp")
         self.assertTrue(ans["ok"])
         self.assertEqual(ans["text"], "ANS")
-        self.assertEqual(ans["model"], "gpt-5-codex")
+        self.assertEqual(ans["model"], "gpt-5.5")
         self.assertEqual(ans["cost"], 0.0)            # subscription → $0 by policy
         self.assertTrue(ans["subscription"])
         self.assertEqual(ans["lens"], "")
@@ -179,8 +179,8 @@ class TestCodexSeatAnswer(unittest.TestCase):
         # dispatch #3: a non-default model must NOT be downgraded to the placeholder.
         cap, p = self._capture(ClaudeRun(ok=True, text="A"))
         with p:
-            claude_runner._codex_seat_answer({"model": "gpt-5-codex-mini"}, "T", "/tmp")
-        self.assertEqual(cap["model"], "gpt-5-codex-mini")
+            claude_runner._codex_seat_answer({"model": "gpt-5.5-mini"}, "T", "/tmp")
+        self.assertEqual(cap["model"], "gpt-5.5-mini")
 
     def test_model_defaults_to_constant_when_absent(self):
         cap, p = self._capture(ClaudeRun(ok=True, text="A"))
@@ -191,16 +191,16 @@ class TestCodexSeatAnswer(unittest.TestCase):
     def test_empty_effort_no_high_injected_and_no_trailing_dash(self):
         cap, p = self._capture(ClaudeRun(ok=True, text="A"))
         with p:
-            ans = claude_runner._codex_seat_answer({"model": "gpt-5-codex"}, "T", "/tmp")
+            ans = claude_runner._codex_seat_answer({"model": "gpt-5.5"}, "T", "/tmp")
         self.assertEqual(cap["effort"], "")           # codex's own default, NOT 'high'
         self.assertEqual(ans["effort"], "")
-        self.assertEqual(ans["name"], "gpt-5-codex")  # not 'gpt-5-codex-'
+        self.assertEqual(ans["name"], "gpt-5.5")  # not 'gpt-5.5-'
 
     def test_lens_applied_to_prompt_and_surfaced(self):
-        cap, p = self._capture(ClaudeRun(ok=True, text="A", model="gpt-5-codex"))
+        cap, p = self._capture(ClaudeRun(ok=True, text="A", model="gpt-5.5"))
         with p:
             ans = claude_runner._codex_seat_answer(
-                {"model": "gpt-5-codex", "lens": "risks", "lens_text": "FIND RISKS"},
+                {"model": "gpt-5.5", "lens": "risks", "lens_text": "FIND RISKS"},
                 "TASK", "/tmp")
         self.assertEqual(cap["prompt"], claude_runner._apply_lens("TASK", "FIND RISKS"))
         self.assertIn("risks", cap["label"])          # the tab title shows the lens
@@ -209,7 +209,7 @@ class TestCodexSeatAnswer(unittest.TestCase):
     def test_no_lens_prompt_unchanged(self):
         cap, p = self._capture(ClaudeRun(ok=True, text="A"))
         with p:
-            ans = claude_runner._codex_seat_answer({"model": "gpt-5-codex"}, "TASK", "/tmp")
+            ans = claude_runner._codex_seat_answer({"model": "gpt-5.5"}, "TASK", "/tmp")
         self.assertEqual(cap["prompt"], "TASK")
         self.assertEqual(ans["lens"], "")
 
@@ -217,7 +217,7 @@ class TestCodexSeatAnswer(unittest.TestCase):
         cap, p = self._capture(ClaudeRun(ok=False, error="auth expired"))
         with p:
             ans = claude_runner._codex_seat_answer(
-                {"model": "gpt-5-codex", "lens": "risks", "lens_text": "X"}, "T", "/tmp")
+                {"model": "gpt-5.5", "lens": "risks", "lens_text": "X"}, "T", "/tmp")
         self.assertFalse(ans["ok"])
         self.assertIn("auth expired", ans["error"])
         self.assertEqual(ans["lens"], "risks")        # failure dict carries lens too
@@ -258,8 +258,8 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
 
     def test_pure_codex_pair_clears_two_gate(self):
         # ACCEPTANCE: a pure-codex pair satisfies the >=2 gate; judge synthesizes.
-        panel = [{"kind": "codex_cli", "model": "gpt-5-codex"},
-                 {"kind": "codex_cli", "model": "gpt-5-codex", "effort": "high"}]
+        panel = [{"kind": "codex_cli", "model": "gpt-5.5"},
+                 {"kind": "codex_cli", "model": "gpt-5.5", "effort": "high"}]
         with self._env(codex_ok=True) as (rp, asa, csa, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp", panel=panel)
         self.assertTrue(run.ok)
@@ -268,13 +268,13 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
         rcj.assert_called_once()                      # judge ran (claude — C3 deferred)
         self.assertEqual(rcj.call_args.kwargs.get("label"), "fusion-judge")
         names = [a["name"] for a in run.raw["panel"]]
-        self.assertIn("gpt-5-codex", names)           # empty-effort name: no trailing dash
-        self.assertIn("gpt-5-codex-high", names)
+        self.assertIn("gpt-5.5", names)           # empty-effort name: no trailing dash
+        self.assertIn("gpt-5.5-high", names)
 
     def test_pure_codex_pair_falls_back_when_codex_unavailable(self):
         # The gate is REAL, not merely present: logged-out codex → <2 seats → fall back.
-        panel = [{"kind": "codex_cli", "model": "gpt-5-codex"},
-                 {"kind": "codex_cli", "model": "gpt-5-codex", "effort": "high"}]
+        panel = [{"kind": "codex_cli", "model": "gpt-5.5"},
+                 {"kind": "codex_cli", "model": "gpt-5.5", "effort": "high"}]
         with self._env(codex_ok=False) as (rp, asa, csa, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp", panel=panel)
         self.assertFalse(run.ok)
@@ -287,7 +287,7 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
         panel_ans = [{"name": "gemini", "ok": True, "cost": 0.001, "text": "G"}]
         panel = ["gemini",
                  {"kind": "claude_cli", "model": "opus", "effort": "high"},
-                 {"kind": "codex_cli", "model": "gpt-5-codex"}]
+                 {"kind": "codex_cli", "model": "gpt-5.5"}]
         with self._env(active=active, claude_ok=True, codex_ok=True,
                        panel_ans=panel_ans) as (rp, asa, csa, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp", panel=panel)
@@ -296,7 +296,7 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
         asa.assert_called_once()                      # claude seat
         csa.assert_called_once()                      # codex seat
         names = {a["name"] for a in run.raw["panel"]}
-        self.assertEqual(names, {"gemini", "opus-high", "gpt-5-codex"})
+        self.assertEqual(names, {"gemini", "opus-high", "gpt-5.5"})
 
     def test_existing_claude_cli_panel_unchanged_with_codex_off(self):
         # Additive proof: a pure claude_cli panel behaves exactly as pre-C2 —
@@ -312,13 +312,13 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
 
     def test_codex_seat_surfaced_in_raw_seats_and_lenses(self):
         # Diagnostics parity: a "(codex)" seat label + a lensed codex seat in lenses_used.
-        panel = [{"kind": "codex_cli", "model": "gpt-5-codex", "lens": "risks"},
-                 {"kind": "codex_cli", "model": "gpt-5-codex", "effort": "high"}]
+        panel = [{"kind": "codex_cli", "model": "gpt-5.5", "lens": "risks"},
+                 {"kind": "codex_cli", "model": "gpt-5.5", "effort": "high"}]
         with self._env(codex_ok=True) as (rp, asa, csa, rcj):
             run = claude_runner.run_fusion_json("q", cwd="/tmp", panel=panel)
         self.assertTrue(run.ok)
         self.assertTrue(any("(codex)" in s for s in run.raw["seats"]))
-        self.assertIn({"seat": "gpt-5-codex", "lens": "risks"}, run.raw["lenses"])
+        self.assertIn({"seat": "gpt-5.5", "lens": "risks"}, run.raw["lenses"])
 
 
 if __name__ == "__main__":

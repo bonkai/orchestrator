@@ -44,8 +44,8 @@ FCFG = {
 # C5.2: _view_ctx also surfaces codex availability + the codex model list (sourced
 # from the codex ENGINE config). Stub config.codex_engine so _codex_seat_models()
 # doesn't read the real ~/.orchestrator/config.json; the single seed model suffices.
-CODEX_ENGINE = {"model": "gpt-5-codex",
-                "seats": [{"kind": "codex_cli", "model": "gpt-5-codex"}]}
+CODEX_ENGINE = {"model": "gpt-5.5",
+                "seats": [{"kind": "codex_cli", "model": "gpt-5.5"}]}
 
 
 class TestViewCtxFusion(unittest.TestCase):
@@ -104,7 +104,7 @@ class TestViewCtxFusion(unittest.TestCase):
         off = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=False)
         self.assertFalse(off["codex_cli_available"])
         # Sourced from the codex SEED — a codex id, never a Claude id.
-        self.assertEqual(off["codex_seat_models"], ["gpt-5-codex"])
+        self.assertEqual(off["codex_seat_models"], ["gpt-5.5"])
         self.assertNotIn("opus", off["codex_seat_models"])
         on = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=True)
         self.assertTrue(on["codex_cli_available"])
