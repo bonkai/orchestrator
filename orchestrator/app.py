@@ -313,6 +313,26 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     # convergence: the cap watcher uses the codex branch (hard-kill, no pause-resume)
     # and the in-band poller is the SOLE finalizer (codex has no Stop hook).
     if executor_engine == "codex":
+        # §2 Q7 / Plus cap GUARD: bound concurrent codex EXECUTOR dispatches so a burst
+        # can't silently exhaust the shared 5-hour subscription window. Counts the OTHER
+        # codex dispatches currently running (the just-created row is still 'pending', so
+        # it isn't counted); at/over the cap we reject as a VISIBLE failed row — never a
+        # claude fallback (dispatch #3) — and the user waits or kills one. Soft cap (a
+        # near-simultaneous pair may overshoot by 1); 0/None ⇒ unlimited.
+        cap = int(config.codex_engine().get("max_concurrent_dispatches", 0) or 0)
+        if cap > 0:
+            running_codex = sum(1 for d in db.running_dispatches()
+                                if spawn.is_codex_dispatch(d["id"]))
+            if running_codex >= cap:
+                reason = (f"codex concurrency cap reached: {running_codex}/{cap} codex "
+                          f"dispatches already running — wait or kill one (raise "
+                          f"fusion.codex.max_concurrent_dispatches to change)")
+                db.mark_failed_to_spawn(dispatch_id, reason)
+                db.record_event(dispatch_id, "stage", {
+                    "stage": "spawn_failed", "error": reason, "engine": "codex",
+                    "model": executor_model, "running_codex": running_codex, "cap": cap})
+                spawn.cleanup_dispatch_files(dispatch_id)
+                return None, reason
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(

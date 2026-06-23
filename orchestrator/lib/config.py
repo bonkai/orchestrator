@@ -165,6 +165,15 @@ CODEX_ENGINE_SEED = {
     "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # full-access no-sandbox flag; C6.0 found it
                                      # OVERRIDES -s entirely (NOT additive). UNUSED by the confined workspace-write
                                      # executor above; here for an opt-in full-access override + the C0/§3 record.
+    "max_concurrent_dispatches": 2,  # §2 Q7 / Plus cap GUARD: max codex EXECUTOR dispatches running at once.
+                                     # Each codex dispatch is a full agentic run sharing ONE 5-hour subscription
+                                     # window (esp. tight on Plus), so a burst of concurrent codex dispatches can
+                                     # silently exhaust it. _run_dispatch rejects a codex spawn (VISIBLE failed row,
+                                     # never a claude fallback) once this many codex dispatches are already running.
+                                     # A best-effort SOFT cap (a near-simultaneous pair may overshoot by 1). 0/None ⇒
+                                     # unlimited. Tune per-tier via config.json `fusion.codex.max_concurrent_dispatches`
+                                     # (raise on Pro/Business; this does NOT bound a single Fusion codex PANEL — that's
+                                     # bounded per-call by its seat count).
     # A default codex panel for the C5 dispatch picker (>=2 seats, lens-decorrelated
     # so the judge sees genuinely different angles). Unused until C5 — here so the
     # picker's default lives in config, not code, like FUSION_PRESETS_SEED.
