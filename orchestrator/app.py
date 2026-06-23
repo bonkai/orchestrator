@@ -34,6 +34,29 @@ CLAUDE_SEAT_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 _MAX_LENS_CHARS = 2000
 
 
+def _codex_seat_models() -> set[str]:
+    """Valid codex model ids for the dispatch picker + /send validation (C5.1),
+    SOURCED from the codex ENGINE config — CODEX_ENGINE_SEED merged with
+    config.json's `fusion.codex` (C4: IMPORT the codex model, never redefine it; no
+    codex-id literal lives in app.py). Returns the engine's default model plus every
+    model in its default seat panel, so a `fusion.codex` override is honored and the
+    set grows as codex adds models (today this is the degenerate {"gpt-5-codex"}).
+
+    Deliberately SEPARATE from CLAUDE_SEAT_MODELS: a codex model is a codex id,
+    NEVER a Claude id. A shared/merged list would let a Claude id (e.g. "opus") pass
+    codex validation and reach `codex -m` — the dispatch #3 silent-downgrade hazard.
+    Kept apart, codex validation rejects every Claude id."""
+    eng = config.codex_engine()
+    models = {str(eng.get("model", "")).strip()}
+    for seat in eng.get("seats", []) or []:
+        if isinstance(seat, dict):
+            m = str(seat.get("model", "")).strip()
+            if m:
+                models.add(m)
+    models.discard("")
+    return models
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
