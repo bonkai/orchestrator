@@ -143,10 +143,20 @@ CODEX_ENGINE_SEED = {
     "model": "gpt-5-codex",          # `-m` value — a codex model id (NEVER a Claude id)
     "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
     "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
-    "sandbox": "read-only",          # `-s <mode>` for a $0 seat/judge (read-only — it only READS to answer)
+    "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
+    "executor_sandbox": "workspace-write",  # `-s <mode>` for the C6 EXECUTOR — write-capable but CONFINED to the project.
+                                     # C6.0 (2026-06-23) verified `-s workspace-write` ALONE on codex-cli 0.141.0 is
+                                     # write-capable AND non-hanging (an out-of-sandbox action is REJECTED + the run
+                                     # continues, it does NOT block on a prompt) — so note 1's "else it HANGS" is false,
+                                     # and the auto_bypass_flag is NOT applied to the executor (it would OVERRIDE -s to
+                                     # full-access — verified: codex escaped to /tmp). Operator-chosen confined default;
+                                     # loosen to "danger-full-access" (claude-executor parity) via a config.json
+                                     # `fusion.codex.executor_sandbox` override — reversible, no code change.
     "json_flag": "--json",           # structured-JSONL flag the parser reads (§3)
     "auth_probe": ["codex", "login", "status"],   # cheap, NON-BILLING auth-state probe (§3; not just `which`)
-    "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # no-hang flag for the C6 executor (§3/§6; unused until C6)
+    "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # full-access no-sandbox flag; C6.0 found it
+                                     # OVERRIDES -s entirely (NOT additive). UNUSED by the confined workspace-write
+                                     # executor above; here for an opt-in full-access override + the C0/§3 record.
     # A default codex panel for the C5 dispatch picker (>=2 seats, lens-decorrelated
     # so the judge sees genuinely different angles). Unused until C5 — here so the
     # picker's default lives in config, not code, like FUSION_PRESETS_SEED.

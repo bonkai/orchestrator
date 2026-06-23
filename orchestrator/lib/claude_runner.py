@@ -24,6 +24,7 @@ scrubs the var from the subprocess env.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
