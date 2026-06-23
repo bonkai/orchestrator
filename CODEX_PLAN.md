@@ -18,7 +18,7 @@
 > this banner + the §6 table are the source of truth. (Lesson baked in: keep this status
 > honest the moment a phase lands.)
 >
-> **⚠ Two C6 deviations from this doc's earlier text, both deliberate + recorded:**
+> **⚠ Three C6 findings/deviations from this doc's earlier text, all deliberate + recorded:**
 > (1) The executor runs `-s workspace-write` ALONE (no `--dangerously-bypass-...`). C6.0
 > verified that bypass flag OVERRIDES `-s` to full-access (codex escaped to `/tmp`), and
 > that `workspace-write` alone is non-hanging (note 1's "else it HANGS" is **false** for
@@ -26,7 +26,14 @@
 > operator chose the confined default; loosen via a `fusion.codex.executor_sandbox`
 > override (reversible, no code change). (2) The summarizer fork (note 4) = an additive
 > codex branch in `summarizer.distill_transcript` (most reversible; yields a real,
-> non-empty summary; the claude path is byte-for-byte unchanged).
+> non-empty summary; the claude path is byte-for-byte unchanged). (3) **The seed model id
+> was STALE: `gpt-5-codex` is API-only/retired and a ChatGPT account REJECTS it with a 400
+> ("model is not supported when using Codex with a ChatGPT account") — caught by live
+> testing 2026-06-23.** Fixed to **`gpt-5.5`** (codex's ChatGPT-account default; valid ids
+> are `gpt-5.5`/`gpt-5.4`/`gpt-5.4-mini`, NOT `-codex`-suffixed). With `gpt-5.5` the
+> executor run.sh was validated end-to-end live (`.done`=0, a real workspace write, the
+> command_execution/file_change/agent_message tool events + turn.completed all flowing).
+> Re-verify the id on codex upgrades; override via `fusion.codex.model`.
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:
@@ -491,8 +498,13 @@ timeline + loop watchdog + the extracted completion core (`app._finalize_dispatc
 with `/api/complete`) + a codex cap hard-kill with a distinct reason + the
 `distill_transcript` codex branch. engine=codex NEVER silently spawns claude. Two recorded
 deviations: the executor is confined (`-s workspace-write`, no bypass — C6.0 disproved
-note 1's hang premise + found bypass overrides `-s` to full-access) and the summarizer fork
-is the additive `distill_transcript` branch (note 4). Full suite 451 / skipped=4. See the
-top-of-file build-status banner + the §6 table. Remaining open questions are operational
-(Q7 caps/concurrency — observed live as transient `turn.failed` rate-limits during testing,
-handled as honest failed rows; Q9 judge calibration; Q10 ToS; Q11 resume) — NOT blockers.**
+note 1's hang premise + found bypass overrides `-s` to full-access), the summarizer fork
+is the additive `distill_transcript` branch (note 4), and the seed model id was corrected
+from the rejected `gpt-5-codex` to `gpt-5.5` (the ChatGPT-account model — see the banner).
+The run.sh was validated end-to-end live (`.done`=0, real workspace write, all tool events
++ turn.completed). Full suite 451 / skipped=4. See the top-of-file build-status banner +
+the §6 table. Remaining open questions are operational (Q7 caps/concurrency — Plus is the
+tightest tier, a codex fan-out / big agentic run can exhaust the shared 5h window, and rapid
+calls DID transiently rate-limit during testing → handled as honest failed rows; consider a
+codex-concurrency guard / a pre-flight `/status` check; Q9 judge calibration; Q10 ToS; Q11
+resume) — NOT blockers.**
