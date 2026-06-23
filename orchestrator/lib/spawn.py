@@ -1162,3 +1162,234 @@ def finish_codex_tab(codex_id: str, label: str = "codex", success: bool = False)
         except Exception:
             pass
     cleanup_codex_files(codex_id)
+
+
+# ─── codex EXECUTOR dispatch (C6) — the $0 codex twin of spawn_iterm2/run.sh ──
+# A DISPATCHED codex task in a watchable iTerm2 tab — the codex analogue of the
+# `claude` executor (spawn_iterm2 → run.sh). It is NOT the SEAT runner above:
+#   - WRITE-CAPABLE: `-s <executor_sandbox>` (workspace-write), so codex edits the
+#     project. C6.0 (codex-cli 0.141.0) verified workspace-write ALONE is non-hanging
+#     (an out-of-sandbox action is rejected + the run continues) AND confined — so we
+#     do NOT add the auto_bypass_flag (it OVERRIDES -s to full-access, verified).
+#   - PID at the CLAUDE path (PIDS_DIR/<id>.pid), so manual-kill / kill-all / the
+#     wall-clock cap / the orphan reaper / boot re-attach all locate it with ZERO
+#     watchdog changes (CODEX_PLAN note 2). The seat writes CODEX_DIR/<id>.pid; this
+#     does NOT — termination must reach a real dispatch.
+#   - FIFO + backgrounded codex: the recorded PID is codex's REAL pid (the kill
+#     target), not the shell (a pipeline `$$` would orphan codex on SIGTERM). The
+#     consumer (tee → sidecar + pretty-printer) is wait'd so the sidecar is fully
+#     flushed before .done (the poller reads the envelope on .done).
+#   - ORCHESTRATOR_CODEX_RUN_ID (NOT ORCHESTRATOR_RUN_ID) + the `user.orch_id` tab
+#     tag (the DISPATCH tag, so select/close/auto-close work) — Stop hook stays a
+#     no-op; the orchestrator's in-process poller is the SOLE finalizer (§5 fix iii).
+# Sidecars are int-keyed by dispatch_id in CODEX_DIR (str(dispatch_id) — the codex
+# plumbing is string-keyed; a bare-int key never collides with a seat's slug-uuid id).
+
+CODEX_DISPATCH_RUN_SH = BIN_DIR / "codex_dispatch_run.sh"
+
+
+def _build_codex_dispatch_run_sh(eng: dict) -> str:
+    """Render the codex EXECUTOR run.sh, INTERPOLATING the flag set + model fallback
+    from config.CODEX_ENGINE_SEED (the C4-deferred seed→bash interpolation, finished
+    in C6 — bash can't import the Python seed, so we substitute at runner-write time).
+    Single source of truth; pinned by tests/test_codex_config.py. Uses the EXECUTOR
+    sandbox (write-capable) — NEVER the seat's read-only `sandbox` — and deliberately
+    does NOT emit the `auto_bypass_flag` (that would override -s to full-access)."""
+    template = r'''#!/bin/bash
+# Orchestrator codex EXECUTOR runner — the $0 ChatGPT-subscription codex analogue of
+# run.sh (the dispatched `claude` session), execed inside a WATCHABLE iTerm2 tab.
+#
+# NOT the codex SEAT runner (codex_run.sh, -s read-only): a dispatched executor
+# WRITES the project, so it runs `-s @@EXECUTOR_SANDBOX@@` — write-capable but
+# CONFINED to the project. C6.0 (codex-cli 0.141.0) verified this is NON-hanging: an
+# out-of-sandbox action is rejected and the run continues, NOT a blocking approval
+# prompt — so NO --dangerously-bypass flag is used (it would OVERRIDE -s to full
+# danger-full-access; verified codex escaped to /tmp with it).
+#
+# §5 hook-gap convergence (fix iii): codex has NO Stop/PreToolUse/PostToolUse hooks,
+# so completion / loop-watchdog / timeline are NOT signalled via ~/.claude/settings.json.
+# This runner streams codex's events to a sidecar JSONL the orchestrator's in-process
+# poller (app._codex_dispatch_poller) tails — the SAME sidecar+PID-poll mechanism the
+# seat uses. Hence ORCHESTRATOR_CODEX_RUN_ID (NOT ORCHESTRATOR_RUN_ID — the env-gated
+# Stop hook stays a no-op), AND the PID below is written to the CLAUDE pid path
+# ($HOME/.orchestrator/pids/<id>.pid) so kill / kill-all / cap / reaper / boot re-attach
+# all locate it unchanged (CODEX_PLAN note 2).
+#
+# WHY a FIFO + backgrounded codex (not the seat's `codex | tee | python` pipeline):
+# the orchestrator must TERMINATE codex by the recorded PID. In a pipeline `$$` is the
+# SHELL and codex is a pipeline child — SIGTERM to the shell would orphan codex, not
+# kill it. So codex is backgrounded to capture its REAL pid (the kill target); its
+# output flows through a FIFO to tee (raw JSONL → sidecar, parsed by
+# claude_runner._build_codex_run) + a python3 pretty-printer (readable lines in the
+# tab, cosmetic). `wait`ing the consumer guarantees the sidecar is flushed BEFORE
+# .done. OPENAI_API_KEY is scrubbed so the $0 SUBSCRIPTION path is used, never the
+# billed API (CLAUDE.md hard rule, extended to codex).
+#
+# The codex subcommand / sandbox / json flag / model fallback are INTERPOLATED from
+# config.CODEX_ENGINE_SEED at write time (single source of truth, pinned by tests).
+if [ -z "${ORCHESTRATOR_CODEX_RUN_ID:-}" ]; then
+    echo "Orchestrator codex executor: ORCHESTRATOR_CODEX_RUN_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_CODEX_RUN_ID"
+CODEX_DIR="$HOME/.orchestrator/codex"
+PID_FILE="$HOME/.orchestrator/pids/${ID}.pid"
+PROMPT_FILE="$CODEX_DIR/${ID}.prompt"
+OUT_FILE="$CODEX_DIR/${ID}.jsonl"
+DONE_FILE="$CODEX_DIR/${ID}.done"
+FIFO="$CODEX_DIR/${ID}.fifo"
+MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
+if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Orchestrator codex executor: missing prompt file $PROMPT_FILE" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+PROMPT=$(cat "$PROMPT_FILE")
+# $0 subscription path only — never route the executor through the billed OpenAI API.
+unset OPENAI_API_KEY
+echo "---- orchestrator codex EXECUTOR: dispatch $ID ($MODEL, -s @@EXECUTOR_SANDBOX@@) ----"
+echo "(watchable; writes confined to this project; no Stop hook — orchestrator finalizes from the sidecar)"
+echo
+rm -f "$FIFO"
+mkfifo "$FIFO" || { echo "Orchestrator codex executor: mkfifo failed" >&2; echo 2 > "$DONE_FILE"; exit 2; }
+# Consumer: raw JSONL -> sidecar (tee) + readable lines -> tab (python). Reads the
+# FIFO and blocks until codex (the writer) opens it; backgrounded so we launch codex
+# next. Keyed off codex event types (item.started/completed: command_execution /
+# file_change / agent_message), NOT claude's assistant/result. Cosmetic only — tee has
+# already written raw JSONL to the sidecar, which the orchestrator parses unchanged.
+tee "$OUT_FILE" < "$FIFO" | python3 -u -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        print(line)
+        continue
+    t = obj.get('type', '')
+    if t == 'thread.started':
+        print('[codex]', (obj.get('thread_id') or '')[:8])
+    elif t in ('item.started', 'item.completed'):
+        item = obj.get('item') or {}
+        it = item.get('type')
+        if it == 'agent_message':
+            if t == 'item.completed':
+                txt = (item.get('text') or '').strip()
+                if txt:
+                    print('[assistant]', txt)
+        elif it == 'command_execution':
+            if t == 'item.started':
+                print('[run]', (item.get('command') or '')[:200])
+            else:
+                print('[run-done exit=%s]' % item.get('exit_code'),
+                      (item.get('aggregated_output') or '')[:200].replace(chr(10), ' '))
+        elif it == 'file_change':
+            if t == 'item.started':
+                paths = ', '.join('%s %s' % (c.get('kind', ''), c.get('path', ''))
+                                  for c in (item.get('changes') or []) if isinstance(c, dict))
+                print('[edit]', paths[:200])
+        elif t == 'item.completed':
+            print('[item]', it or '?')
+    elif t == 'turn.completed':
+        u = obj.get('usage') or {}
+        print('[done] in=%s cached=%s out=%s reasoning=%s' % (
+            u.get('input_tokens', 0), u.get('cached_input_tokens', 0),
+            u.get('output_tokens', 0), u.get('reasoning_output_tokens', 0)))
+    elif t and t != 'turn.started':
+        print('[codex:%s]' % t)
+" &
+CONSUMER_PID=$!
+# codex -> FIFO, backgrounded so $! is codex's REAL pid (the kill target). < /dev/null
+# keeps codex from blocking 'Reading additional input from stdin...' on a non-TTY.
+codex @@EXEC_SUBCMD@@ "$PROMPT" -m "$MODEL" -s @@EXECUTOR_SANDBOX@@ @@JSON_FLAG@@ < /dev/null > "$FIFO" &
+CODEX_PID=$!
+echo "$CODEX_PID" > "$PID_FILE"
+wait "$CODEX_PID"
+code=$?
+wait "$CONSUMER_PID" 2>/dev/null
+rm -f "$FIFO"
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- codex executor finished (exit $code) ----"
+'''
+    return (template
+            .replace("@@EXEC_SUBCMD@@", eng["exec_subcmd"])
+            .replace("@@EXECUTOR_SANDBOX@@", eng["executor_sandbox"])
+            .replace("@@JSON_FLAG@@", eng["json_flag"])
+            .replace("@@MODEL_DEFAULT@@", eng["model"]))
+
+
+# Built at import from the SEED (genuine seed→bash interpolation); a module constant
+# like the seat runner so the drift test can pin it. Re-import regenerates it after a
+# seed edit. (NB: only re-read if the seed is patched + the module re-imported.)
+CODEX_DISPATCH_RUN_SH_CONTENT = _build_codex_dispatch_run_sh(config.CODEX_ENGINE_SEED)
+
+
+def ensure_codex_dispatch_runner():
+    """One-time (lazy): create the codex sidecar dir + write codex_dispatch_run.sh.
+    Mirrors ensure_runner/ensure_codex_runner; called before spawning a codex
+    dispatch tab, so install.sh needs no change."""
+    CODEX_DIR.mkdir(parents=True, exist_ok=True)
+    PIDS_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    CODEX_DISPATCH_RUN_SH.write_text(CODEX_DISPATCH_RUN_SH_CONTENT)
+    CODEX_DISPATCH_RUN_SH.chmod(0o755)
+
+
+def is_codex_dispatch(dispatch_id: int) -> bool:
+    """True if `dispatch_id` is a codex EXECUTOR (C6) — detected by its int-keyed
+    codex prompt sidecar, which exists from spawn until cleanup. Lets the watchdog
+    (resume_watchers_on_boot + the cap watcher) pick the codex branch (a distinct
+    hard-kill reason, no claude pause-resume) and re-attach the poller, with NO
+    dispatches-table schema change. Only the executor writes a bare-int CODEX_DIR
+    key; a seat's id is always a slug-uuid, so there is no collision."""
+    return (CODEX_DIR / f"{dispatch_id}.prompt").exists()
+
+
+def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: str = "") -> None:
+    """Open a new iTerm2 tab and start the codex EXECUTOR for this dispatch — the
+    $0 codex twin of spawn_iterm2. Writes the task + model to int-keyed CODEX_DIR
+    sidecars (the run.sh reads them; avoids shell-quoting the prompt into AppleScript),
+    tags the tab `user.orch_id` + titles it `orch #<id>` (so select/close/auto-close
+    all work, exactly like spawn_iterm2), exports ORCHESTRATOR_CODEX_RUN_ID (NOT
+    ORCHESTRATOR_RUN_ID — Stop hook no-op), and execs codex_dispatch_run.sh (which
+    writes codex's REAL pid to PIDS_DIR/<id>.pid). `model` is the codex `-m` id, passed
+    EXPLICITLY by the caller (dispatch #3); defaults to the seed model as a safety net.
+    Raises on spawn failure (the caller marks a VISIBLE failed row — NEVER a silent
+    claude fallback)."""
+    if not iterm2_installed():
+        raise RuntimeError(
+            "iTerm2 not installed. Install with: brew install --cask iterm2"
+        )
+    ensure_codex_dispatch_runner()
+    prompt_file = CODEX_DIR / f"{dispatch_id}.prompt"
+    model_file = CODEX_DIR / f"{dispatch_id}.model"
+    prompt_file.write_text(task.strip(), encoding="utf-8")
+    model_file.write_text((model or config.CODEX_ENGINE_SEED["model"]).strip())
+
+    safe_proj = project_path.replace('"', '\\"')
+    title = f"orch #{dispatch_id}"
+    safe_title = title.replace('"', '\\"')
+
+    cmd = (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_CODEX_RUN_ID={dispatch_id} && '
+        f'{_setuservar_printf("orch_id", str(dispatch_id))}'
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/codex_dispatch_run.sh"'
+    )
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+
+    script = _spawn_tab_script(safe_title, apple_cmd)
+    try:
+        _spawn_osascript(script)
+    except Exception:
+        # Clean up orphan sidecars so a failed spawn leaks no files.
+        for f in (prompt_file, model_file):
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
+        raise
