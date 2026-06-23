@@ -952,11 +952,12 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
 
     # Normalize the (possibly mixed) panel into usable seats. Each entry is either
     # an EXTERNAL provider — a registry NAME (str), fanned out via its provider
-    # script — or a LOCAL Claude Code seat (dict {"kind":"claude_cli","model",
-    # "effort"}) run through the `claude` CLI like the judge: visible tab,
-    # subscription, $0, NO Anthropic API. Duplicate Claude seats are allowed.
-    # External names are kept only if active (key resolves), so "fusion on but
-    # <2 usable seats" falls back instead of erroring.
+    # script — or a LOCAL CLI seat: a Claude Code seat (dict {"kind":"claude_cli",
+    # "model","effort"}) run through the `claude` CLI, or a codex seat (dict
+    # {"kind":"codex_cli","model","effort"}, C2.3) run through `codex exec` — both
+    # like the judge: visible tab, subscription, $0, NO Anthropic/OpenAI API.
+    # Duplicate CLI seats are allowed. External names are kept only if active (key
+    # resolves), so "fusion on but <2 usable seats" falls back instead of erroring.
     active = config.active_providers()
     claude_ok = config.claude_cli_available()
     codex_ok = config.codex_cli_available()   # C2.3: mirror claude_ok (PATH + auth probe)
@@ -1041,18 +1042,22 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     if prov_names:
         spawn.ensure_fusion_providers()                # materialize scripts (lazy)
 
-    # Fan out BOTH groups in parallel: external providers through the watchable
-    # fusion tab (in-process fallback if no iTerm2), each Claude seat as its own
-    # watchable brain tab. Wall-clock ~= slowest seat, not the sum. (iTerm2 tab
-    # CREATION is serialized by a lock in spawn.py so concurrent spawns don't
-    # race; only the spawn moment is serial — the polling overlaps.)
+    # Fan out ALL groups in parallel: external providers through the watchable
+    # fusion tab (in-process fallback if no iTerm2), each Claude seat AND each codex
+    # seat as its own watchable tab. Wall-clock ~= slowest seat, not the sum. (iTerm2
+    # tab CREATION is serialized by a lock in spawn.py so concurrent spawns don't
+    # race; only the spawn moment is serial — the polling overlaps.) codex_seats are
+    # in max_workers too, else a pure-codex pair would run serially.
     answers: list = []
     with concurrent.futures.ThreadPoolExecutor(
-            max_workers=(len(claude_seats) + (1 if prov_names else 0)) or 1) as ex:
+            max_workers=(len(claude_seats) + len(codex_seats)
+                         + (1 if prov_names else 0)) or 1) as ex:
         prov_future = (ex.submit(_panel_answers, prompt, prov_names, prov_providers,
                                  timeout_s, cwd_eff, prov_lenses) if prov_names else None)
         claude_futures = [ex.submit(_anthropic_seat_answer, cs, prompt, cwd_eff)
                           for cs in claude_seats]
+        codex_futures = [ex.submit(_codex_seat_answer, cs, prompt, cwd_eff)
+                         for cs in codex_seats]
         if prov_future is not None:
             try:
                 answers.extend(prov_future.result() or [])
@@ -1063,6 +1068,11 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                 answers.append(fut.result())
             except Exception as e:
                 print(f"[claude_runner] fusion claude seat failed: {e}")
+        for fut in codex_futures:
+            try:
+                answers.append(fut.result())
+            except Exception as e:
+                print(f"[claude_runner] fusion codex seat failed: {e}")
 
     # F8.4: tag each external answer with its lens NAME for the surface/breakdown
     # (Claude seats already carry their own "lens" from _anthropic_seat_answer).
