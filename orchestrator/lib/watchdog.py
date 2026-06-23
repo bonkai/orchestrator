@@ -40,9 +40,60 @@ def is_pausing(dispatch_id: int) -> bool:
     return dispatch_id in _pausing
 
 
-def schedule(dispatch_id: int, claude_pid: int | None, cap_s: int):
-    """Start a wall-clock watchdog for this dispatch."""
-    task = asyncio.create_task(_run(dispatch_id, claude_pid, cap_s))
+# ─── codex EXECUTOR in-band pollers (C6 §5 fix iii) ──────────────────────────
+# One async task per RUNNING codex dispatch — the codex twin of _watchers, but it
+# FINALIZES the dispatch (codex has no Stop hook). The poller BODY lives in app.py
+# (it needs the completion core + summarizer + the GC-safety set), so app injects a
+# FACTORY at startup; watchdog only TRACKS + CANCELS them. This keeps the kill / cap
+# paths able to stop a codex poller WITHOUT importing app, and lets
+# resume_watchers_on_boot re-attach them after a restart.
+_codex_pollers: dict[int, asyncio.Task] = {}
+_codex_poller_factory = None   # set by app.py: (dispatch_id: int, tail_only: bool) -> coroutine
+
+
+def set_codex_poller_factory(factory):
+    """Inject the codex poller coroutine factory (app.py at startup). Without it —
+    e.g. a unit test importing watchdog directly — schedule_codex_poller is a no-op,
+    so watchdog stays import-light and app-free."""
+    global _codex_poller_factory
+    _codex_poller_factory = factory
+
+
+def _discard_codex_poller(dispatch_id: int, task: asyncio.Task):
+    # done-callback: drop the registry entry, but only if it's still THIS task (a
+    # reschedule may have replaced it). Keeps the registry self-cleaning on both
+    # natural completion and cancellation.
+    if _codex_pollers.get(dispatch_id) is task:
+        _codex_pollers.pop(dispatch_id, None)
+
+
+def schedule_codex_poller(dispatch_id: int, tail_only: bool = False):
+    """Start the in-band codex finalizer poller for this dispatch (no-op if no
+    factory was injected). Replaces any existing poller for the id. `tail_only=True`
+    on boot re-attach: the poller seeks past the already-consumed sidecar prefix."""
+    if _codex_poller_factory is None:
+        return None
+    cancel_codex_poller(dispatch_id)
+    task = asyncio.create_task(_codex_poller_factory(dispatch_id, tail_only))
+    _codex_pollers[dispatch_id] = task
+    task.add_done_callback(lambda t, d=dispatch_id: _discard_codex_poller(d, t))
+    return task
+
+
+def cancel_codex_poller(dispatch_id: int):
+    """Stop a codex poller (manual kill / kill-all / cap hard-kill / shutdown). The
+    poller also self-terminates when it detects a dead PID, but cancelling avoids a
+    redundant finalize attempt + a lingering task tailing a dead tab."""
+    t = _codex_pollers.pop(dispatch_id, None)
+    if t and not t.done():
+        t.cancel()
+
+
+def schedule(dispatch_id: int, claude_pid: int | None, cap_s: int, engine: str = "claude"):
+    """Start a wall-clock watchdog for this dispatch. `engine="codex"` selects the
+    hard-kill cap branch in _run (no claude pause-resume — codex has no resume in v1);
+    the default "claude" path is byte-for-byte unchanged."""
+    task = asyncio.create_task(_run(dispatch_id, claude_pid, cap_s, engine))
     _watchers[dispatch_id] = task
 
 
@@ -53,10 +104,32 @@ def cancel(dispatch_id: int):
         t.cancel()
 
 
-async def _run(dispatch_id: int, claude_pid: int | None, cap_s: int):
+async def _run(dispatch_id: int, claude_pid: int | None, cap_s: int, engine: str = "claude"):
     from orchestrator.lib import loop_watchdog
     try:
         await asyncio.sleep(cap_s)
+        if engine == "codex":
+            # Codex cap hit: no Stop-hook session_id and no resume in v1 (CODEX_PLAN
+            # note 5), so a cap HARD-KILLS — skip the claude pause-and-resume entirely.
+            # Write a DISTINCT outcome reason so the learning loop sees a codex cap-kill
+            # (more disruptive — the project may be left mid-edit) vs a resumable claude
+            # timeout. Cancel the in-band poller so it doesn't redundantly try to
+            # finalize the row this writes (the atomic guard would no-op it anyway).
+            log.warning("Codex dispatch %s exceeded %ss wall-clock cap — hard-killing "
+                        "(not resumable)", dispatch_id, cap_s)
+            cancel_codex_poller(dispatch_id)
+            if not claude_pid:
+                claude_pid = spawn.read_pid_now(dispatch_id)
+                if claude_pid:
+                    db.update_claude_pid(dispatch_id, claude_pid)
+            if claude_pid:
+                await spawn.kill_pid_async(claude_pid)
+            db.kill_dispatch_record(
+                dispatch_id, reason="timeout (codex cap — hard-kill, not resumable)")
+            spawn.cleanup_dispatch_files(dispatch_id)
+            loop_watchdog.clear(dispatch_id)
+            idle_notifier.clear(dispatch_id)
+            return
         log.warning("Dispatch %s exceeded %ss wall-clock cap — pausing", dispatch_id, cap_s)
         # Publish the pause intent BEFORE the SIGTERM. A graceful Claude runs
         # its Stop hook on SIGTERM, whose POST lands in /api/complete; seeing
