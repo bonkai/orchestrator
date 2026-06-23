@@ -985,48 +985,30 @@ async def send(
 
     # Optional multi-model Fusion for the rewrite brain call. The panel is a mixed
     # list of seats: Claude Code seats (local `claude` CLI, model+effort, $0, NO
-    # Anthropic API) and external cross-lab providers (key-gated). The UI sends it
-    # as JSON in `fusion_seats`; we validate each seat — Claude seats against the
-    # model/effort whitelist, provider seats against active keys — dropping
-    # anything we can't honor so a stale UI selection can never force an unusable
-    # seat. (Legacy comma `fusion_panel` is still accepted as a fallback.) An
-    # empty panel lets run_fusion_json fall back to the configured preset.
-    import json as _json
+    # Anthropic API), codex seats (C5.1: local `codex exec`, $0, NO OpenAI API), and
+    # external cross-lab providers (key-gated). The UI sends it as JSON in
+    # `fusion_seats`; _parse_fusion_panel validates each seat and drops anything we
+    # can't honor (Claude/codex models against their whitelists, providers against
+    # active keys) so a stale UI selection can never force an unusable seat. (Legacy
+    # comma `fusion_panel` is still accepted as a fallback.) An empty panel lets
+    # run_fusion_json fall back to the configured preset.
     do_fusion = fusion.lower() in ("1", "true", "yes", "on")
     active = config.active_providers()
-    panel: list = []
-    raw_seats = (fusion_seats or "").strip()
-    if raw_seats:
-        try:
-            decoded = _json.loads(raw_seats)
-        except (ValueError, TypeError):
-            decoded = []
-        for s in decoded if isinstance(decoded, list) else []:
-            if not isinstance(s, dict):
-                continue
-            # F8.4: an optional per-seat lens (a configured lens NAME or literal
-            # text) decorrelates the panel; capped + stripped, resolved seat-side
-            # by config.resolve_lens. Empty ⇒ the seat gets the prompt verbatim.
-            seat_lens = str(s.get("lens", "")).strip()[:_MAX_LENS_CHARS]
-            if s.get("type") == "claude":
-                # NB: seat_model/seat_effort — NOT the `model`/`effort` Form params,
-                # which govern the EXECUTOR. Shadowing them here silently rewrote the
-                # dispatched session's model/effort to the last Claude seat's.
-                seat_model = str(s.get("model", "")).strip()
-                seat_effort = str(s.get("effort", "")).strip()
-                if seat_model in CLAUDE_SEAT_MODELS and seat_effort in CLAUDE_SEAT_EFFORTS:
-                    seat = {"kind": "claude_cli", "model": seat_model, "effort": seat_effort}
-                    if seat_lens:
-                        seat["lens"] = seat_lens
-                    panel.append(seat)
-            elif s.get("type") == "provider":
-                name = str(s.get("name", "")).strip()
-                if name in active:
-                    # A lens turns the bare-name seat into the dict form
-                    # run_fusion_json also accepts; no lens ⇒ stays a plain name.
-                    panel.append({"name": name, "lens": seat_lens} if seat_lens else name)
-    else:
-        panel = [p for p in fusion_panel.split(",") if p in active]
+    codex_models = _codex_seat_models()
+    panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models)
+
+    # C5.1: the dispatch EXECUTOR engine (claude | codex) + its codex model —
+    # DISTINCT from the panel seats above and from the `model`/`effort` Form params
+    # (which govern the CLAUDE executor). The UI greys the codex <option> when codex
+    # is unavailable (C5.2), but that gating is cosmetic — THIS is the server gate a
+    # crafted POST must pass. A codex executor needs an EXPLICIT, whitelisted codex
+    # model; blank/unknown is rejected (no silent downgrade to a Claude id). The
+    # codex executor SPAWN is C6; _run_dispatch holds the validated, inert seam.
+    try:
+        executor_engine, executor_model = _validate_executor_engine(
+            executor_engine, executor_model, codex_models)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     # F7: enrichment mode — analyze the task with a panel and APPEND the analysis
     # to the executor prompt (separate from the rewrite). Reuses the same panel
     # selection; needs the panel to be usable (>=2 seats) or it self-skips.
@@ -1042,6 +1024,7 @@ async def send(
     task = asyncio.create_task(_send_in_background(
         project_id, task, wall_cap_s, do_rewrite, effort, model,
         do_fusion=do_fusion, panel=panel, do_enrich=do_enrich, do_verify=do_verify,
+        executor_engine=executor_engine, executor_model=executor_model,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
