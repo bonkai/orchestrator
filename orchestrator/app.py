@@ -617,6 +617,203 @@ async def _run_summarizer(dispatch_id: int):
         print(f"[orchestrator] summarizer crashed for #{dispatch_id}: {e}")
 
 
+async def _finalize_dispatch(dispatch_id: int, *, session_id: str | None,
+                             transcript_src: str | None, exit_reason: str | None,
+                             outcome: str = "completed") -> bool:
+    """The /api/complete completion CORE, extracted (C6) so BOTH the claude Stop-hook
+    path (/api/complete) and the codex in-band poller (§5 fix iii) finalize a dispatch
+    identically — codex gets the SAME atomic-complete → transcript/artifact → summarizer
+    WITHOUT the Claude hooks. Deliberately OMITS the claude-only is_pausing branch (the
+    /api/complete caller still owns that, before calling here).
+
+    Returns True iff this call WON the finalize race. The race is FOUR-way — this, the
+    cap watchdog, manual_kill/kill_all, the orphan reaper — and is settled by
+    db.complete_dispatch's atomic compare-and-set: the losers get changed=False and skip
+    the transcript/summarizer work, so there is exactly one outcome row + one summarizer.
+
+    `transcript_src` is the file copied into TRANSCRIPTS_DIR + registered as the artifact
+    + handed to the summarizer: the claude Stop-hook transcript for claude, the codex
+    `exec --json` sidecar for codex (distill_transcript learned the codex schema in C6).
+    The copy runs BEFORE spawn.cleanup_dispatch_files (which deletes the codex sidecar),
+    so the summary/artifact survive. Never raises into the caller's flow."""
+    watchdog.cancel(dispatch_id)
+    changed = db.complete_dispatch(
+        dispatch_id,
+        session_id=session_id,
+        transcript_path=transcript_src,
+        exit_reason=exit_reason,
+        outcome=outcome,
+    )
+    if not changed:
+        return False
+
+    # Now safe to copy transcript and insert artifact — we're the winner.
+    if transcript_src:
+        src = Path(transcript_src).expanduser()
+        if src.is_file():
+            dest = db.TRANSCRIPTS_DIR / f"{dispatch_id}.jsonl"
+            try:
+                shutil.copyfile(src, dest)
+                with db.conn() as c:
+                    c.execute(
+                        "INSERT OR IGNORE INTO artifacts(dispatch_id, kind, path) "
+                        "VALUES (?, 'transcript', ?)",
+                        (dispatch_id, str(dest)),
+                    )
+                    c.execute(
+                        "UPDATE dispatches SET transcript_path = ? WHERE id = ?",
+                        (str(dest), dispatch_id),
+                    )
+            except Exception as e:
+                print(f"[orchestrator] transcript copy failed: {e}")
+
+    spawn.cleanup_dispatch_files(dispatch_id)
+    # Drop loop-watchdog state — dispatch is done
+    loop_watchdog.clear(dispatch_id)
+    idle_notifier.clear(dispatch_id)
+    db.record_event(dispatch_id, "stage", {"stage": "completed",
+                                           "exit_reason": exit_reason or "stop"})
+
+    # Fire-and-forget summarizer (offloads its blocking claude call to a thread).
+    # Backgrounded + strong-ref'd so a tab disconnect / poller exit can't GC it mid-run.
+    task = asyncio.create_task(_run_summarizer(dispatch_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return True
+
+
+# ─── codex EXECUTOR in-band poller (C6 §5 fix iii) ───────────────────────────
+# codex has NO Stop/PreToolUse/PostToolUse hooks, so a dispatched codex executor loses
+# completion logging, the loop watchdog, AND the live timeline. This poller is the
+# convergence (fix iii): the SOLE finalizer + activity feed for a codex dispatch, modeled
+# on watchdog (one async task for the dispatch's whole life), NOT on run_codex_json (a sync
+# one-shot). It tails the sidecar JSONL the executor run.sh tees, records tool_use/
+# tool_result timeline events + feeds loop_watchdog from the codex tool-call fingerprint
+# (C6.0 schema), and on .done finalizes IN-PROCESS via _finalize_dispatch (never self-POSTs
+# /api/complete). watchdog tracks/cancels the task; resume_watchers_on_boot re-attaches it.
+
+_CODEX_POLL_INTERVAL_S = 0.5
+# codex_dispatch_run.sh writes the PID right after backgrounding codex; if none appears
+# within this window the tab never started its runner, so finalize as failed (the codex
+# analogue of run_claude_json's _STARTUP_GRACE_S, a touch longer for codex's startup).
+_CODEX_POLLER_STARTUP_GRACE_S = 90
+
+
+def _codex_timeline_step(dispatch_id: int, line: str, seen_items: set, completed_items: set):
+    """Translate ONE codex sidecar JSONL line into the SAME signals the claude hooks
+    produce: a `tool_use` timeline event + a loop_watchdog fingerprint on first sight of
+    a tool call (the PreToolUse analogue — mirrors /api/tool_use), and a `tool_result`
+    event on its completion (the PostToolUse analogue — mirrors /api/tool_result). Dedups
+    by codex `item.id` so a tool call counts ONCE (it emits item.started THEN
+    item.completed). A detected loop fires the SAME async kill path claude uses
+    (loop_watchdog.trigger_kill → watchdog.manual_kill, reason='loop:<tool>')."""
+    line = line.strip()
+    if not line:
+        return
+    try:
+        obj = json.loads(line)
+    except (ValueError, TypeError):
+        return
+    ev = claude_runner._codex_tool_event(obj)
+    if ev is None:
+        return
+    item_id, tool, ihash = ev["id"], ev["tool_name"], ev["input_hash"]
+    # First sighting of this tool item → tool_use timeline + loop-watchdog fingerprint
+    # + idle reset (exactly /api/tool_use, but fed from the stream instead of a hook).
+    if item_id not in seen_items:
+        seen_items.add(item_id)
+        db.record_event(dispatch_id, "tool_use",
+                        {"tool_name": tool, "input_hash": ihash, **ev["detail"]})
+        idle_notifier.reset_idle(dispatch_id)
+        if loop_watchdog.record(dispatch_id, tool, ihash):
+            db.record_event(dispatch_id, "stage", {"stage": "loop_detected", "tool": tool})
+            t = asyncio.create_task(loop_watchdog.trigger_kill(dispatch_id, (tool, ihash)))
+            _background_tasks.add(t)
+            t.add_done_callback(_background_tasks.discard)
+    # Completion of the tool call → tool_result timeline (exactly /api/tool_result).
+    if ev["phase"] == "end" and item_id not in completed_items:
+        completed_items.add(item_id)
+        db.record_event(dispatch_id, "tool_result", {"tool_name": tool, **ev["detail"]})
+
+
+async def _codex_dispatch_poller(dispatch_id: int, tail_only: bool = False):
+    """Lifetime poller for one codex EXECUTOR dispatch — the §5 in-band finalizer. Tails
+    the sidecar JSONL live (→ timeline + loop watchdog), and on .done (or a closed/killed
+    tab) finalizes via _finalize_dispatch. Runs for the dispatch's whole life as a
+    watchdog-tracked task. `tail_only=True` (boot re-attach) seeks past the already-
+    consumed prefix so a restart can't re-emit timeline events or re-trip the loop
+    watchdog on old tool calls. Never raises (a crash here would leave the dispatch with
+    no finalizer); on cancellation (kill/cap) it just exits — the killer wrote the row."""
+    jsonl = spawn.CODEX_DIR / f"{dispatch_id}.jsonl"
+    done = spawn.CODEX_DIR / f"{dispatch_id}.done"
+    offset = 0
+    buf = ""
+    seen_items: set = set()        # item.ids already fingerprinted (tool_use + loop feed)
+    completed_items: set = set()   # item.ids already tool_result'd
+    pid = None
+    started_at = time.time()
+    # Boot re-attach: skip the prefix the pre-restart poller already consumed.
+    if tail_only and jsonl.is_file():
+        try:
+            offset = jsonl.stat().st_size
+        except OSError:
+            offset = 0
+    try:
+        while True:
+            # 1. consume newly-appended JSONL (incremental; keep a partial trailing
+            #    line in `buf` until its newline arrives so we never parse half a line).
+            if jsonl.is_file():
+                try:
+                    with jsonl.open(encoding="utf-8", errors="replace") as f:
+                        f.seek(offset)
+                        chunk = f.read()
+                        offset = f.tell()
+                except OSError:
+                    chunk = ""
+                if chunk:
+                    buf += chunk
+                    while "\n" in buf:
+                        ln, buf = buf.split("\n", 1)
+                        _codex_timeline_step(dispatch_id, ln, seen_items, completed_items)
+            # 2. .done → finalize (exit code written AFTER the sidecar flushed).
+            if done.is_file():
+                try:
+                    exit_code = int((done.read_text().strip() or "1"))
+                except (ValueError, OSError):
+                    exit_code = 1
+                outcome = "completed" if exit_code == 0 else "failed"
+                exit_reason = "codex" if exit_code == 0 else f"codex exit {exit_code}"
+                await _finalize_dispatch(
+                    dispatch_id, session_id=None,
+                    transcript_src=str(jsonl) if jsonl.is_file() else None,
+                    exit_reason=exit_reason, outcome=outcome)
+                return
+            # 3. liveness: a closed/killed tab → no .done will ever arrive.
+            if pid is None:
+                pid = spawn.read_pid_now(dispatch_id)
+                if pid is None and (time.time() - started_at) > _CODEX_POLLER_STARTUP_GRACE_S:
+                    await _finalize_dispatch(
+                        dispatch_id, session_id=None, transcript_src=None,
+                        exit_reason="codex tab failed to start (no PID)", outcome="failed")
+                    return
+            elif not spawn.pid_alive(pid):
+                if done.is_file():
+                    continue  # race: .done just landed — handle on the next loop top
+                await _finalize_dispatch(
+                    dispatch_id, session_id=None,
+                    transcript_src=str(jsonl) if jsonl.is_file() else None,
+                    exit_reason="codex tab closed before completion", outcome="failed")
+                return
+            await asyncio.sleep(_CODEX_POLL_INTERVAL_S)
+    except asyncio.CancelledError:
+        # Killed (manual/kill-all/cap) cancelled us — the killer already wrote the
+        # outcome row + cleaned up. Nothing to finalize; exit quietly.
+        raise
+    except Exception as e:
+        print(f"[orchestrator] codex poller for #{dispatch_id} crashed: {e}")
+
+
 # ─── transcript view ──────────────────────────────────────────────────────
 
 # ─── fire-and-forget send (rewrite optional) ─────────────────────────────
