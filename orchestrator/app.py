@@ -63,6 +63,23 @@ def _codex_seat_models() -> set[str]:
     return models
 
 
+def _codex_seat_efforts() -> set[str]:
+    """Valid codex reasoning-effort values for the dispatch picker + /send
+    validation, SOURCED from the codex ENGINE config (CODEX_ENGINE_SEED's `efforts`
+    merged with config.json's `fusion.codex.efforts`) — like _codex_seat_models, no
+    effort literal lives in app.py (C4 import-don't-redefine).
+
+    Codex's reasoning ladder is its OWN (minimal/low/medium/high/xhigh — verified
+    against the live API), NOT claude's (low/medium/high/xhigh/max — CLAUDE_SEAT_EFFORTS),
+    so the two are deliberately separate. The empty string is NOT in this set on
+    purpose: a codex seat with effort "" omits the `-c model_reasoning_effort` override
+    and uses the model's own default — that's the picker's "default" option, always
+    valid, never validated against this whitelist."""
+    eng = config.codex_engine()
+    return {str(e).strip() for e in (eng.get("efforts") or [])
+            if isinstance(e, str) and e.strip()}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()

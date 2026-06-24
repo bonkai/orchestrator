@@ -620,8 +620,10 @@ def remove_lens(name: str) -> dict:
 
 # ── Fusion PROFILES: named, saveable panel configs (the dispatch quick-switch) ──
 # A profile bundles the EXACT panel a user wants for a kind of task — Claude seats
-# (model+effort+lens) and provider seats (name+lens) — under a chosen name, so the
-# picker can re-populate itself in one click. Merge-preserving and corruption-
+# (model+effort+lens), codex seats (model+effort+lens), and provider seats (name+lens)
+# — under a chosen name, so the picker can re-populate itself in one click. The codex
+# seats persist alongside the others so a saved profile never silently drops them.
+# Merge-preserving and corruption-
 # guarded like the lens/preset helpers (api_keys, presets, lenses all survive).
 
 def save_profile(name: str, profile: dict) -> dict:
