@@ -320,6 +320,63 @@ class TestCodexExecutorFiles(unittest.TestCase):
             self.assertFalse((pids / "9.pid").exists())
 
 
+class TestCodexDispatchHybridResume(unittest.TestCase):
+    """#246 fix: after the CAPTURED one-shot turn (which the orchestrator still finalizes
+    from the sidecar — completion row + timeline + watchdog + summary, unchanged), the
+    EXECUTOR run.sh hands the SAME tab off to an INTERACTIVE `codex resume <thread_id>`, so
+    it stays open + continuable like the claude executor's REPL instead of printing once and
+    closing. Only the follow-up turns are uncaptured, and that loss is surfaced in-tab.
+    These pin the hybrid SHAPE on the generated runner (the seed-token pinning lives in
+    tests/test_codex_config.py::TestSpawnCodexDispatchRunShPinnedToSeed)."""
+
+    SH = spawn.CODEX_DISPATCH_RUN_SH_CONTENT
+
+    def test_hands_off_to_interactive_resume_on_the_captured_thread(self):
+        # exec'd so the tab BECOMES the codex session (closing codex closes the tab, like
+        # `exec claude`); on the SAME thread captured from turn 1.
+        self.assertIn('exec codex resume "$THREAD_ID"', self.SH)
+
+    def test_captures_thread_id_from_thread_started(self):
+        self.assertIn("THREAD_ID=", self.SH)
+        self.assertIn("thread.started", self.SH)
+
+    def test_thread_id_captured_before_done_so_it_survives_cleanup(self):
+        # The poller finalizes on .done and then DELETES the sidecar (cleanup_dispatch_files),
+        # so the resume handle MUST be read into a shell var before .done is written.
+        cap = self.SH.find("THREAD_ID=")
+        done = self.SH.find('echo "$code" > "$DONE_FILE"')
+        self.assertGreater(cap, -1)
+        self.assertGreater(done, -1)
+        self.assertLess(cap, done, "thread_id must be captured before the success .done write")
+
+    def test_resume_needs_a_tty_so_it_does_not_close_stdin(self):
+        # Interactive resume needs the tab's REAL TTY — the `< /dev/null` (correct only for
+        # the non-interactive turn-1 exec) must NOT appear on the resume handoff line.
+        line = next((ln for ln in self.SH.splitlines() if "exec codex resume" in ln), "")
+        self.assertTrue(line, "interactive resume handoff line not found")
+        self.assertNotIn("< /dev/null", line)
+
+    def test_keeps_tab_open_when_no_thread_id(self):
+        # Fallback (codex errored before thread.started): drop to an interactive shell so the
+        # tab still STAYS OPEN — never silently vanish (the #246 regression being fixed).
+        self.assertIn('exec "${SHELL:-/bin/zsh}" -i', self.SH)
+
+    def test_surfaces_that_followup_turns_are_not_recorded(self):
+        # Acceptance bar: the capture loss is surfaced to the user (an in-tab notice), not
+        # silent. Keeps the honest-degradation contract the codex finalizer rides on.
+        self.assertIn("NOT recorded by the orchestrator", self.SH)
+
+    def test_turn1_capture_path_is_unchanged(self):
+        # The one-shot `codex exec … --json … < /dev/null` (the captured turn the poller
+        # tails) must remain intact — the hybrid is ADDITIVE, not a swap of the capture path.
+        self.assertIn("--json", self.SH)
+        self.assertIn("< /dev/null", self.SH)
+        cmd = next((ln for ln in self.SH.splitlines()
+                    if "codex exec " in ln and "$PROMPT" in ln), "")
+        self.assertIn("--json", cmd)
+        self.assertIn("< /dev/null", cmd)
+
+
 class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
     """§2 Q7 Plus guard: a codex dispatch is rejected (VISIBLE failed row, NEVER a
     claude fallback) once `max_concurrent_dispatches` codex dispatches are already
