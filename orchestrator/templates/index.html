@@ -305,6 +305,14 @@
         var fusionDefaultPanel = {{ fusion_default_panel | tojson }};
         var CLAUDE_MODELS = {{ claude_seat_models | tojson }};
         var CLAUDE_EFFORTS = {{ claude_seat_efforts | tojson }};
+        // Codex seats: codex's OWN model + reasoning-effort vocabulary (NOT claude's —
+        // codex = minimal/low/medium/high/xhigh, claude = low/medium/high/xhigh/max).
+        // CODEX_MODELS is the picker's whitelist (default model first); CODEX_EFFORTS is
+        // the explicit thinking-level ladder (each row prepends a "default" → "" option
+        // meaning codex's own model default). CODEX_AVAILABLE gates the add button.
+        var CODEX_MODELS = {{ codex_seat_models | tojson }};
+        var CODEX_EFFORTS = {{ codex_seat_efforts | tojson }};
+        var CODEX_AVAILABLE = {{ codex_cli_available | tojson }};
         // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
         var FUSION_LENSES = {{ fusion_lenses | tojson }};
         var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
@@ -327,8 +335,11 @@
         var FUSION_VERIFY_KEY = 'orch_fusion_verify';
         var PROVIDER_SEATS_KEY = 'orch_fusion_provider_seats';
         var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
+        var CODEX_SEATS_KEY = 'orch_fusion_codex_seats';
         var claudeSeatsEl = document.getElementById('claude-seats');
         var addClaudeSeatBtn = document.getElementById('add-claude-seat');
+        var codexSeatsEl = document.getElementById('codex-seats');
+        var addCodexSeatBtn = document.getElementById('add-codex-seat');
         var providerSeatsEl = document.getElementById('provider-seats');
         var addProviderSeatBtn = document.getElementById('add-provider-seat');
         var fusionCountEl = document.getElementById('fusion-count');
