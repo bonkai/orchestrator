@@ -1205,7 +1205,13 @@ def _build_codex_dispatch_run_sh(eng: dict) -> str:
     in C6 — bash can't import the Python seed, so we substitute at runner-write time).
     Single source of truth; pinned by tests/test_codex_config.py. Uses the EXECUTOR
     sandbox (write-capable) — NEVER the seat's read-only `sandbox` — and deliberately
-    does NOT emit the `auto_bypass_flag` (that would override -s to full-access)."""
+    does NOT emit the `auto_bypass_flag` (that would override -s to full-access).
+
+    After the captured one-shot turn (which the orchestrator finalizes from the sidecar),
+    the runner HANDS THE TAB OFF to an interactive `codex resume <thread_id>` (the #246
+    hybrid fix) so the tab stays open + continuable like the claude executor's REPL; the
+    resume subcommand + flags are interpolated from the seed too (`resume_subcmd`/
+    `resume_flags`)."""
     template = r'''#!/bin/bash
 # Orchestrator codex EXECUTOR runner — the $0 ChatGPT-subscription codex analogue of
 # run.sh (the dispatched `claude` session), execed inside a WATCHABLE iTerm2 tab.
