@@ -602,9 +602,11 @@
 
         function updateFusionCount() {
           if (!fusionCountEl) return;
-          var c = claudeSeats().length, p = providerSeats().length, total = c + p;
+          var c = claudeSeats().length, x = codexSeats().length,
+              p = providerSeats().length, total = c + x + p;
           fusionCountEl.textContent = 'panel: ' + total + ' seat' + (total === 1 ? '' : 's') +
-            ' (' + c + ' Claude · ' + p + ' cross-lab)' + (total < 2 ? ' — need ≥2' : '');
+            ' (' + c + ' Claude · ' + x + ' Codex · ' + p + ' cross-lab)' +
+            (total < 2 ? ' — need ≥2' : '');
           var anyOn = (fusionCheckbox && fusionCheckbox.checked) ||
                       (enrichCheckbox && enrichCheckbox.checked);
           fusionCountEl.style.color = (total < 2 && anyOn) ? '#f0c659' : '';
@@ -647,6 +649,15 @@
             addClaudeSeatRow('opus', 'high');
             addClaudeSeatRow('opus', 'medium');
           }
+          // Restore codex seats (saved set ONLY — DEFAULT ZERO, unlike Claude's two-seat
+          // default: codex is opt-in, so the out-of-box $0 panel and the "byte-for-byte
+          // unchanged unless opted in" contract stay intact). Each row = codex model +
+          // optional thinking-level + lens.
+          var savedCodexSeats = null;
+          try { savedCodexSeats = JSON.parse(localStorage.getItem(CODEX_SEATS_KEY)); } catch (e) {}
+          if (Array.isArray(savedCodexSeats)) {
+            savedCodexSeats.forEach(function(s) { if (s) addCodexSeatRow(s.model, s.effort, s.lens); });
+          }
           try { fusionCheckbox.checked = localStorage.getItem(FUSION_ON_KEY) === '1'; } catch (e) {}
           if (enrichCheckbox) {
             try { enrichCheckbox.checked = localStorage.getItem(FUSION_ENRICH_KEY) === '1'; } catch (e) {}
@@ -679,6 +690,14 @@
           if (addClaudeSeatBtn) {
             addClaudeSeatBtn.addEventListener('click', function() {
               addClaudeSeatRow('opus', 'high'); saveClaudeSeats();
+            });
+          }
+          // A disabled button (codex absent/logged-out) never fires this — the handler
+          // is still attached so a later available render just works. New seat = the
+          // default codex model, "default" effort (model default), no lens.
+          if (addCodexSeatBtn) {
+            addCodexSeatBtn.addEventListener('click', function() {
+              addCodexSeatRow(CODEX_MODELS[0] || '', '', ''); saveCodexSeats();
             });
           }
           if (addProviderSeatBtn) {
