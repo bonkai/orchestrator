@@ -413,6 +413,23 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
             "stage": "running", "pid": pid, "engine": "codex"})
         return dispatch_id, ""
 
+    # MIRROR of the codex branch's no-fallthrough guard (and _derive_executor's total
+    # routing): the claude executor must NEVER run a non-Claude `--model`. By here the
+    # engine is "claude" and `model` was derived/validated to "" or a known Claude id, so
+    # this is normally unreachable — it is the last line before `claude --model <model>`
+    # and refuses any other value (e.g. a codex/gpt id slipping through a future
+    # derivation regression) as a VISIBLE failed row + stage event, never a silent spawn
+    # (the dispatch #241 bug: gpt-5.5 reached `claude --model gpt-5.5`).
+    if model and model not in CLAUDE_EXECUTOR_MODELS:
+        reason = (f"refusing to run unknown model {model!r} as a Claude executor "
+                  f"(`claude --model {model}`): not a known Claude model — a codex/gpt "
+                  f"id must route to the codex executor")
+        db.mark_failed_to_spawn(dispatch_id, reason)
+        db.record_event(dispatch_id, "stage", {
+            "stage": "spawn_failed", "error": reason, "engine": "claude", "model": model})
+        spawn.cleanup_dispatch_files(dispatch_id)
+        return None, reason
+
     loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(
@@ -1030,17 +1047,38 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
 
 
 def _derive_executor(model: str, codex_models: set | None = None) -> tuple[str, str, str]:
-    """Return (engine, claude_model, codex_model) derived from one picker value.
+    """Return (engine, claude_model, executor_model) derived from one picker value.
+
+    TOTAL over the model-string space — every value lands in exactly ONE bucket, so no
+    id can slip through to the wrong executor:
+      - a codex model (the codex_engine() whitelist via _codex_seat_models) →
+        ("codex", "", model)        — runs `codex exec -m <model>`
+      - "" (the picker's "default") or a known Claude executor model
+        (CLAUDE_EXECUTOR_MODELS) → ("claude", model, "")  — runs `claude [--model <model>]`
+      - ANYTHING ELSE (a typo, a gpt id when the runtime codex set lacked it, a future
+        id) → ("invalid", "", model), which _validate_executor_engine REJECTS as a
+        visible failure — it never becomes a silent `claude --model <model>`.
+
+    This is the MIRROR of the no-downgrade rule (a codex pick never silently becomes a
+    Claude executor — see _validate_executor_engine): an unknown / codex / gpt id can
+    never silently reach `claude --model` either. The old catch-all
+    `return "claude", model, ""` did exactly that — e.g. gpt-5.5 when the runtime codex
+    set lacked it flowed to `claude --model gpt-5.5` (dispatch #241). The offending id is
+    returned in the 3rd slot (the value _validate_executor_engine inspects) so the
+    rejection can name it.
 
     The codex whitelist comes only from config.codex_engine() through
-    _codex_seat_models(); no model ids are defined here. A codex selection clears
-    the Claude model so it cannot reach `claude --model`.
+    _codex_seat_models(); no codex ids are defined here. The Claude whitelist is the
+    executor picker's Anthropic options (CLAUDE_EXECUTOR_MODELS). A codex/invalid result
+    clears the Claude model so a non-Claude id can never ride `claude --model`.
     """
     model = (model or "").strip()
     codex_models = _codex_seat_models() if codex_models is None else codex_models
     if model in codex_models:
         return "codex", "", model
-    return "claude", model, ""
+    if model == "" or model in CLAUDE_EXECUTOR_MODELS:
+        return "claude", model, ""
+    return "invalid", "", model
 
 
 def _validate_executor_engine(engine: str, model: str, codex_models: set,
@@ -1057,6 +1095,15 @@ def _validate_executor_engine(engine: str, model: str, codex_models: set,
     (dispatch #3). engine="claude" (the default) ignores `model` and returns
     ("claude", ""), so the no-codex path is byte-for-byte unchanged."""
     engine = (engine or "claude").strip() or "claude"
+    # The MIRROR of the codex no-downgrade guard below: _derive_executor marks a model
+    # that is neither a known Claude id nor a codex id as engine="invalid" (carrying the
+    # offending id in `model`). Reject it with a clear, id-naming message rather than ever
+    # letting it ride `claude --model` (the dispatch #241 bug).
+    if engine == "invalid":
+        raise ValueError(
+            f"unknown model {model!r}: not a known Claude model "
+            f"(opus/sonnet/haiku/fable) or codex model — refusing to run it as "
+            f"`claude --model {model}` (a codex/gpt id must route to the codex executor)")
     if engine not in ("claude", "codex"):
         raise ValueError(f"unknown executor engine: {engine!r}")
     if engine == "claude":
