@@ -70,6 +70,12 @@ class TestCodexEngineSeedMerge(_IsolatedConfig):
         self.assertEqual(ce["auth_probe"], ["codex", "login", "status"])
         self.assertEqual(ce["auto_bypass_flag"],
                          "--dangerously-bypass-approvals-and-sandbox")
+        # C6: the full valid ChatGPT-account model set (live-verified 2026-06-23) + the
+        # executor sandbox + the concurrency-cap knob.
+        self.assertEqual(ce["models"], ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
+        self.assertIn(ce["model"], ce["models"])       # the default is one of the valid ids
+        self.assertEqual(ce["executor_sandbox"], "workspace-write")
+        self.assertEqual(ce["max_concurrent_dispatches"], 2)
         # default seat panel for the C5 picker: >=2 codex seats.
         self.assertGreaterEqual(len(ce["seats"]), 2)
         self.assertTrue(all(s.get("kind") == "codex_cli" for s in ce["seats"]))

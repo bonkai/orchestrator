@@ -101,12 +101,14 @@ class TestViewCtxFusion(unittest.TestCase):
             self.assertIn(key, ctx)
 
     def test_view_ctx_exposes_codex_availability_and_models(self):
-        # C5.2: the dispatch-form engine picker reads codex_cli_available to grey the
-        # codex <option>, and codex_seat_models to populate the codex model select.
+        # C5.2/C6: the engine picker reads codex_cli_available to grey the codex <option>,
+        # and codex_seat_models to populate the codex model select. C6 exposes the FULL
+        # valid set (default first so engine=codex defaults to gpt-5.5, then the rest
+        # sorted) — all codex ids, never a Claude id.
         off = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=False)
         self.assertFalse(off["codex_cli_available"])
-        # Sourced from the codex SEED — a codex id, never a Claude id.
-        self.assertEqual(off["codex_seat_models"], ["gpt-5.5"])
+        self.assertEqual(off["codex_seat_models"], ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
+        self.assertEqual(off["codex_seat_models"][0], "gpt-5.5")   # DEFAULT model first
         self.assertNotIn("opus", off["codex_seat_models"])
         on = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=True)
         self.assertTrue(on["codex_cli_available"])
