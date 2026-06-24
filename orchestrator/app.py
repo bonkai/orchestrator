@@ -182,6 +182,12 @@ def _view_ctx() -> dict:
     codex_default = str(config.codex_engine().get("model", "")).strip()
     codex_models_ordered = (([codex_default] if codex_default in codex_models else [])
                             + sorted(codex_models - {codex_default}))
+    # Codex reasoning-effort ladder for the codex-seat picker's thinking-level select,
+    # in the seed's ladder order (NOT sorted — minimal→xhigh is meaningful). The JS
+    # prepends a "default" option (effort "" ⇒ the model's own default); these are the
+    # explicit non-default rungs. Codex's ladder ≠ claude's, hence a separate list.
+    codex_efforts_ordered = [str(e).strip() for e in config.codex_engine().get("efforts", [])
+                             if isinstance(e, str) and e.strip()]
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -192,6 +198,7 @@ def _view_ctx() -> dict:
         "claude_cli_available": config.claude_cli_available(),
         "codex_cli_available": codex_available,
         "codex_seat_models": codex_models_ordered,
+        "codex_seat_efforts": codex_efforts_ordered,
         "claude_seat_models": CLAUDE_SEAT_MODELS,
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
