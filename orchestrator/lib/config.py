@@ -157,6 +157,19 @@ CODEX_ENGINE_SEED = {
     # `model` above must be one of these; override the whole list via `fusion.codex.models`.
     "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
     "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
+    # The selectable reasoning-effort ladder offered by the Fusion codex-seat picker
+    # AND the /send validation whitelist (app._codex_seat_efforts unions these). These
+    # are codex's OWN values, NOT claude's (claude = low/medium/high/xhigh/max): the
+    # live API (codex-cli 0.141.0) rejects an unknown value with a 400 listing the
+    # supported set — verified 2026-06-24: 'none','minimal','low','medium','high','xhigh'.
+    # We offer the meaningful ladder and OMIT 'none' (it disables reasoning — a footgun
+    # for a perspective seat; add it back per-machine via `fusion.codex.efforts` if
+    # wanted). The picker also offers a "default" option that maps to the empty string
+    # (effort=""), which means "no -c override → the model's own default" and is ALWAYS
+    # valid (it is deliberately NOT in this list — an empty effort is omitted, not
+    # validated against it). Codex churns these, so re-verify on upgrade; override the
+    # whole ladder via config.json `fusion.codex.efforts`.
+    "efforts": ["minimal", "low", "medium", "high", "xhigh"],
     "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
     "executor_sandbox": "workspace-write",  # `-s <mode>` for the C6 EXECUTOR — write-capable but CONFINED to the project.
