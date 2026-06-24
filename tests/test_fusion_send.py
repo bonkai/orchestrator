@@ -340,10 +340,12 @@ class TestParseFusionPanelCodexSeat(unittest.TestCase):
 
     def test_codex_efforts_defaults_to_seed_when_omitted(self):
         # Mirrors _derive_executor: when codex_efforts isn't passed, it falls back to
-        # _codex_seat_efforts() (the seed). "high" is in the real seed ladder → carried.
-        panel = app_module._parse_fusion_panel(
-            '[{"type":"codex","model":"gpt-5.5","effort":"high"}]', "", self.ACTIVE,
-            self.CODEX)
+        # _codex_seat_efforts() (the seed). Patched so it doesn't read real config.json.
+        with mock.patch.object(app_module.config, "codex_engine",
+                               return_value={"efforts": ["minimal", "high"]}):
+            panel = app_module._parse_fusion_panel(
+                '[{"type":"codex","model":"gpt-5.5","effort":"high"}]', "", self.ACTIVE,
+                self.CODEX)
         self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5", "effort": "high"}])
 
     def test_model_less_codex_seat_is_dropped(self):
