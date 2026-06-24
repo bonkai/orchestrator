@@ -171,6 +171,19 @@ CODEX_ENGINE_SEED = {
     # whole ladder via config.json `fusion.codex.efforts`.
     "efforts": ["minimal", "low", "medium", "high", "xhigh"],
     "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
+    # C6 HYBRID executor (the #246 fix — mirrors the claude REPL's stay-open, continuable
+    # tab): after the CAPTURED one-shot `exec` turn the orchestrator finalizes from the
+    # sidecar, the SAME iTerm tab hands off to an INTERACTIVE `codex resume <thread_id>` so
+    # the user can read the answer, keep the conversation going (full context — verified),
+    # and close the tab manually. The dispatch is already 'completed' by then (PID file +
+    # wall-clock cap + poller all cleared at finalize), so this interactive phase is
+    # UNTRACKED — it holds no concurrency slot, can't be cap-killed, and its follow-up turns
+    # are NOT recorded (exactly a claude dispatch's post-Stop-hook state). `resume_flags`
+    # (`--include-non-interactive`) lets the interactive resume pick up the exec-CREATED
+    # (non-interactive) session by its explicit thread id. 0.141.0-pinned; both are
+    # interpolated into spawn.codex_dispatch_run.sh and pinned by tests/test_codex_config.py.
+    "resume_subcmd": "resume",
+    "resume_flags": "--include-non-interactive",
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
     "executor_sandbox": "workspace-write",  # `-s <mode>` for the C6 EXECUTOR — write-capable but CONFINED to the project.
                                      # C6.0 (2026-06-23) verified `-s workspace-write` ALONE on codex-cli 0.141.0 is
