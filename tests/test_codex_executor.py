@@ -394,5 +394,132 @@ class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
         spawn_cx.assert_not_called()
 
 
+# ─────────────── executor routing: a non-Claude id NEVER reaches `claude --model` ──
+
+class TestExecutorRoutingNonClaude(unittest.TestCase):
+    """The app.py:~1010 convention MIRROR — "a codex executor NEVER falls back to a
+    Claude id" implies its inverse: a non-Claude / unknown id must NEVER silently reach
+    `claude --model`. _derive_executor is TOTAL: a codex id → codex, "" or a known Claude
+    id → claude, ANYTHING ELSE → 'invalid' (rejected by _validate_executor_engine).
+    Regression for the gpt-5.5 + "skip rewrite & send" bug (dispatch #241), where a model
+    absent from the runtime codex set fell through the old catch-all `return "claude",
+    model, ""` to `claude --model gpt-5.5`. Pure/offline — codex_models passed
+    explicitly, so no config.json read."""
+
+    def test_unknown_gpt_id_never_derives_claude_carrying_it(self):
+        # THE bug: the runtime codex set lacked gpt-5.5 (stale process / empty set), so
+        # the old catch-all returned ("claude","gpt-5.5","") → `claude --model gpt-5.5`.
+        engine, claude_model, executor_model = app_module._derive_executor(
+            "gpt-5.5", codex_models=set())
+        self.assertNotEqual(engine, "claude")            # never the claude engine...
+        self.assertNotEqual(claude_model, "gpt-5.5")     # ...carrying the non-Claude id
+        self.assertEqual(claude_model, "")               # nothing rides the `claude --model` slot
+        self.assertEqual(engine, "invalid")              # it is explicitly rejected
+
+    def test_unknown_ids_are_the_whole_class_not_just_gpt55(self):
+        # Typos, future ids, retired/ChatGPT-rejected codex ids — every unknown id, not
+        # just gpt-5.5, must be invalid (codex set has only gpt-5.5 here).
+        for bad in ("gpt-6", "o3", "claude-opus-4-8", "opusx", "gpt-5.5-mini", "gpt-5-codex"):
+            engine, claude_model, _ = app_module._derive_executor(bad, codex_models={"gpt-5.5"})
+            self.assertEqual(engine, "invalid", f"{bad!r} should be invalid")
+            self.assertEqual(claude_model, "", f"{bad!r} must not ride `claude --model`")
+
+    def test_empty_model_stays_claude_default(self):
+        # "" (the picker's "default") and whitespace-only both → claude, no --model flag.
+        self.assertEqual(app_module._derive_executor("", codex_models={"gpt-5.5"}),
+                         ("claude", "", ""))
+        self.assertEqual(app_module._derive_executor("   ", codex_models={"gpt-5.5"}),
+                         ("claude", "", ""))
+
+    def test_known_claude_executor_models_stay_claude(self):
+        # Every Anthropic option the executor picker offers — INCLUDING fable, which is
+        # absent from CLAUDE_SEAT_MODELS; gating on the seat list would falsely reject a
+        # legitimate fable dispatch.
+        for m in app_module.CLAUDE_EXECUTOR_MODELS:
+            self.assertEqual(app_module._derive_executor(m, codex_models={"gpt-5.5"}),
+                             ("claude", m, ""))
+        self.assertIn("fable", app_module.CLAUDE_EXECUTOR_MODELS)  # the fable guard
+
+    def test_codex_model_routes_to_codex(self):
+        # When the set DOES carry it, gpt-5.5 routes to codex (the codex-tab arm of the
+        # acceptance OR) — and the Claude model slot is cleared.
+        self.assertEqual(app_module._derive_executor("gpt-5.5", codex_models={"gpt-5.5"}),
+                         ("codex", "", "gpt-5.5"))
+
+    def test_validate_rejects_invalid_engine_naming_the_model(self):
+        # The symmetric half: derive marks it 'invalid'; validate REJECTS it (never a
+        # silent claude), and the message names the offending id so the failure is clear.
+        with self.assertRaises(ValueError) as cm:
+            app_module._validate_executor_engine("invalid", "gpt-5.5", {"gpt-5.5"},
+                                                 codex_available=True)
+        self.assertIn("gpt-5.5", str(cm.exception))
+
+    def test_shared_seam_rejects_unknown_model_end_to_end(self):
+        # The EXACT shared derive→validate seam both /send and _run_dispatch use, with the
+        # bug's input (unknown id + empty codex set): it must raise, never yield a claude
+        # engine carrying the id. codex_available=True proves the rejection is independent
+        # of codex login state (it's the id that's unknown, not codex that's down).
+        engine, _claude, executor_model = app_module._derive_executor("gpt-5.5", codex_models=set())
+        with self.assertRaises(ValueError):
+            app_module._validate_executor_engine(engine, executor_model, set(),
+                                                 codex_available=True)
+
+
+class TestClaudeSpawnGuard(unittest.IsolatedAsyncioTestCase):
+    """Last-line backstop in _run_dispatch (the literal mirror of the codex branch's
+    no-fallthrough guard): even if _derive_executor REGRESSES to the old catch-all and
+    hands the claude branch a non-Claude id, the dispatch must refuse `claude --model
+    <id>` — a VISIBLE failed row (mark_failed_to_spawn + stage event), NEVER spawn_iterm2
+    (the dispatch #241 bug) and NEVER the codex spawn. All seams mocked — offline."""
+
+    def _patches(self):
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": str(REPO)}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        es.enter_context(mock.patch.object(app_module.db, "create_dispatch", return_value=42))
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.db, "mark_started"))
+        es.enter_context(mock.patch.object(app_module.db, "touch_project"))
+        es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        es.enter_context(mock.patch.object(app_module.spawn, "read_claude_pid", return_value=4321))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule"))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_cli_available", return_value=True))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_engine",
+            return_value={"model": "gpt-5.5", "max_concurrent_dispatches": 0}))
+        es.enter_context(mock.patch.object(app_module.db, "running_dispatches", return_value=[]))
+        mfs = es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
+        spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
+        spawn_cx = es.enter_context(mock.patch.object(app_module.spawn, "spawn_codex_dispatch"))
+        return es, mfs, spawn_it, spawn_cx
+
+    async def test_regressed_derivation_cannot_spawn_claude_model(self):
+        es, mfs, spawn_it, spawn_cx = self._patches()
+        # Simulate the OLD buggy catch-all: claude engine carrying a non-Claude id.
+        es.enter_context(mock.patch.object(
+            app_module, "_derive_executor", return_value=("claude", "gpt-5.5", "")))
+        with es:
+            did, err = await app_module._run_dispatch(1, "t", 600, "max", "gpt-5.5")
+        self.assertIsNone(did)
+        self.assertIn("gpt-5.5", err)
+        spawn_it.assert_not_called()      # NEVER `claude --model gpt-5.5`
+        spawn_cx.assert_not_called()      # and never the codex spawn either
+        mfs.assert_called_once()          # visible failed row
+
+    async def test_claude_default_still_reaches_spawn(self):
+        # The guard must NOT fire for the normal claude default (model=""): it short-
+        # circuits on `model and ...`, so the real claude path is byte-for-byte unchanged.
+        es, mfs, spawn_it, spawn_cx = self._patches()
+        spawn_it.side_effect = RuntimeError("boom")   # short-circuit the success tail
+        with es:
+            did, err = await app_module._run_dispatch(1, "t", 600, "max", "")
+        spawn_it.assert_called_once()     # claude path reached its spawn
+        spawn_cx.assert_not_called()
+        self.assertIn("spawn failed", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
