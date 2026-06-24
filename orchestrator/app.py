@@ -29,6 +29,15 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # are allowed. Efforts are the `claude --effort` choices (low…max).
 CLAUDE_SEAT_MODELS = ["opus", "sonnet", "haiku"]
 CLAUDE_SEAT_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# The Anthropic models the dispatch EXECUTOR picker offers (templates/index.html's
+# "Anthropic" <optgroup>) — i.e. the only non-empty values valid after `claude --model`.
+# DISTINCT from CLAUDE_SEAT_MODELS (the Fusion-panel seats): the executor picker also
+# offers `fable`, which the Fusion panel does not, so a strict Claude allowlist MUST use
+# THIS list — using CLAUDE_SEAT_MODELS would falsely reject a legitimate `fable` dispatch.
+# "" (the picker's "default" = no --model flag) is always valid and handled separately.
+# _derive_executor uses this to stay TOTAL: a value that is neither here, "", nor a codex
+# id is rejected, never sent to `claude --model`. Keep in sync with index.html's options.
+CLAUDE_EXECUTOR_MODELS = ["fable", "opus", "sonnet", "haiku"]
 # F8.4: ceiling on a per-seat lens string accepted from /send (a configured lens
 # name is short; a literal lens is a sentence or two). Bounds a crafted request.
 _MAX_LENS_CHARS = 2000
