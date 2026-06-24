@@ -219,10 +219,12 @@ def load_config() -> dict:
 
 def _normalize_profile(prof: dict) -> dict:
     """Coerce a saved Fusion PROFILE to the canonical shape
-    {"claude_seats": [{model, effort, lens}], "provider_seats": [{name, lens}]},
-    dropping malformed seats and unknown keys. Pure / no IO — used on BOTH the
-    read path (fusion_config, so a hand-edited config.json can't break the picker)
-    and the write path (save_profile, so what lands on disk is always clean)."""
+    {"claude_seats": [{model, effort, lens}], "codex_seats": [{model, effort, lens}],
+    "provider_seats": [{name, lens}]}, dropping malformed seats and unknown keys.
+    Pure / no IO — used on BOTH the read path (fusion_config, so a hand-edited
+    config.json can't break the picker) and the write path (save_profile, so what
+    lands on disk is always clean). A profile saved before codex seats existed simply
+    has no `codex_seats` key → an empty list (backward-compatible)."""
     def s(v) -> str:
         return str(v).strip() if v is not None else ""
     prof = prof if isinstance(prof, dict) else {}
@@ -232,11 +234,20 @@ def _normalize_profile(prof: dict) -> dict:
             claude.append({"model": s(seat.get("model")),
                            "effort": s(seat.get("effort")) or "high",
                            "lens": s(seat.get("lens"))})
+    codex = []
+    for seat in prof.get("codex_seats") or []:
+        if isinstance(seat, dict) and s(seat.get("model")):
+            # Codex effort is OPTIONAL — "" means the model's own reasoning default
+            # (NOT defaulted to "high" the way a Claude seat is). We only coerce shape
+            # here; the picker/_parse_fusion_panel validate the id + effort whitelist.
+            codex.append({"model": s(seat.get("model")),
+                          "effort": s(seat.get("effort")),
+                          "lens": s(seat.get("lens"))})
     providers = []
     for seat in prof.get("provider_seats") or []:
         if isinstance(seat, dict) and s(seat.get("name")):
             providers.append({"name": s(seat.get("name")), "lens": s(seat.get("lens"))})
-    return {"claude_seats": claude, "provider_seats": providers}
+    return {"claude_seats": claude, "codex_seats": codex, "provider_seats": providers}
 
 
 def fusion_config() -> dict:
@@ -328,8 +339,8 @@ def codex_engine() -> dict:
 
 
 def fusion_profiles() -> dict:
-    """The saved Fusion PROFILES (name → {claude_seats, provider_seats}) — named,
-    full panel configs the dispatch picker saves and re-applies. Pure user data
+    """The saved Fusion PROFILES (name → {claude_seats, codex_seats, provider_seats})
+    — named, full panel configs the dispatch picker saves and re-applies. Pure user data
     read from config.json's fusion.profiles (→ {} when absent/garbage); unlike
     presets/lenses there are no built-in defaults, so this is a plain read."""
     return fusion_config()["profiles"]
@@ -615,17 +626,18 @@ def remove_lens(name: str) -> dict:
 
 def save_profile(name: str, profile: dict) -> dict:
     """Add or edit one saved Fusion profile (fusion.profiles). The profile is
-    normalized to {claude_seats:[{model,effort,lens}], provider_seats:[{name,lens}]}
-    before storing, so junk can't land on disk. A blank name, a non-dict profile,
-    or a profile with NO valid seats raises ConfigWriteError. Returns the new
-    fusion_config(). Raises ConfigWriteError on a corrupt file (never clobbers it)."""
+    normalized to {claude_seats:[{model,effort,lens}], codex_seats:[{model,effort,lens}],
+    provider_seats:[{name,lens}]} before storing, so junk can't land on disk. A blank
+    name, a non-dict profile, or a profile with NO valid seats (of any kind) raises
+    ConfigWriteError. Returns the new fusion_config(). Raises ConfigWriteError on a
+    corrupt file (never clobbers it)."""
     name = (name or "").strip()
     if not name:
         raise ConfigWriteError("profile name is required")
     if not isinstance(profile, dict):
         raise ConfigWriteError("profile must be an object")
     clean = _normalize_profile(profile)
-    if not clean["claude_seats"] and not clean["provider_seats"]:
+    if not (clean["claude_seats"] or clean["codex_seats"] or clean["provider_seats"]):
         raise ConfigWriteError("profile has no seats")
     cfg = _read_config_for_write()
     cfg.setdefault("fusion", {}).setdefault("profiles", {})[name] = clean
