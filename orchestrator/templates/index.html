@@ -72,12 +72,21 @@
 
         <div class="dispatch-controls">
           <label>wall-cap (s, ≤6h): <input type="number" name="wall_cap_s" value="14400" min="60" max="21600" title="wall-clock cap in seconds — default 4h (14400), max 6h (21600). On timeout the dispatch is paused (resumable), not killed."></label>
-          <label>effort:
+          <label title="Pick the reasoning effort for whichever engine your model uses. Claude and Codex have different ladders (Claude: low–max; Codex: minimal–xhigh) — a value that doesn't fit the chosen engine safely falls back to that engine's default, so nothing breaks.">effort:
             <select name="effort">
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
-              <option value="max" selected>max</option>
+              <optgroup label="Claude (low–max)">
+                {% for e in claude_seat_efforts %}
+                <option value="{{ e }}"{% if e == 'max' %} selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+              </optgroup>
+              {% if codex_seat_efforts %}
+              <optgroup label="Codex (minimal–xhigh)">
+                <option value="default">default (model's own)</option>
+                {% for e in codex_seat_efforts %}
+                <option value="{{ e }}">{{ e }}</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
             </select>
           </label>
           <label>model:
