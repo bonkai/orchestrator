@@ -322,13 +322,20 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
             codex_available=config.codex_cli_available())
     except ValueError as e:
         return None, str(e)
-    # Effort is a Claude-only flag. Codex uses its own model default, so never
-    # forward xhigh/max (or any other Claude effort) into `-c
-    # model_reasoning_effort`.
+    # Effort is engine-specific and the two vocabularies differ, so an out-of-set pick
+    # falls back to THAT engine's default — a cross-engine selection never errors:
+    #   - codex: its OWN ladder (minimal/low/medium/high/xhigh, _codex_seat_efforts).
+    #     Anything else — claude's "max", the picker's "default", "" — falls back to ""
+    #     = the model's own default (no `-c model_reasoning_effort` override). Forwarded
+    #     to the codex executor below.
+    #   - claude: low/medium/high/xhigh/max (CLAUDE_SEAT_EFFORTS); else → "max".
+    # (The dropdown offers BOTH ladders grouped by engine — see templates/index.html —
+    # so the user picks per task; this is the server-side safety net for a mismatch.)
     effort = (effort or "").strip()
     if executor_engine == "codex":
-        effort = ""
-    elif effort not in ("medium", "high", "xhigh", "max"):
+        if effort not in _codex_seat_efforts():
+            effort = ""
+    elif effort not in CLAUDE_SEAT_EFFORTS:
         effort = "max"
 
     # Pick up any staged attachments (drag-drop), move them to a dispatch-
