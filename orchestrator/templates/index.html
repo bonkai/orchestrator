@@ -449,6 +449,95 @@
           updateFusionCount();
         }
 
+        // -- Codex seats: model + thinking-level (effort) + optional lens; duplicates
+        // allowed. The $0 codex twin of the Claude-seat rows (local `codex exec` on the
+        // ChatGPT subscription, NO OpenAI API). DIFFERENCES from a Claude seat: codex's
+        // OWN model + effort vocabulary, effort defaults to "default" ("" ⇒ the model's
+        // own reasoning default — NOT an injected 'high'), and DEFAULT ZERO seats, so the
+        // out-of-box panel stays the two-Opus $0 default and codex stays opt-in.
+        function makeCodexEffortSelect(val) {
+          // Like makeSeatSelect, but the FIRST option is "default" → "" (codex's own
+          // model default — no -c override). A blank/unknown saved val selects it.
+          var sel = document.createElement('select');
+          sel.className = 'codex-seat-effort';
+          sel.style.fontSize = '11px';
+          var def = document.createElement('option');
+          def.value = ''; def.textContent = 'default';
+          def.title = 'codex uses the model’s own reasoning default (no -c override)';
+          sel.appendChild(def);
+          CODEX_EFFORTS.forEach(function(e) {
+            var op = document.createElement('option');
+            op.value = e; op.textContent = e;
+            if (e === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          return sel;
+        }
+        // A codex-namespaced lens dropdown (class 'codex-seat-lens' so codexSeats()
+        // never collects a Claude/provider row's lens). Mirrors makeLensSelect /
+        // makeProviderLensSelect.
+        function makeCodexLensSelect(val) {
+          var sel = document.createElement('select');
+          sel.className = 'codex-seat-lens';
+          sel.style.fontSize = '10px';
+          var none = document.createElement('option');
+          none.value = ''; none.textContent = 'no lens';
+          none.title = 'no lens — this seat answers the prompt verbatim';
+          sel.appendChild(none);
+          LENS_NAMES.forEach(function(name) {
+            var op = document.createElement('option');
+            op.value = name; op.textContent = name;
+            op.title = LENS_TEXT[name] || '';
+            if (name === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          setLensTitle(sel);
+          sel.addEventListener('change', function() { setLensTitle(sel); });
+          return sel;
+        }
+        function addCodexSeatRow(model, effort, lens) {
+          if (!codexSeatsEl) return;
+          var row = document.createElement('div');
+          row.className = 'codex-seat-row';
+          row.style.cssText = 'display:flex; align-items:center; gap:0.35rem; padding:2px 0; font-size:12px;';
+          var mSel = makeSeatSelect(CODEX_MODELS, model || (CODEX_MODELS[0] || ''), 'codex-seat-model');
+          var eSel = makeCodexEffortSelect(effort || '');
+          var rm = document.createElement('button');
+          rm.type = 'button'; rm.className = 'link codex-seat-rm';
+          rm.textContent = '×'; rm.title = 'remove this seat';
+          rm.style.cssText = 'margin-left:0.25rem; padding:0 6px;';
+          rm.addEventListener('click', function() { row.remove(); saveCodexSeats(); });
+          mSel.addEventListener('change', saveCodexSeats);
+          eSel.addEventListener('change', saveCodexSeats);
+          row.appendChild(document.createTextNode('codex '));
+          row.appendChild(mSel);
+          row.appendChild(document.createTextNode(' · effort '));
+          row.appendChild(eSel);
+          if (LENS_NAMES.length) {
+            var lSel = makeCodexLensSelect(lens || '');
+            lSel.addEventListener('change', saveCodexSeats);
+            row.appendChild(document.createTextNode(' · lens '));
+            row.appendChild(lSel);
+          }
+          row.appendChild(rm);
+          codexSeatsEl.appendChild(row);
+        }
+        function codexSeats() {
+          if (!codexSeatsEl) return [];
+          return Array.prototype.slice.call(
+            codexSeatsEl.querySelectorAll('.codex-seat-row')
+          ).map(function(r) {
+            var lensEl = r.querySelector('.codex-seat-lens');
+            return { model: r.querySelector('.codex-seat-model').value,
+                     effort: r.querySelector('.codex-seat-effort').value,
+                     lens: lensEl ? lensEl.value : '' };
+          });
+        }
+        function saveCodexSeats() {
+          try { localStorage.setItem(CODEX_SEATS_KEY, JSON.stringify(codexSeats())); } catch (e) {}
+          updateFusionCount();
+        }
+
         // -- Cross-lab provider seats: provider + optional lens; duplicates allowed
         // (F12). Same add/remove/persist shape as Claude seats, so the panel can
         // hold e.g. 3× glm, each through a different lens.
