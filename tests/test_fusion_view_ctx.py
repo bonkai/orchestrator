@@ -41,10 +41,12 @@ FCFG = {
     "presets": {"budget": ["deepseek", "xai", "gemini"]},
 }
 
-# C5.2: _view_ctx also surfaces codex availability + the codex model list (sourced
-# from the codex ENGINE config). Stub config.codex_engine so _codex_seat_models()
-# doesn't read the real ~/.orchestrator/config.json; the single seed model suffices.
+# C5.2 / C6: _view_ctx also surfaces codex availability + the codex model list (the
+# default model + the full valid-model set + the seat-panel models, sourced from the
+# codex ENGINE config). Stub config.codex_engine so _codex_seat_models() doesn't read
+# the real ~/.orchestrator/config.json.
 CODEX_ENGINE = {"model": "gpt-5.5",
+                "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
                 "seats": [{"kind": "codex_cli", "model": "gpt-5.5"}]}
 
 
