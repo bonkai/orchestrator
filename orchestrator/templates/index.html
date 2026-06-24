@@ -735,17 +735,20 @@
             var p = PROFILES[name];
             if (!p) return;
             claudeSeatsEl.innerHTML = '';
+            if (codexSeatsEl) codexSeatsEl.innerHTML = '';
             providerSeatsEl.innerHTML = '';
             (p.claude_seats || []).forEach(function(s) { addClaudeSeatRow(s.model, s.effort, s.lens); });
+            (p.codex_seats || []).forEach(function(s) { addCodexSeatRow(s.model, s.effort, s.lens); });
             (p.provider_seats || []).forEach(function(s) {
               if (isActiveProvider(s.name)) addProviderSeatRow(s.name, s.lens);
             });
-            saveClaudeSeats(); saveProviderSeats();
+            saveClaudeSeats(); saveCodexSeats(); saveProviderSeats();
             flashStatus('applied profile “' + name + '”');
           }
 
           function profilePayload() {
-            return { claude_seats: claudeSeats(), provider_seats: providerSeats() };
+            return { claude_seats: claudeSeats(), codex_seats: codexSeats(),
+                     provider_seats: providerSeats() };
           }
 
           // POST a form-encoded body; on success refresh PROFILES from the response.
@@ -774,7 +777,7 @@
           var pSave = document.getElementById('profile-save');
           if (pSave) pSave.addEventListener('click', function() {
             var seats = profilePayload();
-            if (!seats.claude_seats.length && !seats.provider_seats.length) {
+            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.provider_seats.length) {
               flashStatus('add at least one seat before saving', true); return;
             }
             var name = (window.prompt('Save current panel as profile name:') || '').trim();
@@ -787,7 +790,7 @@
             var name = profileSelect ? profileSelect.value : '';
             if (!name) { flashStatus('no profile selected', true); return; }
             var seats = profilePayload();
-            if (!seats.claude_seats.length && !seats.provider_seats.length) {
+            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.provider_seats.length) {
               flashStatus('add at least one seat before updating', true); return;
             }
             postProfile('/fusion/profile', { name: name, profile: JSON.stringify(seats) },
