@@ -47,6 +47,7 @@ FCFG = {
 # the real ~/.orchestrator/config.json.
 CODEX_ENGINE = {"model": "gpt-5.5",
                 "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+                "efforts": ["minimal", "low", "medium", "high", "xhigh"],
                 "seats": [{"kind": "codex_cli", "model": "gpt-5.5"}]}
 
 
@@ -97,7 +98,7 @@ class TestViewCtxFusion(unittest.TestCase):
         # The template/JS reference these unconditionally; guarantee they exist.
         ctx = self._ctx({})
         for key in ("fusion_providers", "fusion_available", "fusion_default_panel",
-                    "codex_cli_available", "codex_seat_models"):
+                    "codex_cli_available", "codex_seat_models", "codex_seat_efforts"):
             self.assertIn(key, ctx)
 
     def test_view_ctx_exposes_codex_availability_and_models(self):
@@ -110,6 +111,11 @@ class TestViewCtxFusion(unittest.TestCase):
         self.assertEqual(off["codex_seat_models"], ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
         self.assertEqual(off["codex_seat_models"][0], "gpt-5.5")   # DEFAULT model first
         self.assertNotIn("opus", off["codex_seat_models"])
+        # The codex-seat picker's thinking-level ladder, in SEED order (not sorted —
+        # minimal→xhigh is meaningful), and codex's OWN vocabulary (no claude "max").
+        self.assertEqual(off["codex_seat_efforts"],
+                         ["minimal", "low", "medium", "high", "xhigh"])
+        self.assertNotIn("max", off["codex_seat_efforts"])
         on = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=True)
         self.assertTrue(on["codex_cli_available"])
 
