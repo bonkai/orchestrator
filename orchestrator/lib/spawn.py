@@ -785,6 +785,7 @@ def cleanup_dispatch_files(dispatch_id: int):
         # summary/artifact survive this delete (a no-op for a claude dispatch).
         CODEX_DIR / f"{dispatch_id}.prompt",
         CODEX_DIR / f"{dispatch_id}.model",
+        CODEX_DIR / f"{dispatch_id}.effort",
         CODEX_DIR / f"{dispatch_id}.jsonl",
         CODEX_DIR / f"{dispatch_id}.done",
         CODEX_DIR / f"{dispatch_id}.fifo",
@@ -1366,7 +1367,8 @@ def is_codex_dispatch(dispatch_id: int) -> bool:
     return (CODEX_DIR / f"{dispatch_id}.prompt").exists()
 
 
-def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: str = "") -> None:
+def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: str = "",
+                         effort: str = "") -> None:
     """Open a new iTerm2 tab and start the codex EXECUTOR for this dispatch — the
     $0 codex twin of spawn_iterm2. Writes the task + model to int-keyed CODEX_DIR
     sidecars (the run.sh reads them; avoids shell-quoting the prompt into AppleScript),
@@ -1384,8 +1386,13 @@ def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: 
     ensure_codex_dispatch_runner()
     prompt_file = CODEX_DIR / f"{dispatch_id}.prompt"
     model_file = CODEX_DIR / f"{dispatch_id}.model"
+    effort_file = CODEX_DIR / f"{dispatch_id}.effort"
     prompt_file.write_text(task.strip(), encoding="utf-8")
     model_file.write_text((model or config.CODEX_ENGINE_SEED["model"]).strip())
+    # Optional reasoning effort; "" ⇒ the run.sh emits no -c override (model's own
+    # default). Validated against codex's ladder upstream (app._run_dispatch), so a
+    # claude-only value like "max" never lands here.
+    effort_file.write_text((effort or "").strip())
 
     safe_proj = project_path.replace('"', '\\"')
     title = f"orch #{dispatch_id}"
@@ -1405,7 +1412,7 @@ def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: 
         _spawn_osascript(script)
     except Exception:
         # Clean up orphan sidecars so a failed spawn leaks no files.
-        for f in (prompt_file, model_file):
+        for f in (prompt_file, model_file, effort_file):
             try:
                 f.unlink()
             except FileNotFoundError:
