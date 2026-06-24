@@ -852,8 +852,8 @@
           // single-model rewrite. (Only the rewrite path uses fusion.)
           var fusionWanted = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
           if (rewrite && fusionWanted &&
-              (claudeSeats().length + providerSeats().length) < 2) {
-            flashStatus('fusion needs ≥2 seats — add another Claude seat or provider seat', true);
+              (claudeSeats().length + codexSeats().length + providerSeats().length) < 2) {
+            flashStatus('fusion needs ≥2 seats — add another Claude, Codex, or provider seat', true);
             return;
           }
           // Persist the draft BEFORE dispatching so it survives any failure on
@@ -877,6 +877,17 @@
           claudeSeats().forEach(function(s) {
             var seat = { type: 'claude', model: s.model, effort: s.effort };
             if (s.lens) seat.lens = s.lens;       // F8.4: per-seat lens (optional)
+            fusionSeats.push(seat);
+          });
+          // Codex seats ($0 ChatGPT-subscription `codex exec`, NO OpenAI API). effort
+          // is OPTIONAL: "" (the row's "default" option) is omitted so codex uses the
+          // model's own reasoning default. _parse_fusion_panel validates the model +
+          // effort server-side and drops anything unhonorable (a Claude id can never
+          // reach `codex -m`).
+          codexSeats().forEach(function(s) {
+            var seat = { type: 'codex', model: s.model };
+            if (s.effort) seat.effort = s.effort;
+            if (s.lens) seat.lens = s.lens;
             fusionSeats.push(seat);
           });
           // F12: one entry per provider SEAT (duplicates allowed), each with its
