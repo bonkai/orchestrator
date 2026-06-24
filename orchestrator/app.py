@@ -150,16 +150,16 @@ def _view_ctx() -> dict:
     # Saved profiles (name → {claude_seats, provider_seats}); the picker offers
     # them as a quick-switch dropdown that re-populates the seats in one click.
     fusion_profiles = fcfg.get("profiles", {})
-    # C5.2: codex availability + model list for the dispatch-form engine picker.
+    # Codex availability + model list for the dispatch-form's merged model picker.
     # codex_cli_available mirrors claude_cli_available, but it runs an auth-probe
     # SUBPROCESS (`codex login status`; near-instant, finite-timeout) rather than a
     # bare `which`. is_fusion_available() above short-circuits PAST that probe when
     # claude or >=2 providers exist, so this is the one deliberate codex probe per
-    # render — the template greys the codex executor <option> when it's False
+    # render — the template greys Codex model options when it's False
     # (logged-out/absent). codex_seat_models seeds that picker (sourced from the
     # codex SEED via config — no codex-id literal in the template).
     codex_available = config.codex_cli_available()
-    # Picker options: the DEFAULT model first (so engine=codex defaults to gpt-5.5), then
+    # Picker options: the DEFAULT model first, then
     # the rest sorted — a bare sort would surface gpt-5.4 ahead of the gpt-5.5 default.
     codex_models = _codex_seat_models()
     codex_default = str(config.codex_engine().get("model", "")).strip()
