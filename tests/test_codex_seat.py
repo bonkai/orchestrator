@@ -321,5 +321,41 @@ class TestRunFusionJsonCodexSeat(unittest.TestCase):
         self.assertIn({"seat": "gpt-5.5", "lens": "risks"}, run.raw["lenses"])
 
 
+# ── codex seats persist in saved Fusion PROFILES (the "+ add codex seat" picker) ──
+
+class TestNormalizeProfileCodexSeats(unittest.TestCase):
+    """Codex seats persist in saved profiles alongside claude/provider seats, so the
+    dispatch picker's "+ add codex seat" rows aren't silently dropped on save/apply.
+    config._normalize_profile is PURE (no IO) → tested directly. Codex effort is
+    OPTIONAL ("" ⇒ the model's own reasoning default — NOT defaulted to "high" like a
+    claude seat); a model-less codex seat is dropped, exactly like a model-less claude
+    seat. Offline, no skip."""
+
+    def test_codex_seats_carried_with_optional_effort_and_lens(self):
+        out = config._normalize_profile({
+            "codex_seats": [{"model": "gpt-5.5", "effort": "high", "lens": "risks"},
+                            {"model": "gpt-5.4"},        # effort/lens blank → kept blank
+                            {"effort": "high"},          # no model → dropped
+                            "nope"]})                    # not a dict → dropped
+        self.assertEqual(out["codex_seats"],
+                         [{"model": "gpt-5.5", "effort": "high", "lens": "risks"},
+                          {"model": "gpt-5.4", "effort": "", "lens": ""}])
+
+    def test_codex_effort_not_defaulted_to_high_unlike_claude(self):
+        out = config._normalize_profile({
+            "claude_seats": [{"model": "opus"}],
+            "codex_seats": [{"model": "gpt-5.5"}]})
+        self.assertEqual(out["claude_seats"][0]["effort"], "high")   # claude default
+        self.assertEqual(out["codex_seats"][0]["effort"], "")        # codex: model default
+
+    def test_profile_without_codex_key_is_backward_compatible(self):
+        # A profile saved before codex seats existed has no codex_seats key → [].
+        out = config._normalize_profile({"claude_seats": [{"model": "opus"}],
+                                         "provider_seats": [{"name": "glm"}]})
+        self.assertEqual(out["codex_seats"], [])
+        self.assertEqual(out["claude_seats"], [{"model": "opus", "effort": "high", "lens": ""}])
+        self.assertEqual(out["provider_seats"], [{"name": "glm", "lens": ""}])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

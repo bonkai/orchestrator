@@ -202,6 +202,20 @@ class TestProfiles(_IsolatedConfig):
         self.assertEqual(p["provider_seats"], [{"name": "glm", "lens": "risks"}])
         self.assertNotIn("junk", p)
 
+    def test_codex_only_profile_saved_and_read_back(self):
+        # A profile of ONLY codex seats is VALID (not "no seats") and round-trips with
+        # each seat's model + optional effort + lens — so a codex panel persists across
+        # save/apply with no silent drop. Codex effort stays "" (model default).
+        config.save_profile("cx", {"codex_seats": [
+            {"model": "gpt-5.5", "effort": "high", "lens": "risks"},
+            {"model": "gpt-5.4"}]})
+        p = config.fusion_profiles()["cx"]
+        self.assertEqual(p["codex_seats"],
+                         [{"model": "gpt-5.5", "effort": "high", "lens": "risks"},
+                          {"model": "gpt-5.4", "effort": "", "lens": ""}])
+        self.assertEqual(p["claude_seats"], [])
+        self.assertEqual(p["provider_seats"], [])
+
     def test_save_preserves_keys_and_lenses(self):
         self._write({"fusion": {"providers": {"glm": {"api_key": "KEEP"}},
                                 "lenses": {"custom": "x"}}})
