@@ -311,11 +311,11 @@ class TestCodexExecutorFiles(unittest.TestCase):
              mock.patch.object(spawn, "PIDS_DIR", pids), \
              mock.patch.object(spawn, "TASKS_DIR", tasks), \
              mock.patch.object(spawn, "auto_close_enabled", return_value=False):
-            for suf in ("prompt", "model", "jsonl", "done", "fifo"):
+            for suf in ("prompt", "model", "effort", "jsonl", "done", "fifo"):
                 (cd / f"9.{suf}").write_text("x")
             (pids / "9.pid").write_text("123")
             spawn.cleanup_dispatch_files(9)
-            for suf in ("prompt", "model", "jsonl", "done", "fifo"):
+            for suf in ("prompt", "model", "effort", "jsonl", "done", "fifo"):
                 self.assertFalse((cd / f"9.{suf}").exists(), f"codex {suf} not cleared")
             self.assertFalse((pids / "9.pid").exists())
 

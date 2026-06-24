@@ -313,6 +313,18 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
     def test_model_fallback_matches_seed(self):
         self.assertIn(self.SEED["model"], self.SH)
 
+    def test_reads_effort_sidecar_and_can_forward_it(self):
+        # C6: the executor forwards an OPTIONAL reasoning effort. The run.sh reads the
+        # per-dispatch .effort sidecar and emits `-c model_reasoning_effort=<e>` only when
+        # non-empty (empty ⇒ the model's own default) — mirroring the codex SEAT runner.
+        self.assertIn(".effort", self.SH)
+        self.assertIn("model_reasoning_effort", self.SH)
+
+    def test_effort_applied_via_array_on_invocation_line(self):
+        # Applied through the EFFORT_FLAG array on the actual `codex exec` line, so an
+        # empty effort expands to nothing (no stray `-c` / no model-default override).
+        self.assertIn("EFFORT_FLAG", self._codex_cmd_line())
+
     def _codex_cmd_line(self) -> str:
         # The ACTUAL `codex exec "$PROMPT" …` invocation line (not the doc comments,
         # which mention the seat's `-s read-only` descriptively).
