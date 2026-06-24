@@ -399,18 +399,19 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
         try:
             await loop.run_in_executor(
                 None, spawn.spawn_codex_dispatch, proj["path"], dispatch_id, task,
-                executor_model,
+                executor_model, effort,
             )
         except Exception as e:
             db.mark_failed_to_spawn(dispatch_id, str(e))
             db.record_event(dispatch_id, "stage", {
                 "stage": "spawn_failed", "error": str(e),
-                "engine": "codex", "model": executor_model,
+                "engine": "codex", "model": executor_model, "effort": effort,
             })
             spawn.cleanup_dispatch_files(dispatch_id)
             return None, f"codex spawn failed: {e}"
         db.record_event(dispatch_id, "stage", {
-            "stage": "iterm2_spawned", "engine": "codex", "model": executor_model})
+            "stage": "iterm2_spawned", "engine": "codex", "model": executor_model,
+            "effort": effort or "(model default)"})
         pid = await loop.run_in_executor(None, spawn.read_claude_pid, dispatch_id, 5.0)
         db.mark_started(dispatch_id, terminal_pid=None, claude_pid=pid)
         db.touch_project(project_id)
@@ -1149,13 +1150,14 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     # "One knob": the dispatch's UI model/effort picker also drives the Fusion
     # judge (rewrite synthesis) and the enrich judge — same model that runs the
     # executor. Blank model ("default") keeps the judge on opus so an untouched
-    # picker never silently downgrades the synthesis seat; effort flows straight
-    # through (claude --effort accepts medium/high/xhigh/max), falling back to
-    # "high" only for an out-of-range value.
+    # picker never silently downgrades the synthesis seat. The judge is always a
+    # Claude brain call, so effort is validated against the Claude ladder
+    # (CLAUDE_SEAT_EFFORTS) — a codex-only pick (minimal/"default") or anything
+    # out of range falls back to "high".
     _, claude_model, _ = _derive_executor(model)
     judge_model = claude_model or "opus"
     judge_effort = (effort or "").strip()
-    if judge_effort not in ("medium", "high", "xhigh", "max"):
+    if judge_effort not in CLAUDE_SEAT_EFFORTS:
         judge_effort = "high"
     if do_rewrite:
         # Include staged attachments in the rewriter input so it can plan
