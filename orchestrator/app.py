@@ -159,6 +159,12 @@ def _view_ctx() -> dict:
     # (logged-out/absent). codex_seat_models seeds that picker (sourced from the
     # codex SEED via config — no codex-id literal in the template).
     codex_available = config.codex_cli_available()
+    # Picker options: the DEFAULT model first (so engine=codex defaults to gpt-5.5), then
+    # the rest sorted — a bare sort would surface gpt-5.4 ahead of the gpt-5.5 default.
+    codex_models = _codex_seat_models()
+    codex_default = str(config.codex_engine().get("model", "")).strip()
+    codex_models_ordered = (([codex_default] if codex_default in codex_models else [])
+                            + sorted(codex_models - {codex_default}))
     return {
         "tabs": tabs,
         "saved_projects": saved,
@@ -168,7 +174,7 @@ def _view_ctx() -> dict:
         "fusion_available": config.is_fusion_available(),
         "claude_cli_available": config.claude_cli_available(),
         "codex_cli_available": codex_available,
-        "codex_seat_models": sorted(_codex_seat_models()),
+        "codex_seat_models": codex_models_ordered,
         "claude_seat_models": CLAUDE_SEAT_MODELS,
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
