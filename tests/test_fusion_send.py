@@ -455,7 +455,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(did, 42)
         self.assertEqual(err, "")
         spawn_cx.assert_called_once()        # the codex executor was spawned
-        # spawn_codex_dispatch(project_path, dispatch_id, task, executor_model)
+        # spawn_codex_dispatch(project_path, dispatch_id, task, executor_model, effort)
         self.assertEqual(spawn_cx.call_args.args[3], "gpt-5.5")  # explicit codex model (no downgrade)
         spawn_it.assert_not_called()         # NO silent claude executor
         mfs.assert_not_called()
