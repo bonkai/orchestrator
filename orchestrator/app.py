@@ -263,7 +263,7 @@ async def project_remove(project_id: int):
 
 # ─── dispatch ─────────────────────────────────────────────────────────────
 
-async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max", model: str = "", executor_engine: str = "claude", executor_model: str = "") -> tuple[int | None, str]:
+async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str = "max", model: str = "") -> tuple[int | None, str]:
     """Core dispatch flow shared by `/dispatch` (sync redirect) and `/send`
     (background task). Returns (dispatch_id, error). On any failure, returns
     (None, reason) — never raises HTTPException, since the background-task
@@ -983,13 +983,28 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
     return panel
 
 
-def _validate_executor_engine(engine: str, model: str, codex_models: set) -> tuple[str, str]:
+def _derive_executor(model: str, codex_models: set | None = None) -> tuple[str, str, str]:
+    """Return (engine, claude_model, codex_model) derived from one picker value.
+
+    The codex whitelist comes only from config.codex_engine() through
+    _codex_seat_models(); no model ids are defined here. A codex selection clears
+    the Claude model so it cannot reach `claude --model`.
+    """
+    model = (model or "").strip()
+    codex_models = _codex_seat_models() if codex_models is None else codex_models
+    if model in codex_models:
+        return "codex", "", model
+    return "claude", model, ""
+
+
+def _validate_executor_engine(engine: str, model: str, codex_models: set,
+                              codex_available: bool = True) -> tuple[str, str]:
     """Validate the dispatch EXECUTOR engine + (for codex) its model — the C5.1
     server gate behind the UI's engine picker. The disabled codex <option> (C5.2)
     is cosmetic; a crafted POST is rejected HERE. Returns (engine, model).
 
-    Raises ValueError on an unknown engine, or a codex engine with a blank or
-    unknown model. The two codex rejections are DISTINCT (per C5.1 "a default that
+    Raises ValueError on an unknown engine, unavailable codex CLI, or a codex engine
+    with a blank or unknown model. The two codex rejections are DISTINCT (per C5.1 "a default that
     omits the model is rejected" vs an unknown id): a missing model is the
     no-downgrade guard, an out-of-whitelist model is a bad id — both reject. A codex
     executor NEVER falls back to a Claude id, nor silently to the claude engine
@@ -1005,10 +1020,12 @@ def _validate_executor_engine(engine: str, model: str, codex_models: set) -> tup
         raise ValueError("codex executor requires an explicit codex model (no silent downgrade)")
     if model not in codex_models:
         raise ValueError(f"unknown codex executor model: {model!r}")
+    if not codex_available:
+        raise ValueError("codex executor is unavailable: install and log in to the Codex CLI")
     return "codex", model
 
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False, executor_engine: str = "claude", executor_model: str = ""):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
@@ -1035,7 +1052,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     # picker never silently downgrades the synthesis seat; effort flows straight
     # through (claude --effort accepts medium/high/xhigh/max), falling back to
     # "high" only for an out-of-range value.
-    judge_model = (model or "").strip() or "opus"
+    executor_engine, claude_model, _ = _derive_executor(model)
+    judge_model = claude_model or "opus"
     judge_effort = (effort or "").strip()
     if judge_effort not in ("medium", "high", "xhigh", "max"):
         judge_effort = "high"
@@ -1171,8 +1189,7 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
             print(f"[orchestrator] /send enrich crashed (dispatching un-enriched): {e}")
 
     dispatch_id, err = await _run_dispatch(
-        project_id, final_task, wall_cap_s, effort, model,
-        executor_engine=executor_engine, executor_model=executor_model)
+        project_id, final_task, wall_cap_s, effort, model)
     if err:
         print(f"[orchestrator] /send dispatch failed: {err}")
         return
@@ -1199,8 +1216,6 @@ async def send(
     fusion_seats: str = Form(""),
     fusion_enrich: str = Form("false"),
     fusion_verify: str = Form("false"),
-    executor_engine: str = Form("claude"),
-    executor_model: str = Form(""),
 ):
     """Fire-and-forget send. Validates synchronously, then schedules the
     rewrite+dispatch as a background task and returns immediately so the
@@ -1231,16 +1246,14 @@ async def send(
     codex_models = _codex_seat_models()
     panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models)
 
-    # C5.1: the dispatch EXECUTOR engine (claude | codex) + its codex model —
-    # DISTINCT from the panel seats above and from the `model`/`effort` Form params
-    # (which govern the CLAUDE executor). The UI greys the codex <option> when codex
-    # is unavailable (C5.2), but that gating is cosmetic — THIS is the server gate a
-    # crafted POST must pass. A codex executor needs an EXPLICIT, whitelisted codex
-    # model; blank/unknown is rejected (no silent downgrade to a Claude id). The
-    # codex executor SPAWN is C6; _run_dispatch holds the validated, inert seam.
+    # The single model picker determines the executor. The disabled Codex options
+    # are cosmetic; derive and validate server-side so a crafted codex request is
+    # rejected when unavailable instead of falling through to Claude.
+    executor_engine, _, executor_model = _derive_executor(model, codex_models)
     try:
         executor_engine, executor_model = _validate_executor_engine(
-            executor_engine, executor_model, codex_models)
+            executor_engine, executor_model, codex_models,
+            codex_available=config.codex_cli_available())
     except ValueError as e:
         raise HTTPException(400, str(e))
     # F7: enrichment mode — analyze the task with a panel and APPEND the analysis
@@ -1258,7 +1271,6 @@ async def send(
     task = asyncio.create_task(_send_in_background(
         project_id, task, wall_cap_s, do_rewrite, effort, model,
         do_fusion=do_fusion, panel=panel, do_enrich=do_enrich, do_verify=do_verify,
-        executor_engine=executor_engine, executor_model=executor_model,
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
