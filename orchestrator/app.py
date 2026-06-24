@@ -48,6 +48,12 @@ def _codex_seat_models() -> set[str]:
     Kept apart, codex validation rejects every Claude id."""
     eng = config.codex_engine()
     models = {str(eng.get("model", "")).strip()}
+    # The full valid-model list (C6: gpt-5.5/gpt-5.4/gpt-5.4-mini) — the picker's options
+    # + the validation whitelist. Unioned with the default `model` + the seat-panel models
+    # so a `fusion.codex` override of ANY of them is honored.
+    for m in eng.get("models", []) or []:
+        if isinstance(m, str) and m.strip():
+            models.add(m.strip())
     for seat in eng.get("seats", []) or []:
         if isinstance(seat, dict):
             m = str(seat.get("model", "")).strip()

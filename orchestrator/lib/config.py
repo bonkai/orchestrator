@@ -149,6 +149,13 @@ CODEX_ENGINE_SEED = {
     # per-machine via config.json `fusion.codex.model` (e.g. to gpt-5.4-mini for a tight
     # Plus cap) with no code change.
     "model": "gpt-5.5",
+    # The full set of valid ChatGPT-account codex `-m` ids — the dispatch picker's codex
+    # model options AND the validation whitelist (app._codex_seat_models unions these).
+    # All live-verified 2026-06-23: gpt-5.5 / gpt-5.4 / gpt-5.4-mini ACCEPTED; gpt-5-codex
+    # and gpt-5.5-mini REJECTED ("not supported when using Codex with a ChatGPT account").
+    # Per-window Plus runway grows DOWN the list (≈15-80 / 20-100 / 60-350 msgs per 5h).
+    # `model` above must be one of these; override the whole list via `fusion.codex.models`.
+    "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
     "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
     "exec_subcmd": "exec",           # non-interactive subcommand — the `claude -p` analogue (§3)
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
