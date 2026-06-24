@@ -82,22 +82,18 @@
           </label>
           <label>model:
             <select name="model">
-              <option value="" selected>default</option>
-              <option value="fable">fable 5</option>
-              <option value="opus">opus 4.8</option>
-              <option value="sonnet">sonnet 4.6</option>
-              <option value="haiku">haiku 4.5</option>
-            </select>
-          </label>
-          <label title="which CLI runs the dispatched task. codex is the $0 ChatGPT-subscription executor (C6): a watchable tab, writes confined to this project (-s workspace-write), killable / capped like a claude dispatch. The codex option is greyed when codex is absent / logged out.">engine:
-            <select name="executor_engine" id="executor-engine">
-              <option value="claude" selected>claude</option>
-              <option value="codex" {% if not codex_cli_available %}disabled{% endif %}>codex{% if not codex_cli_available %} (unavailable){% endif %}</option>
-            </select>
-          </label>
-          <label id="executor-codex-model-label" style="display:none;">codex model:
-            <select name="executor_model" id="executor-model">
-              {% for m in codex_seat_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+              <optgroup label="Anthropic">
+                <option value="" selected>default</option>
+                <option value="fable">fable 5</option>
+                <option value="opus">opus 4.8</option>
+                <option value="sonnet">sonnet 4.6</option>
+                <option value="haiku">haiku 4.5</option>
+              </optgroup>
+              {% if codex_seat_models %}
+              <optgroup label="Codex" title="Codex uses the ChatGPT subscription executor in a watchable, workspace-confined tab. Models are unavailable when the Codex CLI is absent or logged out.">
+                {% for m in codex_seat_models %}<option value="{{ m }}" {% if not codex_cli_available %}disabled{% endif %}>{{ m }}{% if not codex_cli_available %} (unavailable){% endif %}</option>{% endfor %}
+              </optgroup>
+              {% endif %}
             </select>
           </label>
           <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
@@ -732,14 +728,6 @@
           fd.append('wall_cap_s', form.querySelector('input[name=wall_cap_s]').value);
           fd.append('effort', form.querySelector('select[name=effort]').value);
           fd.append('model', form.querySelector('select[name=model]').value);
-          // C5.1: executor engine (claude|codex) + the codex model. Distinct from
-          // `model` (the claude executor model) and from the fusion seat models. The
-          // server re-validates — the disabled codex <option> is only cosmetic — and
-          // a codex executor is rejected today (its spawn is C6, not yet built).
-          var engineEl = form.querySelector('select[name=executor_engine]');
-          fd.append('executor_engine', engineEl ? engineEl.value : 'claude');
-          var execModelEl = form.querySelector('select[name=executor_model]');
-          fd.append('executor_model', execModelEl ? execModelEl.value : '');
           fd.append('rewrite', rewrite ? 'true' : 'false');
           // Multi-model Fusion for the rewrite brain call. Only meaningful when
           // rewrite is on (fusion routes the rewriter's ONE brain call); the
@@ -873,21 +861,6 @@
               statusEl.textContent = 'error: ' + e.message;
               settle('error');
             });
-        }
-
-        // C5.1: reveal the codex model picker only when the codex executor engine
-        // is selected; claude (the default) keeps the controls looking as before.
-        var executorEngineSel = document.getElementById('executor-engine');
-        var codexModelLabel = document.getElementById('executor-codex-model-label');
-        function syncExecutorEngine() {
-          if (codexModelLabel) {
-            codexModelLabel.style.display =
-              (executorEngineSel && executorEngineSel.value === 'codex') ? '' : 'none';
-          }
-        }
-        if (executorEngineSel) {
-          executorEngineSel.addEventListener('change', syncExecutorEngine);
-          syncExecutorEngine();
         }
 
         btnRaw.addEventListener('click', function() { send(false); });
