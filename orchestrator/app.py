@@ -269,10 +269,10 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     (None, reason) — never raises HTTPException, since the background-task
     caller has no HTTP response to fail.
 
-    `executor_engine` (claude | codex) + `executor_model` (the codex `-m` id) are
-    the C5.1 picker, already validated in /send. engine="claude" (the default) is
-    the unchanged path. engine="codex" hits the C5 SEAM below — the codex executor
-    is C6, so it is rejected, never silently run as claude."""
+    The submitted model selects both executor and CLI model: codex ids route to
+    the codex executor, while every other value stays on Claude. This derivation
+    is repeated here (after /send validates it) so direct /dispatch callers can
+    never send a codex id down Claude's `--model` path."""
     proj = db.get_project(project_id)
     if not proj:
         return None, "unknown project"
@@ -282,11 +282,21 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     if not task:
         return None, "empty task"
     wall_cap_s = max(60, min(21600, int(wall_cap_s)))  # ceiling: 6h
-    # Effort flag for the dispatched session only; brain calls stay at medium.
+    executor_engine, model, executor_model = _derive_executor(model)
+    try:
+        executor_engine, executor_model = _validate_executor_engine(
+            executor_engine, executor_model, _codex_seat_models(),
+            codex_available=config.codex_cli_available())
+    except ValueError as e:
+        return None, str(e)
+    # Effort is a Claude-only flag. Codex uses its own model default, so never
+    # forward xhigh/max (or any other Claude effort) into `-c
+    # model_reasoning_effort`.
     effort = (effort or "").strip()
-    if effort not in ("medium", "high", "xhigh", "max"):
+    if executor_engine == "codex":
+        effort = ""
+    elif effort not in ("medium", "high", "xhigh", "max"):
         effort = "max"
-    model = (model or "").strip()
 
     # Pick up any staged attachments (drag-drop), move them to a dispatch-
     # owned dir so they survive after the stash is cleared, prepend their
