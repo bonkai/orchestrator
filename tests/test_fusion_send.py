@@ -399,6 +399,11 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
             app_module.spawn, "read_claude_pid", return_value=4321))
         es.enter_context(mock.patch.object(app_module.watchdog, "schedule"))
         es.enter_context(mock.patch.object(app_module.watchdog, "schedule_codex_poller"))
+        es.enter_context(mock.patch.object(app_module.config, "codex_cli_available", return_value=True))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_engine",
+            return_value={"model": "gpt-5.5", "max_concurrent_dispatches": 0}))
+        es.enter_context(mock.patch.object(app_module.db, "running_dispatches", return_value=[]))
         mfs = es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
         spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
         spawn_cx = es.enter_context(mock.patch.object(app_module.spawn, "spawn_codex_dispatch"))
@@ -408,8 +413,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         es, mfs, spawn_it, spawn_cx = self._patches()
         with es:
             did, err = await app_module._run_dispatch(
-                1, "do the thing", 600, "max", "",
-                executor_engine="codex", executor_model="gpt-5.5")
+                1, "do the thing", 600, "max", "gpt-5.5")
             # cap watcher took the codex branch; the in-band poller was attached.
             self.assertEqual(
                 app_module.watchdog.schedule.call_args.kwargs.get("engine"), "codex")
@@ -429,8 +433,7 @@ class TestRunDispatchCodexSeam(unittest.IsolatedAsyncioTestCase):
         spawn_cx.side_effect = RuntimeError("boom")
         with es:
             did, err = await app_module._run_dispatch(
-                1, "do the thing", 600, "max", "",
-                executor_engine="codex", executor_model="gpt-5.5")
+                1, "do the thing", 600, "max", "gpt-5.5")
         self.assertIsNone(did)
         self.assertIn("codex", err.lower())
         spawn_it.assert_not_called()         # STILL no claude fallback on failure

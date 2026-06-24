@@ -345,6 +345,7 @@ class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
         es.enter_context(mock.patch.object(
             app_module.config, "codex_engine",
             return_value={"model": "gpt-5.5", "max_concurrent_dispatches": cap}))
+        es.enter_context(mock.patch.object(app_module.config, "codex_cli_available", return_value=True))
         es.enter_context(mock.patch.object(
             app_module.db, "running_dispatches",
             return_value=[{"id": i} for i in range(running_codex_count)]))
@@ -359,7 +360,7 @@ class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
         es, mfs, spawn_cx, spawn_it = self._patches(cap=2, running_codex_count=2)
         with es:
             did, err = await app_module._run_dispatch(
-                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+                1, "t", 600, "max", "gpt-5.5")
         self.assertIsNone(did)
         self.assertIn("concurrency cap", err.lower())
         spawn_cx.assert_not_called()
@@ -370,7 +371,7 @@ class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
         es, mfs, spawn_cx, spawn_it = self._patches(cap=2, running_codex_count=1)
         with es:
             did, err = await app_module._run_dispatch(
-                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+                1, "t", 600, "max", "gpt-5.5")
         self.assertEqual(did, 42)
         spawn_cx.assert_called_once()
         mfs.assert_not_called()
@@ -379,7 +380,7 @@ class TestCodexConcurrencyCap(unittest.IsolatedAsyncioTestCase):
         es, mfs, spawn_cx, spawn_it = self._patches(cap=0, running_codex_count=99)
         with es:
             did, err = await app_module._run_dispatch(
-                1, "t", 600, "max", "", executor_engine="codex", executor_model="gpt-5.5")
+                1, "t", 600, "max", "gpt-5.5")
         self.assertEqual(did, 42)
         spawn_cx.assert_called_once()
 

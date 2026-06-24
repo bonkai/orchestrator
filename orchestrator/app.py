@@ -1052,7 +1052,7 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     # picker never silently downgrades the synthesis seat; effort flows straight
     # through (claude --effort accepts medium/high/xhigh/max), falling back to
     # "high" only for an out-of-range value.
-    executor_engine, claude_model, _ = _derive_executor(model)
+    _, claude_model, _ = _derive_executor(model)
     judge_model = claude_model or "opus"
     judge_effort = (effort or "").strip()
     if judge_effort not in ("medium", "high", "xhigh", "max"):
