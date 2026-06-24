@@ -521,5 +521,107 @@ class TestClaudeSpawnGuard(unittest.IsolatedAsyncioTestCase):
         self.assertIn("spawn failed", err)
 
 
+# ─────────────── executor reasoning-effort routing (engine-aware, safe fallback) ──
+
+class TestCodexExecutorEffort(unittest.IsolatedAsyncioTestCase):
+    """Effort now flows to the codex EXECUTOR (it used to be dropped). A codex-valid
+    effort is forwarded to spawn_codex_dispatch (→ `-c model_reasoning_effort`); a
+    claude-only value ("max") or the picker's "default" safely falls back to "" (the
+    model's own default), so a cross-engine pick never errors. All seams mocked — offline."""
+
+    def _patches(self):
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": str(REPO)}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        es.enter_context(mock.patch.object(app_module.db, "create_dispatch", return_value=42))
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.db, "mark_started"))
+        es.enter_context(mock.patch.object(app_module.db, "touch_project"))
+        es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        es.enter_context(mock.patch.object(app_module.spawn, "read_claude_pid", return_value=4321))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule"))
+        es.enter_context(mock.patch.object(app_module.watchdog, "schedule_codex_poller"))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_cli_available", return_value=True))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_engine",
+            return_value={"model": "gpt-5.5",
+                          "efforts": ["minimal", "low", "medium", "high", "xhigh"],
+                          "max_concurrent_dispatches": 0}))
+        es.enter_context(mock.patch.object(app_module.db, "running_dispatches", return_value=[]))
+        spawn_cx = es.enter_context(mock.patch.object(app_module.spawn, "spawn_codex_dispatch"))
+        return es, spawn_cx
+
+    async def _effort_forwarded(self, picked):
+        # spawn_codex_dispatch(project_path, dispatch_id, task, model, effort) -> args[4]
+        es, spawn_cx = self._patches()
+        with es:
+            did, err = await app_module._run_dispatch(1, "t", 600, picked, "gpt-5.5")
+        self.assertEqual(did, 42, err)
+        spawn_cx.assert_called_once()
+        return spawn_cx.call_args.args[4]
+
+    async def test_valid_codex_effort_forwarded(self):
+        self.assertEqual(await self._effort_forwarded("high"), "high")
+
+    async def test_codex_only_minimal_effort_forwarded(self):
+        # minimal is NOT a claude effort — proves codex's OWN ladder is honored, not claude's.
+        self.assertEqual(await self._effort_forwarded("minimal"), "minimal")
+
+    async def test_claude_only_max_falls_back_to_model_default(self):
+        # "max" is claude-only; codex 400s on it, so it must become "" (no -c override).
+        self.assertEqual(await self._effort_forwarded("max"), "")
+
+    async def test_picker_default_value_falls_back_to_model_default(self):
+        # The dropdown's "default (model's own)" option sends "default" → not a codex
+        # effort → "" (the model's own reasoning default).
+        self.assertEqual(await self._effort_forwarded("default"), "")
+
+
+class TestClaudeExecutorEffort(unittest.IsolatedAsyncioTestCase):
+    """The Claude executor now accepts the FULL ladder including "low" (it previously
+    silently coerced anything outside medium..max to "max"); a codex-only value like
+    "minimal" still falls back to the default "max". spawn_iterm2 is made to raise so we
+    only need the call args, not the success tail."""
+
+    def _patches(self):
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": str(REPO)}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        es.enter_context(mock.patch.object(app_module.db, "create_dispatch", return_value=42))
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_cli_available", return_value=True))
+        es.enter_context(mock.patch.object(
+            app_module.config, "codex_engine",
+            return_value={"model": "gpt-5.5",
+                          "efforts": ["minimal", "low", "medium", "high", "xhigh"]}))
+        spawn_it = es.enter_context(mock.patch.object(app_module.spawn, "spawn_iterm2"))
+        spawn_it.side_effect = RuntimeError("boom")   # short-circuit the success tail
+        return es, spawn_it
+
+    async def _effort_used(self, picked):
+        # spawn_iterm2(project_path, dispatch_id, task, tab_title, effort, model) -> args[4]
+        es, spawn_it = self._patches()
+        with es:
+            await app_module._run_dispatch(1, "t", 600, picked, "")   # "" => claude
+        spawn_it.assert_called_once()
+        return spawn_it.call_args.args[4]
+
+    async def test_low_is_now_allowed(self):
+        self.assertEqual(await self._effort_used("low"), "low")
+
+    async def test_codex_only_effort_falls_back_to_max(self):
+        self.assertEqual(await self._effort_used("minimal"), "max")
+
+    async def test_garbage_effort_falls_back_to_max(self):
+        self.assertEqual(await self._effort_used("bogus"), "max")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
