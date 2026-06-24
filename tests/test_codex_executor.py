@@ -594,6 +594,7 @@ class TestClaudeExecutorEffort(unittest.IsolatedAsyncioTestCase):
             app_module.attachments_mod, "list_files", return_value=[]))
         es.enter_context(mock.patch.object(app_module.db, "create_dispatch", return_value=42))
         es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        es.enter_context(mock.patch.object(app_module.db, "mark_failed_to_spawn"))
         es.enter_context(mock.patch.object(app_module.spawn, "cleanup_dispatch_files"))
         es.enter_context(mock.patch.object(
             app_module.config, "codex_cli_available", return_value=True))
