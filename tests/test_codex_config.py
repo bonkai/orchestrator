@@ -361,6 +361,17 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
         # codex exec blocks 'Reading additional input from stdin…' on a non-TTY otherwise.
         self.assertIn("< /dev/null", self.SH)
 
+    def test_resume_subcommand_matches_seed(self):
+        # C6 HYBRID (#246 fix): after the captured one-shot, the runner hands the tab off to
+        # an interactive `codex <resume_subcmd>` — the subcommand comes from the SEED.
+        self.assertIn(f"codex {self.SEED['resume_subcmd']}", self.SH)
+
+    def test_resume_flags_match_seed(self):
+        # The resume flag set (e.g. --include-non-interactive, so the interactive resume can
+        # pick up the exec-CREATED session by id) is the seed's — a codex upgrade renaming it
+        # regenerates the runner; a hardcoded literal goes RED.
+        self.assertIn(self.SEED["resume_flags"], self.SH)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
