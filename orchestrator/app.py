@@ -934,7 +934,7 @@ def _fusion_panel_breakdown(result) -> list[dict]:
 
 
 def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
-                        codex_models: set) -> list:
+                        codex_models: set, codex_efforts: set | None = None) -> list:
     """Normalize the dispatch form's panel selection into the seat list
     run_fusion_json consumes. `fusion_seats` is the F9 JSON shape — a list of
     {type:"claude"|"codex"|"provider", ...}; `fusion_panel` is the legacy comma
@@ -942,21 +942,25 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
     DROPPED, so a stale UI selection can never force an unusable seat:
       - claude   → {"kind":"claude_cli","model","effort"[,"lens"]}; model/effort
                    against the CLAUDE_SEAT_* whitelists.
-      - codex    → {"kind":"codex_cli","model"[,"lens"]} (C5.1); model against the
-                   codex whitelist (a codex id, NEVER a Claude id). NO effort —
-                   _codex_seat_answer lets codex use the model's own reasoning
-                   default; a blank/unknown model is dropped (no silent downgrade).
-                   run_fusion_json already consumes this third kind (C2.3), so the
-                   transform here is purely additive and never touches claude_cli.
+      - codex    → {"kind":"codex_cli","model"[,"effort"][,"lens"]}; model against
+                   the codex whitelist (a codex id, NEVER a Claude id) — a blank/unknown
+                   model DROPS the seat (no silent downgrade). The optional effort
+                   (thinking level) is carried only when it's a whitelisted codex effort
+                   (codex_efforts); a blank or unknown effort is OMITTED so codex uses
+                   the model's own reasoning default (effort is OPTIONAL for codex,
+                   unlike a required Claude effort). run_fusion_json already consumes
+                   this third kind + its effort (C2.3), so the transform is additive
+                   and never touches claude_cli.
       - provider → the bare name (or {"name","lens"} when lensed) if key-active.
-    Pure (no config reads) so it is unit-testable offline; /send passes in `active`
-    and `codex_models`. An empty result lets run_fusion_json fall back to the
-    configured preset.
+    Pure when `codex_efforts` is passed (no config reads on the hot path — /send passes
+    `active`, `codex_models`, and `codex_efforts`); omitting `codex_efforts` falls back
+    to the seed via _codex_seat_efforts(), mirroring _derive_executor. An empty result
+    lets run_fusion_json fall back to the configured preset.
 
-    NB: no UI button emits a codex seat yet (only +claude / +provider) — the codex
-    seat is a server-accepted forward seam, reachable via the saved-profile/JSON
-    path or a future picker button. The claude/provider branches are byte-for-byte
-    the pre-C5 /send loop."""
+    The dispatch panel's "+ add codex seat" button emits {type:"codex",model,effort,
+    lens}; codex seats also persist in saved profiles. The claude/provider branches are
+    byte-for-byte the pre-C5 /send loop."""
+    codex_efforts = _codex_seat_efforts() if codex_efforts is None else codex_efforts
     panel: list = []
     raw_seats = (fusion_seats or "").strip()
     if raw_seats:
