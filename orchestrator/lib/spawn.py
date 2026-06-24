@@ -1329,15 +1329,65 @@ wait "$CODEX_PID"
 code=$?
 wait "$CONSUMER_PID" 2>/dev/null
 rm -f "$FIFO"
+# Capture turn-1's thread_id from the sidecar BEFORE writing .done. The orchestrator's
+# in-band poller finalizes on .done and then DELETES this sidecar (cleanup_dispatch_files),
+# so read the id NOW into a shell var that survives the delete. thread.started is codex's
+# FIRST event; we take its thread_id (the resume handle). The Python is all-double-quoted
+# so the single-quote wrapper needs no escaping and bash does no expansion inside it.
+THREAD_ID="$(python3 -c 'import json, sys
+tid = ""
+try:
+    for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get("type") == "thread.started" and o.get("thread_id"):
+            tid = o["thread_id"]
+            break
+except Exception:
+    pass
+sys.stdout.write(tid)
+' "$OUT_FILE" 2>/dev/null)"
 echo "$code" > "$DONE_FILE"
 echo
-echo "---- codex executor finished (exit $code) ----"
+echo "---- codex executor turn 1 finished (exit $code) — orchestrator finalized from the sidecar ----"
+# HYBRID auto-resume — mirror the claude executor's stay-open, continuable tab (the #246
+# fix). Turn 1 above was the CAPTURED one-shot the orchestrator finalizes from the sidecar
+# (completion row + timeline + loop-watchdog + summary). Now hand THIS SAME tab to an
+# INTERACTIVE codex on the SAME thread so the user can read the answer, keep the
+# conversation going, and close the tab manually. The orchestrator no longer tracks this
+# phase: the dispatch is already 'completed' and its PID file / wall-clock cap / poller
+# were all cleared at finalize — exactly a claude dispatch's post-Stop-hook state. So a long
+# follow-up holds NO concurrency slot and CANNOT be hard-killed by the cap; the trade-off is
+# that these follow-up turns are NOT recorded by the orchestrator.
+#
+# NB: NO `< /dev/null` here — interactive codex needs the tab's REAL TTY (the one-shot above
+# used /dev/null only because a non-interactive `exec` blocks on a non-TTY stdin). `exec`
+# replaces this shell so the tab IS the codex session (closing codex closes the tab, like
+# `exec claude`). Model/sandbox are inherited from the resumed session; OPENAI_API_KEY stays
+# unset (scrubbed above) so this interactive phase is the $0 subscription path too.
+if [ -n "$THREAD_ID" ]; then
+    echo
+    echo "---- resuming interactively on thread $THREAD_ID — continue below; close the tab when done ----"
+    echo "(follow-up turns here are NOT recorded by the orchestrator)"
+    echo
+    exec codex @@RESUME_SUBCMD@@ "$THREAD_ID" @@RESUME_FLAGS@@
+fi
+# Fallback: no thread id (codex errored before thread.started, or a parse miss) — keep the
+# tab OPEN at an interactive shell so the user can read the output above + resume manually,
+# instead of the tab vanishing (the #246 regression we are fixing).
+echo
+echo "---- no thread id captured; leaving this tab open (resume manually with: codex @@RESUME_SUBCMD@@ --last) ----"
+exec "${SHELL:-/bin/zsh}" -i
 '''
     return (template
             .replace("@@EXEC_SUBCMD@@", eng["exec_subcmd"])
             .replace("@@EXECUTOR_SANDBOX@@", eng["executor_sandbox"])
             .replace("@@JSON_FLAG@@", eng["json_flag"])
-            .replace("@@MODEL_DEFAULT@@", eng["model"]))
+            .replace("@@MODEL_DEFAULT@@", eng["model"])
+            .replace("@@RESUME_SUBCMD@@", eng["resume_subcmd"])
+            .replace("@@RESUME_FLAGS@@", eng["resume_flags"]))
 
 
 # Built at import from the SEED (genuine seed→bash interpolation); a module constant
