@@ -990,6 +990,15 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
                 seat_model = str(s.get("model", "")).strip()
                 if seat_model in codex_models:
                     seat = {"kind": "codex_cli", "model": seat_model}
+                    # Codex effort (thinking level) is OPTIONAL — unlike a Claude
+                    # seat it is dropped, not seat-fatal, when blank or unknown: "" (the
+                    # picker's "default") and any out-of-whitelist value both fall
+                    # through to the model's own reasoning default, so a stale/crafted
+                    # effort can't fail the seat (and an invalid -c value codex would
+                    # 400 on never ships).
+                    seat_effort = str(s.get("effort", "")).strip()
+                    if seat_effort and seat_effort in codex_efforts:
+                        seat["effort"] = seat_effort
                     if seat_lens:
                         seat["lens"] = seat_lens
                     panel.append(seat)
@@ -1265,7 +1274,8 @@ async def send(
     do_fusion = fusion.lower() in ("1", "true", "yes", "on")
     active = config.active_providers()
     codex_models = _codex_seat_models()
-    panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models)
+    panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models,
+                                _codex_seat_efforts())
 
     # The single model picker determines the executor. The disabled Codex options
     # are cosmetic; derive and validate server-side so a crafted codex request is
