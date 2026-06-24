@@ -1249,6 +1249,7 @@ OUT_FILE="$CODEX_DIR/${ID}.jsonl"
 DONE_FILE="$CODEX_DIR/${ID}.done"
 FIFO="$CODEX_DIR/${ID}.fifo"
 MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
+EFFORT=$(cat "$CODEX_DIR/${ID}.effort" 2>/dev/null || echo "")
 if [ ! -f "$PROMPT_FILE" ]; then
     echo "Orchestrator codex executor: missing prompt file $PROMPT_FILE" >&2
     echo 2 > "$DONE_FILE"
@@ -1257,7 +1258,14 @@ fi
 PROMPT=$(cat "$PROMPT_FILE")
 # $0 subscription path only — never route the executor through the billed OpenAI API.
 unset OPENAI_API_KEY
-echo "---- orchestrator codex EXECUTOR: dispatch $ID ($MODEL, -s @@EXECUTOR_SANDBOX@@) ----"
+# Reasoning effort (optional): empty ⇒ no -c override ⇒ the model's own default. Mirrors
+# the codex SEAT runner's EFFORT_ARG; the value was validated against codex's ladder by
+# app._run_dispatch (an unknown / claude-only value already fell back to "" upstream).
+EFFORT_FLAG=()
+if [ -n "$EFFORT" ]; then
+    EFFORT_FLAG=(-c "model_reasoning_effort=$EFFORT")
+fi
+echo "---- orchestrator codex EXECUTOR: dispatch $ID ($MODEL${EFFORT:+ / $EFFORT}, -s @@EXECUTOR_SANDBOX@@) ----"
 echo "(watchable; writes confined to this project; no Stop hook — orchestrator finalizes from the sidecar)"
 echo
 rm -f "$FIFO"
@@ -1313,7 +1321,7 @@ for line in sys.stdin:
 CONSUMER_PID=$!
 # codex -> FIFO, backgrounded so $! is codex's REAL pid (the kill target). < /dev/null
 # keeps codex from blocking 'Reading additional input from stdin...' on a non-TTY.
-codex @@EXEC_SUBCMD@@ "$PROMPT" -m "$MODEL" -s @@EXECUTOR_SANDBOX@@ @@JSON_FLAG@@ < /dev/null > "$FIFO" &
+codex @@EXEC_SUBCMD@@ "$PROMPT" -m "$MODEL" -s @@EXECUTOR_SANDBOX@@ "${EFFORT_FLAG[@]}" @@JSON_FLAG@@ < /dev/null > "$FIFO" &
 CODEX_PID=$!
 echo "$CODEX_PID" > "$PID_FILE"
 wait "$CODEX_PID"
