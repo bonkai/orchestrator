@@ -137,6 +137,21 @@
               <div id="claude-seats" class="claude-seats"></div>
               <button type="button" id="add-claude-seat" class="secondary small" style="margin-top:0.25rem;">+ add Claude seat</button>
             </div>
+            {% if codex_seat_models %}
+            <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
+              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+                Codex seats <span class="muted">— local <code>codex</code> CLI · ChatGPT subscription · no API · $0 · add as many as you like</span>
+              </div>
+              <div id="codex-seats" class="codex-seats"></div>
+              <button type="button" id="add-codex-seat" class="secondary small" style="margin-top:0.25rem;"
+                      {% if not codex_cli_available %}disabled title="Codex CLI absent or logged out — run `codex login` to add codex seats"{% endif %}>+ add codex seat</button>
+              {% if not codex_cli_available %}
+              <span class="muted" style="display:block; font-size:12px; margin-top:0.25rem;">
+                Codex CLI absent or logged out — run <code>codex login</code> to add codex seats.
+              </span>
+              {% endif %}
+            </div>
+            {% endif %}
             <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
               <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
                 Cross-lab providers <span class="muted">— external API · costs tokens · key-gated · add as many as you like (even the same one)</span>
