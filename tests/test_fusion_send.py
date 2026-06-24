@@ -289,30 +289,62 @@ class TestSendInBackgroundJudgeFromPicker(unittest.IsolatedAsyncioTestCase):
 # ─────────────── C5.1: codex seat parse + executor engine seam ──────────────
 
 class TestParseFusionPanelCodexSeat(unittest.TestCase):
-    """C5.1 producer side: _parse_fusion_panel turns a {type:"codex",model} seat
-    into a {kind:"codex_cli","model"} panel entry (run_fusion_json consumes that
-    third kind — C2.3). The codex model is validated against a whitelist sourced
-    from CODEX_ENGINE_SEED (a codex id, NEVER a Claude id); blank/unknown is
-    DROPPED. The claude/provider branches are unchanged. Pure/offline — no
+    """C5.1 + codex-seat-picker producer side: _parse_fusion_panel turns a
+    {type:"codex",model[,effort][,lens]} seat into a {kind:"codex_cli","model"
+    [,"effort"][,"lens"]} panel entry (run_fusion_json consumes that third kind +
+    its effort — C2.3). The codex model is validated against a whitelist sourced
+    from CODEX_ENGINE_SEED (a codex id, NEVER a Claude id); a blank/unknown MODEL is
+    DROPPED. The codex EFFORT (thinking level) is OPTIONAL — carried only when
+    whitelisted, otherwise OMITTED (codex uses the model's own default), never
+    seat-fatal. The claude/provider branches are unchanged. Pure/offline — no
     TestClient, so skipped stays 4."""
 
     CODEX = {"gpt-5.5"}
+    CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
     ACTIVE = {"deepseek": {}, "minimax": {}}
 
     def test_codex_seat_becomes_codex_cli_kind(self):
         panel = app_module._parse_fusion_panel(
-            '[{"type":"codex","model":"gpt-5.5"}]', "", self.ACTIVE, self.CODEX)
+            '[{"type":"codex","model":"gpt-5.5"}]', "", self.ACTIVE, self.CODEX,
+            self.CODEX_EFFORTS)
         self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5"}])
 
-    def test_codex_seat_carries_optional_lens_no_effort(self):
-        # A codex seat may carry a lens; it never carries an effort — codex uses the
-        # model's own reasoning default (_codex_seat_answer's documented divergence).
+    def test_codex_seat_carries_lens_and_whitelisted_effort(self):
+        # The codex-seat picker sends model + thinking-level (effort) + lens; a
+        # whitelisted effort is CARRIED through to run_fusion_json (which reads it).
         panel = app_module._parse_fusion_panel(
             '[{"type":"codex","model":"gpt-5.5","lens":"risks","effort":"high"}]',
-            "", self.ACTIVE, self.CODEX)
+            "", self.ACTIVE, self.CODEX, self.CODEX_EFFORTS)
         self.assertEqual(panel,
-                         [{"kind": "codex_cli", "model": "gpt-5.5", "lens": "risks"}])
+                         [{"kind": "codex_cli", "model": "gpt-5.5",
+                           "effort": "high", "lens": "risks"}])
+
+    def test_codex_seat_unknown_effort_omitted_seat_kept(self):
+        # An out-of-whitelist effort (stale/crafted, or a claude-only value like
+        # "max") is DROPPED, not seat-fatal — codex falls back to the model default
+        # (so an invalid -c value codex would 400 on never ships). Seat survives.
+        panel = app_module._parse_fusion_panel(
+            '[{"type":"codex","model":"gpt-5.5","effort":"max"}]',
+            "", self.ACTIVE, self.CODEX, self.CODEX_EFFORTS)
+        self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5"}])
         self.assertNotIn("effort", panel[0])
+
+    def test_codex_seat_blank_effort_omitted(self):
+        # The picker's "default" option sends effort "" (or omits it) → no effort key,
+        # so codex uses its own model default (the documented codex divergence).
+        for raw in ('[{"type":"codex","model":"gpt-5.5","effort":""}]',
+                    '[{"type":"codex","model":"gpt-5.5"}]'):
+            panel = app_module._parse_fusion_panel(raw, "", self.ACTIVE, self.CODEX,
+                                                   self.CODEX_EFFORTS)
+            self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5"}])
+
+    def test_codex_efforts_defaults_to_seed_when_omitted(self):
+        # Mirrors _derive_executor: when codex_efforts isn't passed, it falls back to
+        # _codex_seat_efforts() (the seed). "high" is in the real seed ladder → carried.
+        panel = app_module._parse_fusion_panel(
+            '[{"type":"codex","model":"gpt-5.5","effort":"high"}]', "", self.ACTIVE,
+            self.CODEX)
+        self.assertEqual(panel, [{"kind": "codex_cli", "model": "gpt-5.5", "effort": "high"}])
 
     def test_model_less_codex_seat_is_dropped(self):
         self.assertEqual(
