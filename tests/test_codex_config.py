@@ -292,10 +292,10 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
     upgrade renaming --json, or flipping executor_sandbox) regenerates the runner; if
     someone hardcodes a literal instead, the assertion goes RED.
 
-    Two safety invariants beyond C4's: the executor uses the WRITE-capable
-    `executor_sandbox` (NOT the seat's read-only `sandbox`), and does NOT emit the
-    `auto_bypass_flag` (C6.0 found it OVERRIDES -s to full-access — the operator chose
-    confined workspace-write)."""
+    Two invariants beyond C4's: the executor uses the `executor_sandbox` (NOT the seat's
+    read-only `sandbox`), and does NOT emit the `auto_bypass_flag` — full access comes from
+    the `-s danger-full-access` MODE (the operator chose claude parity over confinement,
+    2026-06-25), not the EXTREMELY-DANGEROUS-flagged bypass flag."""
 
     SH = spawn.CODEX_DISPATCH_RUN_SH_CONTENT
     SEED = config.CODEX_ENGINE_SEED
@@ -334,8 +334,8 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
         return ""
 
     def test_command_uses_executor_sandbox_not_read_only(self):
-        # The actual codex invocation must run the WRITE-capable executor_sandbox, never
-        # the seat's read-only `sandbox` (it WRITES the project).
+        # The actual codex invocation must run the executor_sandbox (full-access), never
+        # the seat's read-only `sandbox` (the executor acts on the project like claude).
         cmd = self._codex_cmd_line()
         self.assertTrue(cmd, "codex exec invocation line not found in the executor run.sh")
         self.assertIn(f"-s {self.SEED['executor_sandbox']}", cmd)
@@ -343,7 +343,7 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
 
     def test_does_not_emit_auto_bypass_flag(self):
         # C6.0: the bypass flag OVERRIDES -s to full-access; the confined executor omits
-        # it (the operator-chosen workspace-write confinement). Checked on the command line
+        # it (full access comes from `-s danger-full-access`, the sandbox MODE). Checked on the command line
         # AND whole-file (the full flag string never appears in the doc comments either).
         self.assertNotIn(self.SEED["auto_bypass_flag"], self._codex_cmd_line())
         self.assertNotIn(self.SEED["auto_bypass_flag"], self.SH)
@@ -367,10 +367,30 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
         self.assertIn(f"codex {self.SEED['resume_subcmd']}", self.SH)
 
     def test_resume_flags_match_seed(self):
-        # The resume flag set (e.g. --include-non-interactive, so the interactive resume can
-        # pick up the exec-CREATED session by id) is the seed's — a codex upgrade renaming it
-        # regenerates the runner; a hardcoded literal goes RED.
+        # The resume flag set (--include-non-interactive so the interactive resume can adopt
+        # the exec-CREATED session by id; -a never so it acts without prompts) is the seed's —
+        # a codex upgrade renaming it regenerates the runner; a hardcoded literal goes RED.
         self.assertIn(self.SEED["resume_flags"], self.SH)
+
+    def _resume_line(self) -> str:
+        # The interactive resume hand-off line: `exec codex resume "$THREAD_ID" …`.
+        for ln in self.SH.splitlines():
+            if f"exec codex {self.SEED['resume_subcmd']} " in ln and "$THREAD_ID" in ln:
+                return ln
+        return ""
+
+    def test_resume_runs_at_executor_sandbox_single_source(self):
+        # Full claude-parity: the interactive resume runs at the SAME sandbox as turn 1,
+        # sourced from executor_sandbox (one value, not duplicated in resume_flags) —
+        # danger-full-access. Re-confining executor_sandbox moves BOTH turn 1 and resume.
+        line = self._resume_line()
+        self.assertTrue(line, "interactive resume hand-off line not found")
+        self.assertIn(f"-s {self.SEED['executor_sandbox']}", line)
+
+    def test_resume_never_prompts(self):
+        # The resumed session acts without approval prompts (the codex twin of claude's
+        # --dangerously-skip-permissions) via `-a never`.
+        self.assertIn("-a never", self._resume_line())
 
 
 if __name__ == "__main__":
