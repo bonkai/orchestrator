@@ -178,12 +178,21 @@ CODEX_ENGINE_SEED = {
     # and close the tab manually. The dispatch is already 'completed' by then (PID file +
     # wall-clock cap + poller all cleared at finalize), so this interactive phase is
     # UNTRACKED — it holds no concurrency slot, can't be cap-killed, and its follow-up turns
-    # are NOT recorded (exactly a claude dispatch's post-Stop-hook state). `resume_flags`
-    # (`--include-non-interactive`) lets the interactive resume pick up the exec-CREATED
-    # (non-interactive) session by its explicit thread id. 0.141.0-pinned; both are
-    # interpolated into spawn.codex_dispatch_run.sh and pinned by tests/test_codex_config.py.
+    # are NOT recorded (exactly a claude dispatch's post-Stop-hook state).
+    #
+    # resume_flags carries the resume-ONLY flags (the shared `-s <sandbox>` comes from
+    # executor_sandbox below, so turn 1 and the resume use ONE sandbox value):
+    #   --include-non-interactive  lets the interactive resume adopt the exec-CREATED
+    #                              (non-interactive) session by its explicit thread id.
+    #   -a never                   never ask for approval — the resume session acts WITHOUT
+    #                              prompts, the codex twin of `claude --dangerously-skip-
+    #                              permissions`, so a continued codex dispatch feels identical
+    #                              to a continued claude one (operator, 2026-06-25: "no
+    #                              noticeable difference between picking codex vs claude").
+    # (`-a` is interactive-only — NOT valid on `exec` — so it lives here, not on turn 1.)
+    # 0.141.0-pinned; interpolated into spawn.codex_dispatch_run.sh + pinned by tests.
     "resume_subcmd": "resume",
-    "resume_flags": "--include-non-interactive",
+    "resume_flags": "--include-non-interactive -a never",
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
     "executor_sandbox": "workspace-write",  # `-s <mode>` for the C6 EXECUTOR — write-capable but CONFINED to the project.
                                      # C6.0 (2026-06-23) verified `-s workspace-write` ALONE on codex-cli 0.141.0 is
