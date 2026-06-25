@@ -1219,7 +1219,7 @@ def _build_codex_dispatch_run_sh(eng: dict) -> str:
 # run.sh (the dispatched `claude` session), execed inside a WATCHABLE iTerm2 tab.
 #
 # NOT the codex SEAT runner (codex_run.sh, -s read-only): a dispatched executor runs
-# `-s @@EXECUTOR_SANDBOX@@` (danger-full-access) — FULL machine access, the codex twin
+# `-s @@EXECUTOR_SANDBOX@@` — FULL machine access, the codex twin
 # of `claude --dangerously-skip-permissions`, so a codex dispatch is indistinguishable
 # from a claude one (operator-chosen 2026-06-25). Full access via the `-s` sandbox MODE,
 # NOT a bypass flag. The SAME sandbox value drives the interactive resume hand-off below,
