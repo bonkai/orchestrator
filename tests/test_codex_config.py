@@ -74,7 +74,7 @@ class TestCodexEngineSeedMerge(_IsolatedConfig):
         # executor sandbox + the concurrency-cap knob.
         self.assertEqual(ce["models"], ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
         self.assertIn(ce["model"], ce["models"])       # the default is one of the valid ids
-        self.assertEqual(ce["executor_sandbox"], "workspace-write")
+        self.assertEqual(ce["executor_sandbox"], "danger-full-access")
         self.assertEqual(ce["max_concurrent_dispatches"], 2)
         # default seat panel for the C5 picker: >=2 codex seats.
         self.assertGreaterEqual(len(ce["seats"]), 2)

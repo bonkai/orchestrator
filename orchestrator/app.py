@@ -368,8 +368,8 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     })
 
     # C6: the $0 codex EXECUTOR. engine+model were validated in /send. This branch
-    # spawns a watchable codex tab (writes confined to the project via -s
-    # workspace-write) and NEVER falls through to the `claude` spawn below — a codex
+    # spawns a watchable codex tab (FULL access via -s danger-full-access — claude
+    # parity, overridable via fusion.codex.executor_sandbox) and NEVER falls through to the `claude` spawn below — a codex
     # pick must never become a silent claude executor (the dispatch #3 downgrade). A
     # spawn failure is a VISIBLE failed row, still no claude fallback. The §5 hook-gap
     # convergence: the cap watcher uses the codex branch (hard-kill, no pause-resume)
