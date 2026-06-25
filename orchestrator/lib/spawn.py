@@ -1178,10 +1178,12 @@ def finish_codex_tab(codex_id: str, label: str = "codex", success: bool = False)
 # ─── codex EXECUTOR dispatch (C6) — the $0 codex twin of spawn_iterm2/run.sh ──
 # A DISPATCHED codex task in a watchable iTerm2 tab — the codex analogue of the
 # `claude` executor (spawn_iterm2 → run.sh). It is NOT the SEAT runner above:
-#   - WRITE-CAPABLE: `-s <executor_sandbox>` (workspace-write), so codex edits the
-#     project. C6.0 (codex-cli 0.141.0) verified workspace-write ALONE is non-hanging
-#     (an out-of-sandbox action is rejected + the run continues) AND confined — so we
-#     do NOT add the auto_bypass_flag (it OVERRIDES -s to full-access, verified).
+#   - FULL ACCESS: `-s <executor_sandbox>` (danger-full-access), the codex twin of
+#     `claude --dangerously-skip-permissions`, so codex acts on the project (and beyond)
+#     exactly like a claude dispatch — operator-chosen 2026-06-25 ("no noticeable
+#     difference between picking codex vs claude"). Full access via the `-s` sandbox MODE,
+#     NOT the auto_bypass_flag (it OVERRIDES -s + is danger-flagged). The SAME value drives
+#     the resume hand-off; re-confine via a config.json fusion.codex.executor_sandbox.
 #   - PID at the CLAUDE path (PIDS_DIR/<id>.pid), so manual-kill / kill-all / the
 #     wall-clock cap / the orphan reaper / boot re-attach all locate it with ZERO
 #     watchdog changes (CODEX_PLAN note 2). The seat writes CODEX_DIR/<id>.pid; this
@@ -1216,12 +1218,12 @@ def _build_codex_dispatch_run_sh(eng: dict) -> str:
 # Orchestrator codex EXECUTOR runner — the $0 ChatGPT-subscription codex analogue of
 # run.sh (the dispatched `claude` session), execed inside a WATCHABLE iTerm2 tab.
 #
-# NOT the codex SEAT runner (codex_run.sh, -s read-only): a dispatched executor
-# WRITES the project, so it runs `-s @@EXECUTOR_SANDBOX@@` — write-capable but
-# CONFINED to the project. C6.0 (codex-cli 0.141.0) verified this is NON-hanging: an
-# out-of-sandbox action is rejected and the run continues, NOT a blocking approval
-# prompt — so NO --dangerously-bypass flag is used (it would OVERRIDE -s to full
-# danger-full-access; verified codex escaped to /tmp with it).
+# NOT the codex SEAT runner (codex_run.sh, -s read-only): a dispatched executor runs
+# `-s @@EXECUTOR_SANDBOX@@` (danger-full-access) — FULL machine access, the codex twin
+# of `claude --dangerously-skip-permissions`, so a codex dispatch is indistinguishable
+# from a claude one (operator-chosen 2026-06-25). Full access via the `-s` sandbox MODE,
+# NOT a bypass flag. The SAME sandbox value drives the interactive resume hand-off below,
+# which also adds `-a never` so its follow-up turns act without approval prompts too.
 #
 # §5 hook-gap convergence (fix iii): codex has NO Stop/PreToolUse/PostToolUse hooks,
 # so completion / loop-watchdog / timeline are NOT signalled via ~/.claude/settings.json.
