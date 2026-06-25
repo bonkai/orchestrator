@@ -24,7 +24,12 @@
 > that `workspace-write` alone is non-hanging (note 1's "else it HANGS" is **false** for
 > codex-cli 0.141.0 — an out-of-sandbox action is rejected + the run continues). The
 > operator chose the confined default; loosen via a `fusion.codex.executor_sandbox`
-> override (reversible, no code change). (2) The summarizer fork (note 4) = an additive
+> override (reversible, no code change). **[UPDATED 2026-06-25 — the operator REVERSED this
+> to `-s danger-full-access`: full `claude --dangerously-skip-permissions` parity so a
+> dispatched codex session is indistinguishable from a claude one. `executor_sandbox` now
+> drives BOTH turn 1 AND the interactive resume hand-off (which also adds `-a never` so
+> follow-up turns never prompt); re-confine per-machine via `fusion.codex.executor_sandbox`.]**
+> (2) The summarizer fork (note 4) = an additive
 > codex branch in `summarizer.distill_transcript` (most reversible; yields a real,
 > non-empty summary; the claude path is byte-for-byte unchanged). (3) **The seed model id
 > was STALE: `gpt-5-codex` is API-only/retired and a ChatGPT account REJECTS it with a 400
