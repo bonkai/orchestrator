@@ -1275,7 +1275,7 @@ if [ -n "$EFFORT" ]; then
     EFFORT_FLAG=(-c "model_reasoning_effort=$EFFORT")
 fi
 echo "---- orchestrator codex EXECUTOR: dispatch $ID ($MODEL${EFFORT:+ / $EFFORT}, -s @@EXECUTOR_SANDBOX@@) ----"
-echo "(watchable; writes confined to this project; no Stop hook — orchestrator finalizes from the sidecar)"
+echo "(watchable; full access like a claude dispatch; no Stop hook — orchestrator finalizes from the sidecar)"
 echo
 rm -f "$FIFO"
 mkfifo "$FIFO" || { echo "Orchestrator codex executor: mkfifo failed" >&2; echo 2 > "$DONE_FILE"; exit 2; }
@@ -1380,7 +1380,7 @@ if [ -n "$THREAD_ID" ]; then
     echo "---- resuming interactively on thread $THREAD_ID — continue below; close the tab when done ----"
     echo "(follow-up turns here are NOT recorded by the orchestrator)"
     echo
-    exec codex @@RESUME_SUBCMD@@ "$THREAD_ID" @@RESUME_FLAGS@@
+    exec codex @@RESUME_SUBCMD@@ "$THREAD_ID" @@RESUME_FLAGS@@ -s @@EXECUTOR_SANDBOX@@
 fi
 # Fallback: no thread id (codex errored before thread.started, or a parse miss) — keep the
 # tab OPEN at an interactive shell so the user can read the output above + resume manually,
