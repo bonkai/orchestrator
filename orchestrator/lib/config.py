@@ -194,19 +194,24 @@ CODEX_ENGINE_SEED = {
     "resume_subcmd": "resume",
     "resume_flags": "--include-non-interactive -a never",
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
-    "executor_sandbox": "workspace-write",  # `-s <mode>` for the C6 EXECUTOR — write-capable but CONFINED to the project.
-                                     # C6.0 (2026-06-23) verified `-s workspace-write` ALONE on codex-cli 0.141.0 is
-                                     # write-capable AND non-hanging (an out-of-sandbox action is REJECTED + the run
-                                     # continues, it does NOT block on a prompt) — so note 1's "else it HANGS" is false,
-                                     # and the auto_bypass_flag is NOT applied to the executor (it would OVERRIDE -s to
-                                     # full-access — verified: codex escaped to /tmp). Operator-chosen confined default;
-                                     # loosen to "danger-full-access" (claude-executor parity) via a config.json
-                                     # `fusion.codex.executor_sandbox` override — reversible, no code change.
+    "executor_sandbox": "danger-full-access",  # `-s <mode>` for the C6 EXECUTOR — used on BOTH turn 1 and the resume
+                                     # hand-off (the single source of truth for the dispatch's sandbox). danger-full-access
+                                     # = full machine access, no sandbox: the codex twin of `claude --dangerously-skip-
+                                     # permissions`, so a codex dispatch is INDISTINGUISHABLE from a claude one
+                                     # (operator-chosen 2026-06-25: "no noticeable difference between picking codex vs
+                                     # claude"). REVERSES C6.0's confined `workspace-write` default — C6.0 had verified
+                                     # workspace-write is write-capable + non-hanging + project-confined, but the operator
+                                     # prefers claude parity over confinement. Full access via the `-s` sandbox MODE (clean,
+                                     # version-stable), NOT the auto_bypass_flag (which OVERRIDES -s and is the
+                                     # EXTREMELY-DANGEROUS-flagged path). Re-confine per-machine via a config.json
+                                     # `fusion.codex.executor_sandbox` override (e.g. "workspace-write") — turn 1 + resume
+                                     # both follow it; reversible, no code change.
     "json_flag": "--json",           # structured-JSONL flag the parser reads (§3)
     "auth_probe": ["codex", "login", "status"],   # cheap, NON-BILLING auth-state probe (§3; not just `which`)
     "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # full-access no-sandbox flag; C6.0 found it
-                                     # OVERRIDES -s entirely (NOT additive). UNUSED by the confined workspace-write
-                                     # executor above; here for an opt-in full-access override + the C0/§3 record.
+                                     # OVERRIDES -s entirely (NOT additive). UNUSED by the executor — full access now
+                                     # comes from `-s danger-full-access` above (the clean sandbox MODE), not this flag;
+                                     # kept for the C0/§3 record + an opt-in override.
     "max_concurrent_dispatches": 2,  # §2 Q7 / Plus cap GUARD: max codex EXECUTOR dispatches running at once.
                                      # Each codex dispatch is a full agentic run sharing ONE 5-hour subscription
                                      # window (esp. tight on Plus), so a burst of concurrent codex dispatches can
