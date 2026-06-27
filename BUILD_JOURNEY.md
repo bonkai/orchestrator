@@ -80,7 +80,7 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-17/20 Codex (CODEX_PLAN.md, C0–C6): OpenAI's codex CLI, $0 on a ChatGPT sub, no API key. It's a Fusion seat, a selectable judge, AND a watchable executor. No Stop hook, so an in-band poller tails its sidecar to finalize + loop-watch it. Live testing fixed its model id to gpt-5.5.
+17/20 Codex (CODEX_PLAN.md, C0–C6): OpenAI's codex CLI, $0 on a ChatGPT sub, no API key. It's a Fusion seat, a selectable judge, AND a watchable executor. No Stop hook, so an in-band poller tails its sidecar to finalize + loop-watch it. Live testing fixed the id to gpt-5.5.
 
 ---
 
