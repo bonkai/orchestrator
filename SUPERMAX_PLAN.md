@@ -191,6 +191,31 @@ recommended evolution of v1 before (or instead of) live injection.
 | §3 `write_text_to_session_by_var` + `/refine_inject` (claude-only) | ⬜ designed, gated |
 | §4 refine-then-resume | ⬜ recommended next |
 
+### Verified (2026-06-26)
+
+- `POST /dispatch/{id}/refine` live on `:7878`: 404 on unknown id; clean
+  "enter a follow-up" fragment on empty/missing (after switching `Form(...)` →
+  `Form("")`); pane renders on running **#263** + resumable **#262**; output
+  HTML-escaped (XSS-safe); full suite green (491 OK, skipped=4).
+- Real round-trip on **#262**: the vague *"also make it handle the other cases
+  too and dont break anything"* became a precise, symbol-named instruction that
+  resolved the anaphora from the stored task — returned in ~24 s.
+- Real **2-seat fuse** through the same `run_brain_json` call: `fused=True`,
+  `seats_ok=2`, **$0.00** (subscription claude seats), and the endpoint's
+  fused-detection caught it.
+
+### ⚠ Config gotcha that affects "super"-ness by default
+
+On this machine the **default preset `budget` = [deepseek, minimax,
+gemini-lite]**, but only `gemini-lite` is keyed (deepseek/minimax inactive) → **1
+usable seat → /refine honestly degrades to single-model.** Active providers
+available: `glm, gemini-pro, gemini-flash, gemini-lite` (+ claude & codex CLI
+seats, $0). To make refine actually fuse by default, point the default preset at
+≥2 active seats (Settings), or add `claude_cli`/`codex_cli` seats. A v1.1 option:
+let `/refine` substitute a ≥2 active-seat panel when the configured preset
+resolves to <2 usable seats (currently it does not — it stays preset-driven and
+relies on the honest label).
+
 > Reminder for testing: the server runs `reload=False` on `:7878` — restart
 > `python -m orchestrator` for edits to take effect. Auto-push commits edits to
 > origin/main within seconds, so don't verify via `git diff`.
