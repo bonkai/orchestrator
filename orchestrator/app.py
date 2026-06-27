@@ -583,7 +583,7 @@ def _supermax_refine_prompt(original_task: str, followup: str) -> str:
 
 
 @app.post("/dispatch/{dispatch_id}/refine", response_class=HTMLResponse)
-async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Form(...)):
+async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Form("")):
     """Supermax v1: run a typed follow-up through the Fusion panel and return the
     improved text as an HTMX fragment to copy back into the live session. The
     project cwd + original task come from the DB (never the client). Synchronous
