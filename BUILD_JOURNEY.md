@@ -28,7 +28,7 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-4/20 Phase 2 — completion logging. A global Stop hook (notify_complete.sh) POSTs to /api/complete, writing an outcomes row + copying the transcript. It's env-gated: a no-op unless ORCHESTRATOR_RUN_ID is set, so my own manual claude sessions stay untouched. The learning loop starts.
+4/20 Phase 2 — completion logging. A global Stop hook (notify_complete.sh) POSTs to /api/complete, writing an outcomes row + copying the transcript. Env-gated: a no-op unless ORCHESTRATOR_RUN_ID is set, so my manual claude sessions stay untouched. The learning loop starts.
 
 ---
 
