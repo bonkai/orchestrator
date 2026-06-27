@@ -44,7 +44,7 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-8/20 Phase 6 — cross-project retrieval. embeddings.py hits local Ollama (embeddinggemma, 768-dim) — zero new Python deps. retrieval.py stores vectors as BLOBs + hand-rolls cosine. Top-5 similar past tasks from EVERY project feed the rewriter. Dim-mismatched rows are skipped, not trusted.
+8/20 Phase 6 — cross-project retrieval. embeddings.py hits local Ollama (embeddinggemma, 768-dim) — zero new Python deps. retrieval.py stores vectors as BLOBs + hand-rolls cosine. Top-5 similar past tasks from ANY project feed the rewriter. Dim-mismatched rows are skipped.
 
 ---
 
@@ -60,7 +60,7 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-12/20 Phase 10 — the payoff: "visible, never headless." Every brain call left its hidden subprocess for a watchable tab. run_claude_json + spawn_brain_tab stream claude -p stream-json, tee it to a sidecar, and re-parse the same result. Headless is now just the no-iTerm2 fallback.
+12/20 Phase 10 — the payoff: "visible, never headless." Every brain call left its hidden subprocess for a watchable tab. run_claude_json + spawn_brain_tab stream claude -p stream-json, tee it to a sidecar, then re-parse the result. Headless is now just the no-iTerm2 fallback.
 
 ---
 
@@ -76,11 +76,11 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-16/20 The judge doesn't just merge — it verifies, then re-judges (run_fusion_json). Per-seat "lenses" (risks / simplest path / what's ambiguous) decorrelate the panel. Enrichment mode (fusion.py) appends a Multi-model analysis block instead of authoring. F0–F9 built, 300+ tests green.
+16/20 The judge doesn't just merge — it verifies, then re-judges (run_fusion_json). Per-seat "lenses" (risks / simplest path / what's ambiguous) decorrelate the panel. Enrichment mode (fusion.py) appends a Multi-model analysis block instead. F0–F9 built, 300+ tests green.
 
 ---
 
-17/20 Codex (CODEX_PLAN.md, C0–C6): OpenAI's codex CLI, $0 on a ChatGPT sub, no API key. It's a Fusion seat, a selectable judge, AND a watchable executor. No Stop hook, so an in-band poller tails its sidecar to finalize + loop-watch it. Live testing corrected its model id to gpt-5.5.
+17/20 Codex (CODEX_PLAN.md, C0–C6): OpenAI's codex CLI, $0 on a ChatGPT sub, no API key. It's a Fusion seat, a selectable judge, AND a watchable executor. No Stop hook, so an in-band poller tails its sidecar to finalize + loop-watch it. Live testing fixed its model id to gpt-5.5.
 
 ---
 
@@ -92,4 +92,4 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-20/20 Today: Phases 1–10, Fusion F0–F9, Codex C0–C6, Supermax v1 — all built + tested. Next: the paid cross-lab live verify, Supermax v2 injection, and codex's open questions (caps, ToS, judge calibration). It dispatches, watches, and learns — every run teaches the next one. /end
+20/20 Today: Phases 1–10, Fusion F0–F9, Codex C0–C6, Supermax v1 — all built + tested. Next: the paid cross-lab live verify, Supermax v2 injection, and codex's open questions (caps, ToS, judge calibration). It dispatches, watches, and learns — every run teaches the next. /end
