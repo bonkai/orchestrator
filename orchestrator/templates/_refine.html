@@ -2,11 +2,27 @@
    Renders the panel-improved follow-up (editable) + a copy button, or an error.
    Jinja autoescaping keeps the improved text HTML-safe; the textarea preserves
    newlines. See SUPERMAX_PLAN.md. #}
+{% macro context_line(kind, source, note) %}
+  {% if kind %}
+    <p class="muted" style="font-size:11px; margin:0.1rem 0 0.4rem;">
+      context:
+      {% if kind == 'conversation summary' %}
+        <span title="the panel was briefed with a purpose-aware summary of the session so far">🧠 conversation summary</span>
+        {% if source %}<span class="muted">({{ source }})</span>{% endif %}
+      {% else %}
+        <span title="no usable transcript was found, so the panel only saw the session's original task">original task only</span>
+        {% if source %}<span class="muted">— {{ source }}</span>{% endif %}
+      {% endif %}
+      {% if note %}<span class="muted">· {{ note }}</span>{% endif %}
+    </p>
+  {% endif %}
+{% endmacro %}
 {% if not ok %}
-  <p style="color:#f0676f; font-size:12px; margin:0.6rem 0;">
+  <p style="color:#f0676f; font-size:12px; margin:0.6rem 0 0.2rem;">
     refine failed: {{ error }}</p>
+  {{ context_line(context_kind, context_source, context_note) }}
 {% else %}
-  <p class="muted" style="font-size:12px; margin:0.6rem 0 0.4rem;">
+  <p class="muted" style="font-size:12px; margin:0.6rem 0 0.2rem;">
     {% if fused %}
       <span title="a real multi-model Fusion panel authored this">⚡ fused</span>
       · {{ seats_ok }} seat{{ '' if seats_ok == 1 else 's' }} answered
@@ -17,6 +33,7 @@
       — Fusion panel unavailable; not a multi-model fuse
     {% endif %}
   </p>
+  {{ context_line(context_kind, context_source, context_note) }}
   <textarea id="refine-improved" rows="6"
             style="width:100%; font-family:var(--mono); font-size:12px;"
             spellcheck="false">{{ improved }}</textarea>

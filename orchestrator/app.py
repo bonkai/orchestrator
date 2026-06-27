@@ -541,54 +541,207 @@ async def dispatch_open(dispatch_id: int):
     })
 
 
-# ─── supermax: refine a follow-up through the Fusion panel (v1, copy-paste) ──
-# Once a session is running, the user types a follow-up here; we run it through
-# the SAME panel→judge→fallback chain the rewrite uses (run_brain_json fusion=True),
-# and hand back the improved text to paste into their live iTerm session. See
-# SUPERMAX_PLAN.md for v1 (this) vs v2 (live AppleScript injection, gated).
+# ─── supermax: refine a follow-up through the Fusion panel ───────────────────
+# Once a session is going, the user types a follow-up here; we (1) build CONTEXT
+# from the conversation so far — distill the session transcript, then run a
+# PURPOSE-AWARE summary brain call that knows it's briefing a panel to rewrite the
+# NEXT instruction — and (2) run the follow-up + that summary through the SAME
+# panel→judge→fallback chain the rewrite uses (run_brain_json fusion=True), handing
+# back improved text to paste into the live iTerm session. See SUPERMAX_PLAN.md for
+# this (copy-paste) vs the gated live-injection path.
 
-# Bound the original-task context we prepend to the wrapper — a rewritten prompt
-# can be multi-KB and every char is sent to (paid) panel seats. The follow-up is
-# what we're actually improving; the task is just an anchor for anaphora.
-_REFINE_TASK_CONTEXT_CHARS = 4000
+# Bound the context we prepend to the panel wrapper — a conversation summary (or a
+# multi-KB rewritten task) is sent to every (paid) panel seat, so cap it.
+_REFINE_CONTEXT_CHARS = 8000
+# Cap on the distilled transcript fed to the summary brain call (matches the
+# summarizer's own bound — keeps the summary prompt from blowing up on a long run).
+_REFINE_SUMMARY_TRANSCRIPT_CHARS = 30_000
+
+# claude stores a session's transcript under ~/.claude/projects/<encoded-cwd>/,
+# encoding the cwd by replacing every non-alphanumeric char with '-' (verified
+# against the live dir: /Users/.../image_checkpoint_project →
+# -Users-...-image-checkpoint-project; verse_sites/otakushowcase.com →
+# -...-verse-sites-otakushowcase-com).
+_CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
-def _supermax_refine_prompt(original_task: str, followup: str) -> str:
-    """Wrap a raw follow-up so the Fusion panel IMPROVES it instead of ANSWERING
-    it. This is the make-or-break point (SUPERMAX_PLAN.md §1): run_fusion_json's
-    judge synthesizes an ANSWER to "the task" in the task's requested format — so
-    we make "the task" be "rewrite this message" and the requested format be
-    "plain improved message text". Each seat then returns an improved message, the
-    judge synthesizes the single best one, and `.text` is paste-ready. The
-    single-model fallback (run_claude_json) gets this SAME wrapper, so it improves
-    rather than silently answering. Generic English (engine-neutral for the panel
-    seats), not Claude-tuned phrasing."""
-    task = (original_task or "").strip()
-    if len(task) > _REFINE_TASK_CONTEXT_CHARS:
-        task = task[:_REFINE_TASK_CONTEXT_CHARS] + "\n…(truncated)"
-    ctx = (f"\n\n## The session's original task (for context only — do NOT redo it)\n{task}"
-           if task else "")
+def _encode_cwd_for_claude(cwd: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd or "")
+
+
+def _task_fingerprint(user_task: str) -> str:
+    """A normalized, distinctive slice of the task text, used to match a LIVE
+    session's transcript to THIS dispatch. Essential because a project dir often
+    also holds the user's UNRELATED manual claude sessions (this orchestrator repo
+    included — its freshest .jsonl is usually a hand-run session), so 'newest file'
+    alone would summarize the wrong conversation."""
+    return re.sub(r"[^a-z0-9]", "", (user_task or "").lower())[:80]
+
+
+def _find_live_claude_transcript(cwd: str, user_task: str) -> str | None:
+    """Best-effort: locate the live claude session JSONL for a RUNNING claude
+    dispatch (which has no session_id yet) by matching the task fingerprint within
+    a candidate transcript's head. Returns the freshest matching file, or None when
+    the fingerprint is too short to be safe or nothing matches (→ honest fallback to
+    original-task-only). Never raises."""
+    fp = _task_fingerprint(user_task)
+    if len(fp) < 24:                       # too short to disambiguate safely
+        return None
+    proj = _CLAUDE_PROJECTS_DIR / _encode_cwd_for_claude(cwd)
+    if not proj.is_dir():
+        return None
+    cands: list[tuple[float, Path]] = []
+    for p in proj.glob("*.jsonl"):
+        try:
+            cands.append((p.stat().st_mtime, p))
+        except OSError:
+            continue
+    cands.sort(reverse=True)               # freshest first
+    for _mtime, p in cands[:25]:           # bound the scan
+        try:
+            head = p.read_text(encoding="utf-8", errors="replace")[:20000]
+        except OSError:
+            continue
+        if fp in re.sub(r"[^a-z0-9]", "", head.lower()):
+            return str(p)
+    return None
+
+
+def _resolve_refine_transcript(d: dict) -> tuple[str | None, str]:
+    """Pick the best conversation transcript for a refine, most-reliable first:
+      1. stored transcript_path (completed/paused)          — reliable
+      2. live codex executor sidecar (CODEX_DIR/<id>.jsonl) — reliable (keyed by id)
+      3. live claude transcript matched by task fingerprint — best-effort
+    Returns (path, human-readable source) or (None, reason). Never raises."""
+    tp = d.get("transcript_path")
+    if tp and Path(tp).is_file():
+        return tp, "stored transcript"
+    codex_live = spawn.CODEX_DIR / f"{d['id']}.jsonl"
+    if codex_live.is_file():
+        return str(codex_live), "live codex transcript"
+    live = _find_live_claude_transcript(d.get("project_path") or "", d.get("user_task") or "")
+    if live:
+        return live, "live claude transcript"
+    return None, "no transcript found"
+
+
+def _refine_summary_prompt(original_task: str, followup: str, transcript_md: str) -> str:
+    """PURPOSE-AWARE conversation briefing. The consumer is NOT a human — it's a
+    panel of models whose only job is to rewrite the developer's NEXT follow-up into
+    the SAME running session. Telling the model that purpose AND the actual follow-up
+    yields a far more useful briefing than a generic 'summarize this': it keeps the
+    concrete details the next instruction depends on (paths, symbols, decisions,
+    current state) instead of generalizing them away."""
+    return (
+        "You are writing a tight BRIEFING of an in-progress coding session. It will "
+        "NOT be shown to a human — it is fed to a panel of models whose ONLY job is to "
+        "rewrite the developer's NEXT follow-up instruction (below) into a clearer, "
+        "more complete instruction to send into this SAME session. So capture exactly "
+        "what that panel needs to understand the follow-up in context and lose no "
+        "information:\n"
+        "- what the session set out to do, and what has actually been done so far;\n"
+        "- the CURRENT state: files/modules created or changed (give real paths), key "
+        "symbols/functions, and any decisions or conventions established;\n"
+        "- what is in progress, pending, or known-broken;\n"
+        "- resolve anything the follow-up refers to implicitly ('it', 'that', 'the "
+        "other one') to concrete things from the session.\n\n"
+        "Preserve concrete details (paths, names, numbers, decisions) — do NOT "
+        "generalize them away. Be complete but compact; drop pleasantries and dead "
+        "ends that don't affect the next instruction. Output the briefing as plain "
+        "markdown — no preamble, no JSON.\n\n"
+        f"## The session's original task\n{(original_task or '(unknown)').strip()}\n\n"
+        f"## The developer's next follow-up (what the briefing must support)\n{followup.strip()}\n\n"
+        f"## The session transcript so far\n{transcript_md}"
+    )
+
+
+def _build_refine_context(d: dict, followup: str) -> tuple[str, dict]:
+    """Resolve the transcript, distill it, and run ONE visible PURPOSE-AWARE summary
+    claude call → a compact briefing the refine panel uses as context. Falls back to
+    the original task text (the pre-summary behavior) when no transcript is found or
+    the summary falls short — so refine always runs, and `meta` honestly records
+    which context was used. Never raises."""
+    original_task = d.get("user_task") or ""
+    cwd = d.get("project_path") or ""
+    path, source = _resolve_refine_transcript(d)
+    meta = {"summarized": False, "source": source, "context_kind": "original task only"}
+    if not path:
+        return original_task, meta
+    transcript_md = summarizer.distill_transcript(
+        path, max_chars=_REFINE_SUMMARY_TRANSCRIPT_CHARS)
+    if transcript_md.startswith("[transcript file missing") or \
+            transcript_md.startswith("[no conversational content"):
+        meta["note"] = "transcript unreadable/empty"
+        return original_task, meta
+    # Summary tier stays sonnet/medium (the summarizer's deliberate choice — a
+    # distillation rarely needs opus); the PURPOSE-AWARE prompt does the heavy
+    # lifting. Visible tab like every brain call (no hidden LLM calls).
+    run = claude_runner.run_claude_json(
+        prompt=_refine_summary_prompt(original_task, followup, transcript_md),
+        cwd=cwd, model="sonnet", effort="medium", label="supermax-summary")
+    if run.ok and (run.text or "").strip():
+        meta.update(summarized=True, context_kind="conversation summary",
+                    summary_cost=run.cost_usd)
+        return run.text.strip(), meta
+    meta["note"] = f"summary failed: {run.error or 'empty'}"
+    return original_task, meta
+
+
+def _supermax_refine_prompt(context: str, followup: str) -> str:
+    """Wrap a raw follow-up so the Fusion panel IMPROVES it instead of ANSWERING it.
+    This is the make-or-break point (SUPERMAX_PLAN.md §1): run_fusion_json's judge
+    synthesizes an ANSWER to "the task" in the task's requested format — so we make
+    "the task" be "rewrite this message" and the requested format "plain improved
+    message text". Each seat returns an improved message, the judge synthesizes the
+    best one, and `.text` is paste-ready. The single-model fallback gets the SAME
+    wrapper, so it improves rather than silently answering. `context` is the session
+    briefing (conversation summary, or just the original task when no transcript was
+    found) — grounding for resolving the follow-up, never something to re-execute."""
+    ctx = (context or "").strip()
+    if len(ctx) > _REFINE_CONTEXT_CHARS:
+        ctx = ctx[:_REFINE_CONTEXT_CHARS] + "\n…(truncated)"
+    ctx_block = (
+        "\n\n## Context on the ongoing session (its goal + what's happened so far — "
+        f"grounding only; do NOT redo any of it)\n{ctx}" if ctx else "")
     return (
         "You are improving a follow-up message that a developer is about to send "
         "into an ONGOING Claude Code / coding session. Rewrite the message below so "
         "it is a clearer, more complete, and more actionable instruction: preserve "
-        "the developer's intent exactly, make implicit requirements explicit, and "
-        "resolve vagueness where you reasonably can. Do NOT answer, perform, or plan "
-        "the request, and do NOT add commentary. Output ONLY the improved message "
-        "text, ready to paste directly into the session — no preamble, no quotes, no "
-        "markdown fences."
-        f"{ctx}"
+        "the developer's intent exactly, make implicit requirements explicit, use the "
+        "session context to resolve vague references to concrete things, and fill in "
+        "what the session would need to act without guessing. Do NOT answer, perform, "
+        "or plan the request, and do NOT add commentary. Output ONLY the improved "
+        "message text, ready to paste directly into the session — no preamble, no "
+        "quotes, no markdown fences."
+        f"{ctx_block}"
         f"\n\n## The follow-up message to improve\n{followup.strip()}"
     )
 
 
+def _run_refine(d: dict, project_path: str, followup: str) -> tuple:
+    """The blocking two-step refine, run in a threadpool: build the conversation
+    context (transcript → purpose-aware summary), then fuse the follow-up + context
+    through the panel. Returns (ClaudeRun, context-meta). Never raises."""
+    context, cmeta = _build_refine_context(d, followup)
+    wrapped = _supermax_refine_prompt(context, followup)
+    # fusion=True routes through run_fusion_json (panel→judge), degrading to a single
+    # visible claude call if <2 seats answer. model/effort govern that fallback;
+    # judge_model/judge_effort govern the fusion synthesis (one knob).
+    run = claude_runner.run_brain_json(
+        prompt=wrapped, cwd=project_path, fusion=True,
+        model="opus", effort="high", judge_model="opus", judge_effort="high",
+        label="supermax-refine")
+    return run, cmeta
+
+
 @app.post("/dispatch/{dispatch_id}/refine", response_class=HTMLResponse)
 async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Form("")):
-    """Supermax v1: run a typed follow-up through the Fusion panel and return the
-    improved text as an HTMX fragment to copy back into the live session. The
-    project cwd + original task come from the DB (never the client). Synchronous
-    but offloaded to a threadpool so the minutes-long panel never stalls the loop.
-    Never spawns a hidden brain call — the panel runs in its usual visible tab."""
+    """Supermax refine: build context from the conversation so far (purpose-aware
+    summary of the session transcript), run the follow-up + that context through the
+    Fusion panel, and return the improved text as an HTMX fragment to copy back into
+    the live session. cwd + task + transcript come from the DB / disk (never the
+    client). The blocking two brain steps run in a threadpool so the event loop is
+    never stalled, and both run in their usual visible tabs (no hidden LLM calls)."""
     d = db.get_dispatch_with_project(dispatch_id)
     if not d:
         raise HTTPException(404, "unknown dispatch")
@@ -603,19 +756,14 @@ async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Fo
             request, "_refine.html",
             {"ok": False, "error": f"project path no longer exists: {project_path}"})
 
-    wrapped = _supermax_refine_prompt(d.get("user_task") or "", followup)
     loop = asyncio.get_running_loop()
-    # fusion=True routes through run_fusion_json (panel→judge), degrading to a
-    # single visible claude call if <2 seats answer. model/effort govern that
-    # fallback; judge_model/judge_effort govern the fusion synthesis (one knob).
-    run = await loop.run_in_executor(None, lambda: claude_runner.run_brain_json(
-        prompt=wrapped, cwd=project_path, fusion=True,
-        model="opus", effort="high", judge_model="opus", judge_effort="high",
-        label="supermax-refine"))
+    run, cmeta = await loop.run_in_executor(None, _run_refine, d, project_path, followup)
     if not run.ok:
         return templates.TemplateResponse(
             request, "_refine.html",
-            {"ok": False, "error": run.error or "refine failed", "followup": followup})
+            {"ok": False, "error": run.error or "refine failed", "followup": followup,
+             "context_kind": cmeta.get("context_kind"), "context_source": cmeta.get("source"),
+             "context_note": cmeta.get("note")})
 
     # Honest "did it actually fuse?" — a real panel leaves run.raw['panel']; a
     # single-claude fallback does not. Count seats that actually answered.
@@ -631,6 +779,11 @@ async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Fo
         "cost": run.cost_usd,
         "model": run.model,
         "followup": followup,
+        # What context the panel saw — surfaced so a summary-backed refine is
+        # distinguishable from an original-task-only one (honest, like `fused`).
+        "context_kind": cmeta.get("context_kind"),
+        "context_source": cmeta.get("source"),
+        "context_note": cmeta.get("note"),
     })
 
 
