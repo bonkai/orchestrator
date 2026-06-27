@@ -221,6 +221,7 @@ recommended evolution of v1 before (or instead of) live injection.
 | §1 follow-up wrapper (`_supermax_refine_prompt`) | ✅ shipped |
 | §2 `POST /dispatch/{id}/refine` (threadpool, DB cwd, honest fused label) | ✅ shipped |
 | §2 `_refine.html` fragment + dispatch.html pane (gated on running/resumable) | ✅ shipped |
+| §2.1 conversation-summary context (transcript → purpose-aware summary → panel) | ✅ shipped |
 | v1.5 fire-and-forget + poll (latency robustness) | ⬜ next |
 | §3 `write_text_to_session_by_var` + `/refine_inject` (claude-only) | ⬜ designed, gated |
 | §4 refine-then-resume | ⬜ recommended next |
