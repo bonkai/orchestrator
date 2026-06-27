@@ -68,7 +68,7 @@ origin/main within seconds. "Draft" is not private if origin is public.
 
 ---
 
-14/20 The advanced layer: Fusion (FUSION_PLAN.md). Opt-in, default-off — it fans a task out to a panel of models at DIFFERENT labs in parallel, then a local judge synthesizes them into one. Toggle off = byte-for-byte the old path, and a flaky provider can never abort a dispatch.
+14/20 The advanced layer: Fusion (FUSION_PLAN.md). Opt-in, default-off — it fans a task out to a panel at DIFFERENT labs in parallel, then a local judge synthesizes them into one. Toggle off = byte-for-byte the old path, and a flaky provider can never abort a dispatch.
 
 ---
 
