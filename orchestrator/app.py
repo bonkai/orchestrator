@@ -718,17 +718,46 @@ def _supermax_refine_prompt(context: str, followup: str) -> str:
     )
 
 
+def _panel_for_dispatch(dispatch_id: int) -> list:
+    """Reuse the Fusion panel the user picked when they DISPATCHED this task
+    (recorded on the rewrite stage event as `panel` — the exact seat list
+    _parse_fusion_panel produced, lenses included) so a refine fuses with the SAME
+    seats as the original prompt instead of the global default preset. This is the
+    right default: the dispatch's own panel is already ≥2 working seats (Claude/codex
+    CLI seats are $0 and always available), whereas the configured `budget` preset
+    may resolve to <2 active seats and silently degrade to single-model. Returns the
+    latest non-empty panel, or [] when the dispatch wasn't fusion-dispatched (→ caller
+    falls back to the configured preset). Stale seats are harmless — run_fusion_json
+    drops unusable ones and falls back if <2 remain."""
+    panel: list = []
+    for ev in db.get_events(dispatch_id, since_id=0, limit=200):
+        if ev.get("kind") != "stage":
+            continue
+        p = ev.get("payload") or {}
+        if p.get("stage") in ("rewrite_ok", "rewrite_skipped"):
+            cand = p.get("panel")
+            if isinstance(cand, list) and cand:
+                panel = cand                       # keep the latest non-empty
+    return panel
+
+
 def _run_refine(d: dict, project_path: str, followup: str) -> tuple:
     """The blocking two-step refine, run in a threadpool: build the conversation
     context (transcript → purpose-aware summary), then fuse the follow-up + context
-    through the panel. Returns (ClaudeRun, context-meta). Never raises."""
+    through the panel. Reuses the dispatch's ORIGINAL panel (same seats the user
+    picked for the first prompt) so refine fuses for free with the seats they chose,
+    not the global preset. Returns (ClaudeRun, context-meta). Never raises."""
     context, cmeta = _build_refine_context(d, followup)
     wrapped = _supermax_refine_prompt(context, followup)
+    panel = _panel_for_dispatch(d["id"])
+    cmeta["panel_source"] = "original dispatch" if panel else "configured preset"
     # fusion=True routes through run_fusion_json (panel→judge), degrading to a single
-    # visible claude call if <2 seats answer. model/effort govern that fallback;
+    # visible claude call if <2 seats answer. `panel or None`: reuse the original
+    # dispatch's seats when present, else None → run_fusion_json's configured-preset
+    # default (the pre-reuse behavior). model/effort govern the fallback;
     # judge_model/judge_effort govern the fusion synthesis (one knob).
     run = claude_runner.run_brain_json(
-        prompt=wrapped, cwd=project_path, fusion=True,
+        prompt=wrapped, cwd=project_path, fusion=True, panel=panel or None,
         model="opus", effort="high", judge_model="opus", judge_effort="high",
         label="supermax-refine")
     return run, cmeta
