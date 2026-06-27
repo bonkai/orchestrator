@@ -27,6 +27,31 @@
       <pre>{{ d.user_task }}</pre>
     </div>
 
+    {# Supermax v1: improve a follow-up through the Fusion panel, then copy it
+       back into the live session. Shown only while there's a session to talk to
+       (running, or finished-but-resumable) — same condition as open/resume. #}
+    {% if d.status == 'running' or d.session_id %}
+    <div class="pane reveal">
+      <h3 style="margin-top:0;">supermax refine
+        <span class="muted" style="font-weight:normal; font-size:12px;">
+          — run a follow-up through the Fusion panel, then paste it back into your session</span>
+      </h3>
+      <form hx-post="/dispatch/{{ d.id }}/refine" hx-target="#refine-result"
+            hx-swap="innerHTML" hx-indicator="#refine-spin" hx-disabled-elt="find button">
+        <textarea name="followup" rows="3" required
+                  placeholder="type the next thing you'd send into this session…"
+                  style="width:100%; font-family:var(--mono); font-size:12px;"
+                  spellcheck="false"></textarea>
+        <div style="margin-top:0.4rem; display:flex; gap:0.6rem; align-items:center;">
+          <button type="submit" class="small">improve through fusion panel</button>
+          <span id="refine-spin" class="htmx-indicator muted" style="font-size:11px;">
+            running the panel (visible in iTerm) — can take a minute or two…</span>
+        </div>
+      </form>
+      <div id="refine-result"></div>
+    </div>
+    {% endif %}
+
     {% if rewrite %}
     <div class="pane reveal">
       <h3 style="margin-top:0;">

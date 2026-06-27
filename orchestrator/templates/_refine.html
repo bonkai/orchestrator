@@ -1,0 +1,30 @@
+{# Supermax v1 refine result — HTMX fragment swapped into #refine-result.
+   Renders the panel-improved follow-up (editable) + a copy button, or an error.
+   Jinja autoescaping keeps the improved text HTML-safe; the textarea preserves
+   newlines. See SUPERMAX_PLAN.md. #}
+{% if not ok %}
+  <p style="color:#f0676f; font-size:12px; margin:0.6rem 0;">
+    refine failed: {{ error }}</p>
+{% else %}
+  <p class="muted" style="font-size:12px; margin:0.6rem 0 0.4rem;">
+    {% if fused %}
+      <span title="a real multi-model Fusion panel authored this">⚡ fused</span>
+      · {{ seats_ok }} seat{{ '' if seats_ok == 1 else 's' }} answered
+      {% if preset %}· preset <code>{{ preset }}</code>{% endif %}
+      · ${{ '%.4f'|format(cost or 0) }} panel
+    {% else %}
+      <span title="the panel was unavailable or &lt;2 seats answered — improved by a single visible claude call">single model{% if model %} (<code>{{ model }}</code>){% endif %}</span>
+      — Fusion panel unavailable; not a multi-model fuse
+    {% endif %}
+  </p>
+  <textarea id="refine-improved" rows="6"
+            style="width:100%; font-family:var(--mono); font-size:12px;"
+            spellcheck="false">{{ improved }}</textarea>
+  <div style="margin-top:0.4rem; display:flex; gap:0.5rem; align-items:center;">
+    <button type="button" class="small"
+            onclick="var b=this; navigator.clipboard.writeText(document.getElementById('refine-improved').value).then(function(){b.textContent='copied ✓';setTimeout(function(){b.textContent='copy improved message';},1500);});">
+      copy improved message</button>
+    <span class="muted" style="font-size:11px;">
+      paste this into your live iTerm session (v1 is copy-paste — see SUPERMAX_PLAN.md)</span>
+  </div>
+{% endif %}
