@@ -34,7 +34,7 @@
     <div class="pane reveal">
       <h3 style="margin-top:0;">supermax refine
         <span class="muted" style="font-weight:normal; font-size:12px;">
-          — run a follow-up through the Fusion panel, then paste it back into your session</span>
+          — improve a follow-up using a summary of the conversation so far, then paste it back into your session</span>
       </h3>
       <form hx-post="/dispatch/{{ d.id }}/refine" hx-target="#refine-result"
             hx-swap="innerHTML" hx-indicator="#refine-spin" hx-disabled-elt="find button">
@@ -45,7 +45,7 @@
         <div style="margin-top:0.4rem; display:flex; gap:0.6rem; align-items:center;">
           <button type="submit" class="small">improve through fusion panel</button>
           <span id="refine-spin" class="htmx-indicator muted" style="font-size:11px;">
-            running the panel (visible in iTerm) — can take a minute or two…</span>
+            summarizing the conversation, then running the panel (both visible in iTerm) — can take a minute or two…</span>
         </div>
       </form>
       <div id="refine-result"></div>
