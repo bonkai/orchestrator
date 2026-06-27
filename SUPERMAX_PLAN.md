@@ -120,9 +120,25 @@ reconstructed the session's exact verify recipe, and named real symbols/line
 numbers. The UI labels which context was used (🧠 conversation summary vs original
 task only) the same way it labels fused vs single-model.
 
+### 2.2 Panel reuse — fuse with the SAME seats as the original prompt (SHIPPED)
+
+Refine no longer uses the global default preset (whose `budget` seats are mostly
+un-keyed → <2 active → silent single-model fallback). Instead `_panel_for_dispatch`
+reads the panel the user **picked when they dispatched the task** (recorded on the
+`rewrite_ok`/`rewrite_skipped` stage event as `panel` — the exact seat list, lenses
+included) and reuses it. This is the right default: that panel is already ≥2
+working seats (Claude/codex CLI seats are $0 and always available; the user's e.g.
+2×claude + 2×glm + gemini panel), so refine **fuses for free with the seats they
+chose**, carrying their lenses (first-principles / adversary / user-intent). Empty
+(non-fusion dispatch) → falls back to the configured preset (prior behavior). Stale
+seats are harmless — `run_fusion_json` drops unusable ones and falls back if <2.
+
+Verified on #262: reused its 5-seat panel → **⚡ fused, 4 seats answered, $0.00**,
+🧠 conversation summary, "same seats as the original prompt".
+
 **Cost/latency:** now **two** visible brain steps per refine (summary `sonnet`,
-then the `opus` panel) — more tabs + time, the price of real context. The summary
-tier stays low by design; tunable.
+then the reused `opus`+panel) — more tabs + time, the price of real context +
+fusion. The summary tier stays low by design; tunable.
 
 **Remaining honest limitations:**
 - For a dispatch that already **completed**, the stored transcript is a snapshot
@@ -222,6 +238,7 @@ recommended evolution of v1 before (or instead of) live injection.
 | §2 `POST /dispatch/{id}/refine` (threadpool, DB cwd, honest fused label) | ✅ shipped |
 | §2 `_refine.html` fragment + dispatch.html pane (gated on running/resumable) | ✅ shipped |
 | §2.1 conversation-summary context (transcript → purpose-aware summary → panel) | ✅ shipped |
+| §2.2 panel reuse (fuse with the original dispatch's seats, not the global preset) | ✅ shipped |
 | v1.5 fire-and-forget + poll (latency robustness) | ⬜ next |
 | §3 `write_text_to_session_by_var` + `/refine_inject` (claude-only) | ⬜ designed, gated |
 | §4 refine-then-resume | ⬜ recommended next |
