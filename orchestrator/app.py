@@ -792,7 +792,7 @@ async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Fo
             request, "_refine.html",
             {"ok": False, "error": run.error or "refine failed", "followup": followup,
              "context_kind": cmeta.get("context_kind"), "context_source": cmeta.get("source"),
-             "context_note": cmeta.get("note")})
+             "context_note": cmeta.get("note"), "panel_source": cmeta.get("panel_source")})
 
     # Honest "did it actually fuse?" — a real panel leaves run.raw['panel']; a
     # single-claude fallback does not. Count seats that actually answered.
@@ -813,6 +813,7 @@ async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Fo
         "context_kind": cmeta.get("context_kind"),
         "context_source": cmeta.get("source"),
         "context_note": cmeta.get("note"),
+        "panel_source": cmeta.get("panel_source"),
     })
 
 

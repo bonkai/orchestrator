@@ -26,7 +26,8 @@
     {% if fused %}
       <span title="a real multi-model Fusion panel authored this">⚡ fused</span>
       · {{ seats_ok }} seat{{ '' if seats_ok == 1 else 's' }} answered
-      {% if preset %}· preset <code>{{ preset }}</code>{% endif %}
+      {% if panel_source == 'original dispatch' %}<span title="reused the exact panel you picked when you dispatched this task">· same seats as the original prompt</span>
+      {% elif preset %}· preset <code>{{ preset }}</code>{% endif %}
       · ${{ '%.4f'|format(cost or 0) }} panel
     {% else %}
       <span title="the panel was unavailable or &lt;2 seats answered — improved by a single visible claude call">single model{% if model %} (<code>{{ model }}</code>){% endif %}</span>
