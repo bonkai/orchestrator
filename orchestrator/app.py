@@ -541,6 +541,99 @@ async def dispatch_open(dispatch_id: int):
     })
 
 
+# ─── supermax: refine a follow-up through the Fusion panel (v1, copy-paste) ──
+# Once a session is running, the user types a follow-up here; we run it through
+# the SAME panel→judge→fallback chain the rewrite uses (run_brain_json fusion=True),
+# and hand back the improved text to paste into their live iTerm session. See
+# SUPERMAX_PLAN.md for v1 (this) vs v2 (live AppleScript injection, gated).
+
+# Bound the original-task context we prepend to the wrapper — a rewritten prompt
+# can be multi-KB and every char is sent to (paid) panel seats. The follow-up is
+# what we're actually improving; the task is just an anchor for anaphora.
+_REFINE_TASK_CONTEXT_CHARS = 4000
+
+
+def _supermax_refine_prompt(original_task: str, followup: str) -> str:
+    """Wrap a raw follow-up so the Fusion panel IMPROVES it instead of ANSWERING
+    it. This is the make-or-break point (SUPERMAX_PLAN.md §1): run_fusion_json's
+    judge synthesizes an ANSWER to "the task" in the task's requested format — so
+    we make "the task" be "rewrite this message" and the requested format be
+    "plain improved message text". Each seat then returns an improved message, the
+    judge synthesizes the single best one, and `.text` is paste-ready. The
+    single-model fallback (run_claude_json) gets this SAME wrapper, so it improves
+    rather than silently answering. Generic English (engine-neutral for the panel
+    seats), not Claude-tuned phrasing."""
+    task = (original_task or "").strip()
+    if len(task) > _REFINE_TASK_CONTEXT_CHARS:
+        task = task[:_REFINE_TASK_CONTEXT_CHARS] + "\n…(truncated)"
+    ctx = (f"\n\n## The session's original task (for context only — do NOT redo it)\n{task}"
+           if task else "")
+    return (
+        "You are improving a follow-up message that a developer is about to send "
+        "into an ONGOING Claude Code / coding session. Rewrite the message below so "
+        "it is a clearer, more complete, and more actionable instruction: preserve "
+        "the developer's intent exactly, make implicit requirements explicit, and "
+        "resolve vagueness where you reasonably can. Do NOT answer, perform, or plan "
+        "the request, and do NOT add commentary. Output ONLY the improved message "
+        "text, ready to paste directly into the session — no preamble, no quotes, no "
+        "markdown fences."
+        f"{ctx}"
+        f"\n\n## The follow-up message to improve\n{followup.strip()}"
+    )
+
+
+@app.post("/dispatch/{dispatch_id}/refine", response_class=HTMLResponse)
+async def dispatch_refine(request: Request, dispatch_id: int, followup: str = Form(...)):
+    """Supermax v1: run a typed follow-up through the Fusion panel and return the
+    improved text as an HTMX fragment to copy back into the live session. The
+    project cwd + original task come from the DB (never the client). Synchronous
+    but offloaded to a threadpool so the minutes-long panel never stalls the loop.
+    Never spawns a hidden brain call — the panel runs in its usual visible tab."""
+    d = db.get_dispatch_with_project(dispatch_id)
+    if not d:
+        raise HTTPException(404, "unknown dispatch")
+    followup = (followup or "").strip()
+    if not followup:
+        return templates.TemplateResponse(
+            request, "_refine.html",
+            {"ok": False, "error": "enter a follow-up message to improve."})
+    project_path = d.get("project_path") or ""
+    if not project_path or not Path(project_path).is_dir():
+        return templates.TemplateResponse(
+            request, "_refine.html",
+            {"ok": False, "error": f"project path no longer exists: {project_path}"})
+
+    wrapped = _supermax_refine_prompt(d.get("user_task") or "", followup)
+    loop = asyncio.get_running_loop()
+    # fusion=True routes through run_fusion_json (panel→judge), degrading to a
+    # single visible claude call if <2 seats answer. model/effort govern that
+    # fallback; judge_model/judge_effort govern the fusion synthesis (one knob).
+    run = await loop.run_in_executor(None, lambda: claude_runner.run_brain_json(
+        prompt=wrapped, cwd=project_path, fusion=True,
+        model="opus", effort="high", judge_model="opus", judge_effort="high",
+        label="supermax-refine"))
+    if not run.ok:
+        return templates.TemplateResponse(
+            request, "_refine.html",
+            {"ok": False, "error": run.error or "refine failed", "followup": followup})
+
+    # Honest "did it actually fuse?" — a real panel leaves run.raw['panel']; a
+    # single-claude fallback does not. Count seats that actually answered.
+    fmeta = run.raw if (isinstance(run.raw, dict) and "panel" in run.raw) else {}
+    panel = fmeta.get("panel") or []
+    seats_ok = sum(1 for a in panel if isinstance(a, dict) and a.get("ok"))
+    return templates.TemplateResponse(request, "_refine.html", {
+        "ok": True,
+        "improved": (run.text or "").strip(),
+        "fused": bool(panel),
+        "seats_ok": seats_ok,
+        "preset": fmeta.get("preset") or "",
+        "cost": run.cost_usd,
+        "model": run.model,
+        "followup": followup,
+    })
+
+
 @app.post("/killall")
 async def killall():
     n = await watchdog.kill_all()
