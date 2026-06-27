@@ -89,13 +89,47 @@ Implemented as `_supermax_refine_prompt(original_task, followup)` in `app.py`.
   whether the live session is claude or codex → **codex parity is free at v1.**
 - The user already endorsed a copy-paste-only v1.
 
-**Honest naming / known v1 limitations (documented, not hidden):**
-- The refine is **context-blind**: it sees the original task as background but
-  **not** the live transcript, nor the project bundle / `retrieval.find_similar`
-  context the initial rewrite had. It can't reliably resolve anaphora ("do the
-  same to the *other* file") and a context-blind "improvement" can occasionally
-  degrade an already-context-aware message. v1 is a **prompt-polisher**, not yet
-  true "supermax".
+### 2.1 Conversation-summary context (SHIPPED — the upgrade past "context-blind")
+
+The first cut was context-blind (it saw only the original task). It now briefs the
+panel with a **purpose-aware summary of the conversation so far**, so it can
+resolve "do the same to the *other* one" to concrete things from the session:
+
+1. **Resolve the transcript** (`_resolve_refine_transcript`), most-reliable first:
+   stored `transcript_path` (completed/paused) → live codex sidecar
+   (`CODEX_DIR/<id>.jsonl`, keyed by id) → live **claude** transcript found by
+   **task-fingerprint match** in `~/.claude/projects/<encoded-cwd>/`. The
+   fingerprint match is essential: that dir also holds the user's *unrelated*
+   manual claude sessions (the freshest file is often one), so "newest file" alone
+   would summarize the wrong conversation. No match → honest fallback to
+   original-task-only.
+2. **Distill** it (`summarizer.distill_transcript`, reused — handles claude *and*
+   codex schemas).
+3. **Purpose-aware summary** (`_refine_summary_prompt`): one visible `sonnet` call
+   told it is briefing a panel that will rewrite the developer's *next* follow-up,
+   so it must keep the concrete details that instruction depends on (paths,
+   symbols, decisions, current state, what's pending) instead of a generic recap —
+   and it's given the actual follow-up so the briefing is targeted.
+4. The summary (not just the task) becomes the panel's context.
+
+Verified on a real session (#262): *"also make the camera behave for the other
+targeting mode and verify it on live like before"* → an instruction that resolved
+"the other mode" to the **legacy `autoTarget`/non-SELENGAGE path** (contrasting the
+already-fixed `autoSwing()`/SELENGAGE path — a fact only in the transcript),
+reconstructed the session's exact verify recipe, and named real symbols/line
+numbers. The UI labels which context was used (🧠 conversation summary vs original
+task only) the same way it labels fused vs single-model.
+
+**Cost/latency:** now **two** visible brain steps per refine (summary `sonnet`,
+then the `opus` panel) — more tabs + time, the price of real context. The summary
+tier stays low by design; tunable.
+
+**Remaining honest limitations:**
+- For a dispatch that already **completed**, the stored transcript is a snapshot
+  at completion — a session that kept going past it (e.g. a resumed/continued tab)
+  won't have its newest turns in the summary.
+- Running-**claude** resolution is best-effort (fingerprint heuristic); running-
+  **codex** and stored transcripts are reliable.
 - **Latency:** a full panel takes minutes. v1 holds one synchronous (threadpool)
   POST open; if the user navigates away the result is lost. The robustness
   upgrade is **v1.5: fire-and-forget + poll** (reuse the jobs/poll pattern from
