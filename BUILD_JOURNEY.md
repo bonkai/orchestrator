@@ -11,7 +11,12 @@ Heads up: saving this file auto-commits and pushes to origin/main within seconds
 
 ---
 
-## 1/5 — The origin
+1/5 The origin
+
+I built an AI orchestrator designed to beat any single AI model nearly every time.
+
+I don’t think the best AI system is a single model.
+So I built one that can outperform any standalone model.
 
 So this whole thing started because I was sick of having 10 terminal tabs open with 10 manual Claude Code sessions going at once.
 
@@ -44,7 +49,7 @@ Everything I'm about to say is grounded in the actual code. I checked every symb
 
 ---
 
-## 2/5 — The core build (Phases 1–10)
+2/5 The core build (Phases 1–10)
 
 **Phase 1 — Walking skeleton**
 
@@ -231,7 +236,7 @@ Nothing the model does happens off-screen.
 
 ---
 
-## 3/5 — Fusion (F0–F9)
+3/5 Fusion (F0–F9)
 
 Once the local thing was solid, I built an optional multi-model layer on top — Fusion, all in `FUSION_PLAN.md`.
 
@@ -336,7 +341,7 @@ Assignment strategy in `FUSION_LENS_PLAYBOOK.md`:
 
 ---
 
-## 4/5 — Codex (C0–C6) + Supermax
+4/5 Codex (C0–C6) + Supermax
 
 **Codex — $0 OpenAI executor**
 
@@ -408,7 +413,7 @@ So I built the targeting half and refused to ship the fragile half.
 
 ---
 
-## 5/5 — What didn't get built, and where it stands
+5/5 What didn't get built, and where it stands
 
 **The things I evaluated and declined**
 
