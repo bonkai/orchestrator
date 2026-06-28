@@ -1,60 +1,460 @@
 <!--
-draft. 5 tweets, lowercase rambly voice. posting is your step, not mine.
-every fact / number / symbol is unchanged from the prior version; only the voice
-and formatting changed. case-sensitive tokens (code identifiers, env vars, model
-ids, .md filenames, ClaudeRun, MiniMax-Text-01, gpt-5.5, SIGTERM, etc.) are kept
-exactly so nothing technical breaks. no em dashes anywhere.
-heads up: saving this file auto-commits and pushes to origin/main within seconds.
+DRAFT — "build journey" thread for Twitter/X.
+Posting is your step, not mine.
+
+This file is the readable working draft.
+The numbered sections (1/5, 2/5, etc.) map to individual tweets when posted.
+Each section is long-form — trim/split as you post.
+
+Heads up: saving this file auto-commits and pushes to origin/main within seconds.
 -->
 
 ---
 
-1/5 so this whole thing started because i was sick of having like 10 terminal tabs open with 10 manual claude code sessions going at once. so i built one little browser ui that just dispatches tasks to claude code across every project on my laptop, except it enriches each one first and then it actually learns from every run so the next one starts off smarter. the loop, if you wanna call it that, is basically it grabs that project's memory plus the most similar past tasks from any project i've ever run, has claude rewrite my prompt with all that context, spawns the session in its own iterm2 tab, and then when it finishes it captures what happened, summarizes it, embeds it, and feeds the whole thing back in for next time. so it's a closed loop and it all runs on the one machine. there were three rules i set for myself up front and they basically shaped everything. one, no anthropic api calls at all, every bit of the brain work goes through the claude cli on my existing subscription. two, the brain calls have to be visible, never headless, so every single claude invocation runs in an iterm2 tab i can actually watch. and three, local only, everything runs on this laptop, nothing leaves it. so that's $0 marginal cost on a sub i already pay for, everything watchable, nothing phoning home. anyway i built it up from a tiny mvp to where it is now over about 10 phases, and then on top of that there's a multi-model fusion brain, a $0 openai codex integration, and a thing that refines your follow-ups mid-session. and everything i'm about to say is grounded in the actual code, i'm not handwaving.
+## 1/5 — The origin
+
+So this whole thing started because I was sick of having 10 terminal tabs open with 10 manual Claude Code sessions going at once.
+
+So I built one browser UI that dispatches tasks to Claude Code across every project on my laptop — except it enriches each one first, and it actually learns from every run so the next one starts off smarter.
+
+The loop looks like this:
+
+- Grab the project's memory + most similar past tasks from any project I've ever run
+- Have Claude rewrite my prompt with all that context
+- Spawn the session in its own iTerm2 tab
+- When it finishes, capture what happened, summarize it, embed it, and feed it back for next time
+
+It's a closed loop and it all runs on one machine.
 
 ---
 
-2/5 ok so the first version was just a walking skeleton, honestly nothing smart. fastapi and htmx for the ui, the stdlib sqlite3 module for storage, no orm, and the db lives at ~/.orchestrator/orchestrator.db, deliberately outside the repo so the repo stays clean. and there's this function spawn_iterm2() that drives iterm2 entirely through applescript, no iterm2 python lib, it just opens a tab and runs claude "$task" verbatim. you can have 10+ of those going at once and it tracks them per project. and from day one there was a way to stop them, a per-dispatch stop that does SIGTERM, then a 5s grace, then SIGKILL, plus a global stop-all, and a wall-clock cap in watchdog.py that's 1800s, so 30 min, by default.
+Three rules I set for myself up front that shaped everything:
 
-so the next piece, and this is where the learning loop actually starts, is completion logging. there's a global stop hook, notify_complete.sh, that gets merged into ~/.claude/settings.json, and when a session ends it posts to /api/complete, which writes an outcomes row with a status, completed or killed or failed_to_spawn or orphaned or paused, and copies the transcript over to ~/.orchestrator/transcripts/. the important thing is that hook is env-gated, it's a total no-op unless ORCHESTRATOR_RUN_ID is set in the env, so my own manual claude sessions never trigger it, they're completely untouched.
+1. **No Anthropic API calls** — every bit of brain work goes through the claude CLI on my existing subscription
+2. **Brain calls have to be visible, never headless** — every single Claude invocation runs in an iTerm2 tab I can actually watch
+3. **Local only** — everything runs on this laptop, nothing leaves it
 
-then there's the context bundler, bundle.py. before a task ever runs this thing assembles a bundle out of the project, the CLAUDE.md, the memory/ folder, knowledge/, recent task files, and the live git state, and it figures out where all that lives by reading the project's .forge.json layout, with sane defaults if there isn't one. and it's capped, 5,000 chars per file and 50,000 chars total so one giant file can't blow the prompt, and every path goes through _safe_join and _within_project so a sneaky or symlinked path can't escape the project root. there's a /bundle/<id> view so you can actually look at what context a task is gonna get.
-
-so then the rewriter, which i think of as call a, that's rewriter.py plus prompts/REWRITER.md. it takes that bundle, hands it to a claude call, and gets back structured json, the rewritten_prompt, a rationale, files_to_read, hazards_acknowledged, and proposed_edits, and it shows you all that in an editable preview so you stay in control. couple things i'm kind of proud of here, one is that the rewriter runs at opus/high on purpose because it's the highest-leverage call in the whole system, and the other is that the runner scrubs ORCHESTRATOR_RUN_ID out of the child env before it calls claude, so a brain call can never accidentally trip its own stop hook and pollute the log.
-
-and the mirror of that is the summarizer, call b, summarizer.py and SUMMARIZER.md. the second a dispatch finishes this distills the raw transcript jsonl, drops the noise, caps each block around 1.5kb and the whole thing around 30kb, and turns it into summary_md, what_worked, what_broke, lessons, and tags, which becomes that project's memory basically. and this one is deliberately sonnet/medium, not the rewriter's opus, because a distillation shouldn't escalate to the expensive model. it fires as a background asyncio task that i hold in a strong-reference set so the garbage collector can't kill it mid-flight, and there's an atomic guard so only the race winner fires, no double summaries.
-
-the retrieval is the part where it actually gets cross-project, and it's real semantic search, not keyword stuff. embeddings.py talks to a local ollama running google's embeddinggemma, that's 768-dim, over http at 127.0.0.1:11434, zero new python deps and $0, nothing leaves the laptop. retrieval.py stores every vector as a packed float32 blob right in sqlite and hand-rolls the cosine in pure python, no numpy. and find_similar() pulls the top-5 most similar past tasks from any project, anything with a cosine of 0.3 or higher, and feeds them into the rewriter. it's also kind of defensive, the vectors are NaN/Inf-guarded, and any row whose stored dim doesn't match the query just gets skipped, so if i ever swap the embedding model out it can't quietly poison the results with garbage cosines.
-
-one thing that came up was runaway loops, so there's a loop watchdog, loop_watchdog.py. a second hook, notify_tool_use.sh, a pretooluse one with the same env-gating, posts a fingerprint of (tool_name, input_hash) to /api/tool_use on every tool call, and each dispatch keeps a little ring buffer, a deque with maxlen=8, and when all 8 of the recent fingerprints are identical it fires watchdog.manual_kill with reason="loop:<tool>". funny enough CLAUDE.md still lists this as planned, not in the mvp, but it's been live since phase 7, i went and checked the code before saying any of this, and when the doc and the code disagree the code wins.
-
-then there's auto file-edits, edits.py, so the thing can actually grow a project's memory instead of just reading it. the rewriter can propose three kinds of edit, append_to_memory, append_to_knowledge, and create_task_file, and each one shows up as a checkbox you apply through /apply_edits. the validation is honestly paranoid, .md files only, no ".." in the path, no dotfiles, no absolute paths, no symlink that escapes the project, the parent dir has to be declared in that project's .forge.json layout, there's a 50kb content cap, and create_task_file flat out refuses to overwrite anything. so it can enrich memory but it physically can't write outside the lines.
-
-after that came onboarding, onboarding.py and ONBOARDING.md, a one-time analyze-setup sweep. it scans for every flavor of rule file, CLAUDE.md, .cursorrules, .cursor/rules/*.mdc, AGENTS.md, .github/copilot-instructions.md, README, sniffs the stack out of package.json or requirements.txt or Cargo.toml or whatever, reads the top-level structure, and hands back project_summary, strengths, gaps, recommendations, and proposed_edits, and those edits go through the exact same gate as the auto-edits. i actually ran it on the orchestrator itself, took about 50s, and it nailed all 4 strengths, all 3 missing-dir gaps, and gave me 4 one-click edits plus 1 manual CLAUDE.md addition.
-
-and then the last big local piece was making everything visible, never headless, for real. every brain call moved out of a hidden subprocess into its own iterm2 tab you can watch. run_claude_json and spawn_brain_tab run claude -p with --output-format stream-json --verbose and pipe it through tee into a sidecar file, so the reasoning and tool use scroll by live while the structured result gets rebuilt from the type:result event, which carries the result and the total_cost_usd and the duration_ms. and the brain tabs set ORCHESTRATOR_BRAIN_ID instead of RUN_ID, so they stream live but they never fire the stop hook. so now both the brain calls and the actual dispatched executors run in tabs i can watch, and the old headless path only survives as a fallback for machines that don't have iterm2. nothing the model does happens off-screen.
+That's $0 marginal cost on a sub I already pay for, everything watchable, nothing phoning home.
 
 ---
 
-3/5 so once the local thing was solid i built this optional layer on top called fusion, it's all written up in FUSION_PLAN.md, phases F0 through F9. it's opt-in and off by default, but when you flip it on, instead of one claude rewrite you get a whole panel of models from different labs all answering in parallel and then a local judge synthesizes them down into one. two things make it safe to leave in, one is that with the toggle off it's byte-for-byte identical to the normal local path, and two is that run_fusion_json literally never raises, if the panel comes up short it just silently falls back to the plain single claude call, so a flaky provider can't ever abort a dispatch. and it hands back the same ClaudeRun dataclass everything else already expects so it just slots in.
+I built it up from a tiny MVP through 10 phases, then added a multi-model Fusion brain, a $0 OpenAI Codex integration, and a thing that refines your follow-ups mid-session.
 
-the way it actually hits six labs is each provider is its own little standalone script under orchestrator/providers/, so there's deepseek.py running deepseek-chat, xai.py for grok-4, gemini.py on gemini-2.5-flash, minimax.py with MiniMax-Text-01, glm.py on glm-4.6, and qwen.py on qwen-max. each one speaks its lab's native api in whatever shape that lab wants and they all print the exact same normalized json back, ok, text, model, prompt_tokens, completion_tokens, error. so adding a new lab is just one script and one registry line, there's no shared openai-compatible adapter or anything. and the thing is i originally routed the whole panel through openrouter and i ripped that out completely, the only money that gets spent is per-token paid straight to each lab. one detail that took me forever, glm has to point at z.ai's coding-plan endpoint, /api/coding/paas/v4, which is the flat-subscription host, not the prepaid /api/paas/v4, because that prepaid one 1113s without a top-up.
-
-cost and speed are baked right in. a preset picks which seats actually fire so you're not paying for six every time, there's budget which is deepseek plus minimax plus gemini, balanced which is deepseek plus grok plus qwen, and max which is all six and really just for high-stakes stuff. the fan-out runs through a threadpoolexecutor so the wall-clock is about the slowest seat, not the sum of all of them. and every run reports real money, each script returns its true token counts and _panel_answer prices them against the per-provider dollar-per-million rates, so the cost is input times price_in plus output times price_out, over 1e6, summed across the seats. the judge itself adds $0 because it's the local claude cli, so the whole out-of-pocket is just the panel egress, and i surface it per-seat and stamp it onto the outcomes row.
-
-there's actually two ways a panel can help and i built both. one is the rewriter-panel where the seats straight up author the dispatched prompt, that's a drop-in upgrade to the single-model rewriter. the other is enrichment, that's fusion.py, where instead of replacing the rewrite the panel just reasons about the task and the judge appends a fenced "## Multi-model analysis" block, consensus, contradictions, partial_coverage, unique_insights, blind_spots, and the executor weighs that as context, not gospel. honestly with panelists that are strong but not quite frontier, that second mode is often the safer one because you're not trusting them to write the final thing.
-
-and the judge doesn't just mash the answers together, it goes judge, then verify, then re-judge. _judge_prompt does the synthesis, then there's an opt-in critic, _verify_prompt, that has to return a strict json verdict, defect true-or-false and an issues list, and it's deliberately conservative, and if there's a real defect then one re-judge, _rejudge_prompt, fixes it, otherwise it just keeps the original, so it's fail-safe. and the engine is selectable, that's the C3 thing, a judge_engine param routes the judge and the verifier and the re-judge through claude by default or through codex if you want. every one of those steps is a local-cli call so even the full multi-model path makes zero anthropic api calls.
-
-the part i actually like the most is the per-seat lenses, _apply_lens. a lens makes one seat answer the same exact task but through a single perspective, and it's prepended so the original prompt stays verbatim and last, which means its output format still travels and the judge always sees the unmodified task. i seeded ten of them and each one owns a different failure axis, risks, simplest, ambiguity, first-principles, user-intent, long-horizon, concrete, adversary, precedent, evidence. and the reason that beats just running the same model over and over is that clones share weights and blind spots, so they tend to make the same mistake and agree on it, and then the judge is just looking at one wrong answer three times. diverse lenses force genuinely different angles, which is the uncorrelated errors an ensemble actually needs to be worth anything, and since there's really only like six or seven truly orthogonal angles, distinct angles beat raw headcount every time. i wrote the whole assignment strategy up in FUSION_LENS_PLAYBOOK.md, the rules being your smartest model should be the judge not a seat, put the deep lenses like first-principles and adversary on your strong seats and the grounding ones like concrete and precedent on the weak ones, and pick lenses by the task's dominant failure mode. and there's a little "· <lens>" badge in the breakdown so you can confirm it actually ran decorrelated.
+Everything I'm about to say is grounded in the actual code. I checked every symbol before writing this.
 
 ---
 
-4/5 ok so codex is the same idea but for openai's codex cli, that's CODEX_PLAN.md, phases C0 through C6. the whole thing this hinged on was whether it could be $0 exactly like claude code, and i verified that live, codex exec --json runs non-interactively on a chatgpt subscription with no OPENAI_API_KEY at all, that's the branch a path, pinned to codex-cli 0.141.0. so codex shows up three ways, as a fusion panel seat which is kind:"codex_cli", as a selectable judge, and as a watchable dispatch executor running at -s danger-full-access for full parity with claude, and that's reversible per machine in config. the genuinely tricky part is the executor's missing-hooks problem, because codex never reads ~/.claude/settings.json so it gets none of the stop or pretooluse hooks. the way i got around it, the run.sh writes codex's real pid, and i had to do that through a fifo because a pipeline $$ would've orphaned the actual codex process, and it writes it to the same pids path the claude watchdog already uses, so manual-kill and kill-all and the cap and the orphan reaper all just work for free. and then there's an in-band poller, _codex_dispatch_poller, that tails the sidecar jsonl, builds the live timeline and the loop-watchdog fingerprint off it, and when it's done it calls _finalize_dispatch, which is the exact same completion core that /api/complete uses, so no claude hooks and no self-post. oh and live testing actually caught a stale model id, gpt-5-codex gets rejected by a chatgpt account, so i had to correct it to gpt-5.5. a codex cap hard-kills since there's no resume, and there's a default 2-dispatch concurrency cap so a fan-out doesn't blow the shared subscription window.
+## 2/5 — The core build (Phases 1–10)
 
-then supermax, SUPERMAX_PLAN.md, the idea there is that once a session is actually running, every follow-up you're about to type gets improved through the same fusion panel first. so the post endpoint /dispatch/{id}/refine takes your raw follow-up and reuses the exact seats you picked when you first dispatched the task, so it fuses for free with seats you already know answer instead of some default preset that might quietly degrade to one model. the two steps, building the context and then fusing, run in a threadpool so a panel that takes minutes never stalls the fastapi event loop. the thing that actually made this work, and it almost didn't, is that run_fusion_json's .text is an answer, not a prompt. the judge is told to answer the task in the task's format, so if you just hand it a raw follow-up like "also do the other file," every seat tries to go do the work and you'd end up getting answered twice. so the fix, _supermax_refine_prompt, wraps your follow-up so that "the task" literally becomes "rewrite this message" and the required output becomes plain improved message text, and the single-model fallback gets that exact same wrapper too. and it's context-aware now, it resolves the live transcript, and it's fingerprint-matched so it doesn't accidentally grab one of my unrelated manual sessions, writes a purpose-aware summary of it, and that's how something vague like "do the same to the other one" resolves to real symbols. v1 of that is shipped and live. v2, which would be writing the improved text straight into the live session's stdin, is designed but i deliberately gated it. the targeting is actually solved, every tab gets tagged with the user.orch_id session var so i can find it again, but reliable mid-tui injection just isn't there, there's no idle signal over osascript, a trailing newline auto-submits, the quoting has to survive the cmd to applescript hop, and the codex executor is one-shot anyway with no live stdin to inject into. so i built the targeting half and refused to ship the fragile half, write_text_to_session_by_var genuinely doesn't exist in the code yet.
+**Phase 1 — Walking skeleton**
+
+FastAPI + HTMX for the UI, stdlib `sqlite3` for storage (no ORM), DB at `~/.orchestrator/orchestrator.db`, kept outside the repo so the repo stays clean.
+
+`spawn_iterm2()` drives iTerm2 entirely through AppleScript — no iTerm2 Python lib, it just opens a tab and runs the task.
+
+Safety from day one:
+
+- Per-dispatch stop: SIGTERM → 5s grace → SIGKILL
+- Global stop-all
+- Wall-clock cap in `watchdog.py` (1800s = 30 min by default)
 
 ---
 
-5/5 not everything got built though, and honestly the restraint is part of the story. i did a whole design study of a fapo-style closed-loop prompt-optimizer, it's all in FAPO_PLAN.md, and i ended up calling it a no-go. the integration seam was actually totally fine, fapo's optimizer is itself a claude-cli agent which is exactly this project's whole pattern, so that wasn't the problem. the problem was internal, there's no valid scorer. the only cheap one i could stand up is llm-as-judge, which is just claude grading claude, and that's circular, it converges on prompts that flatter the judge. and the process-status outcome enum i already have is confounded, it's not a quality grade. plus the auto-push daemon would ship any un-reviewed REWRITER.md edit to origin/main within seconds, which is its own problem. and the same kind of judgment earlier killed a token-compression tool because there was no api seam on a $0 subscription. so knowing what not to build, and writing down exactly why, is honestly half the engineering.
+**Phase 2 — Completion logging**
 
-so where it all stands right now, phases 1 through 10, fusion F0 through F9, codex C0 through C6, and supermax v1 are all built and offline-tested, the suite was at 491 green and 4 skipped last time i checked. what's genuinely still open is the paid cross-lab live verify for the four providers i don't have keys for yet, supermax v2 live-injection which is designed but gated, and codex's open operational questions like subscription caps and tos and judge calibration. but the whole thing runs on one laptop, it spends $0 of api budget on its own thinking, it keeps every single llm call in a terminal tab i can watch, and it gets a little smarter with every dispatch because every finished session gets summarized and embedded and fed back into the next one. so yeah, that's the build.
+A global Stop hook (`notify_complete.sh`) gets merged into `~/.claude/settings.json`.
+
+When a session ends it posts to `/api/complete`, which:
+
+- Writes an `outcomes` row (status: `completed`, `killed`, `failed_to_spawn`, `orphaned`, or `paused`)
+- Copies the transcript to `~/.orchestrator/transcripts/`
+
+The hook is env-gated — it's a total no-op unless `ORCHESTRATOR_RUN_ID` is set in the env.
+
+My own manual Claude sessions never trigger it.
+
+---
+
+**Phase 3 — Context bundler (`bundle.py`)**
+
+Before a task ever runs, this assembles a bundle from the project:
+
+- `CLAUDE.md`
+- `memory/` and `knowledge/` folders
+- Recent task files
+- Live git state
+
+It figures out where everything lives by reading `.forge.json` layout, with sane defaults if there isn't one.
+
+Caps:
+
+- 5,000 chars per file
+- 50,000 chars total
+
+So one giant file can't blow the prompt. Every path goes through `_safe_join` and `_within_project` so nothing can escape the project root through symlinks.
+
+There's a `/bundle/<id>` view so you can see exactly what context a task is going to get.
+
+---
+
+**Phase 4 — The rewriter ("Call A")**
+
+`rewriter.py` + `prompts/REWRITER.md`.
+
+Takes the bundle, calls Claude, gets back structured JSON:
+
+- `rewritten_prompt`
+- `rationale`
+- `files_to_read`
+- `hazards_acknowledged`
+- `proposed_edits`
+
+Shows all of that in an editable preview so you stay in control.
+
+Two things I'm proud of here:
+
+- The rewriter runs at Opus/high on purpose — it's the highest-leverage call in the system
+- The runner scrubs `ORCHESTRATOR_RUN_ID` out of the child env before calling Claude, so a brain call can never accidentally trip its own Stop hook and pollute the log
+
+---
+
+**Phase 5 — The summarizer ("Call B")**
+
+`summarizer.py` + `SUMMARIZER.md`.
+
+The second a dispatch finishes, this distills the raw transcript JSONL:
+
+- Drops the noise
+- Caps each block around 1.5KB, whole distillation around 30KB
+- Produces: `summary_md`, `what_worked`, `what_broke`, `lessons`, `tags`
+
+That becomes the project's memory for next time.
+
+This one is deliberately Sonnet/medium — a distillation shouldn't escalate to the expensive model.
+
+It fires as a background asyncio task held in a strong-reference set so the GC can't kill it mid-flight. There's an atomic guard so only the race winner fires — no double summaries.
+
+---
+
+**Phase 6 — Cross-project retrieval**
+
+Real semantic search, not keyword matching.
+
+`embeddings.py` talks to a local Ollama running Google's `embeddinggemma` (768-dim) over HTTP at `127.0.0.1:11434`.
+
+Zero new Python deps. $0. Nothing leaves the laptop.
+
+`retrieval.py`:
+
+- Stores every vector as a packed float32 BLOB in SQLite
+- Hand-rolls the cosine in pure Python — no numpy
+- `find_similar()` pulls the top-5 most similar past tasks across any project (cosine ≥ 0.3) and feeds them into the rewriter
+
+Defensive details:
+
+- Vectors are NaN/Inf-guarded before storage
+- Any row whose stored dimension doesn't match the query gets skipped, so swapping the embedding model can't quietly poison results with garbage cosines
+
+---
+
+**Phase 7 — Loop watchdog (`loop_watchdog.py`)**
+
+A second hook, `notify_tool_use.sh` (a PreToolUse one, same env-gating), posts a fingerprint of `(tool_name, input_hash)` to `/api/tool_use` on every tool call.
+
+Each dispatch keeps a ring buffer — a `deque` with `maxlen=8`. When all 8 recent fingerprints are identical, it fires `watchdog.manual_kill` with `reason="loop:<tool>"`.
+
+Funny enough `CLAUDE.md` still lists this as "planned, not in the MVP." It's been live since Phase 7.
+
+When the doc and the code disagree, the code wins.
+
+---
+
+**Phase 8 — Auto file-edits (`edits.py`)**
+
+The rewriter can propose three kinds of edit:
+
+- `append_to_memory`
+- `append_to_knowledge`
+- `create_task_file`
+
+Each shows up as a checkbox you apply through `/apply_edits`.
+
+Validation is paranoid:
+
+- `.md` files only
+- No `..` in the path
+- No dotfiles
+- No absolute paths
+- No symlink that escapes the project root
+- Parent dir must be declared in that project's `.forge.json` layout
+- 50KB content cap
+- `create_task_file` flat-out refuses to overwrite anything
+
+It can enrich memory but it physically can't write outside the lines.
+
+---
+
+**Phase 9 — Onboarding (`onboarding.py`)**
+
+A one-time "analyze setup" sweep per project.
+
+It scans for:
+
+- Rule files: `CLAUDE.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `AGENTS.md`, `.github/copilot-instructions.md`, `README`
+- Stack signals: `package.json`, `requirements.txt`, `Cargo.toml`, etc.
+- Top-level directory structure
+
+Produces: `project_summary`, `strengths`, `gaps`, `recommendations`, `proposed_edits` — and those edits go through the exact same validation gate as Phase 8.
+
+I ran it on the orchestrator itself: 50s, nailed all 4 strengths, all 3 missing-dir gaps, and gave me 4 one-click edits plus 1 manual `CLAUDE.md` addition.
+
+---
+
+**Phase 10 — Visible brain calls (the payoff)**
+
+Every brain call moved out of a hidden subprocess into its own iTerm2 tab.
+
+`claude_runner.run_claude_json` + `spawn.spawn_brain_tab`:
+
+- Runs `claude -p --output-format stream-json --verbose`
+- Pipes it through `tee` into a sidecar file
+- The reasoning and tool use scroll by live
+- The structured result gets rebuilt from the `type:result` event (which carries `result`, `total_cost_usd`, `duration_ms`)
+
+Brain tabs set `ORCHESTRATOR_BRAIN_ID` instead of `ORCHESTRATOR_RUN_ID` — so they stream live but never fire the Stop hook.
+
+Now both brain calls and dispatched executors run in tabs I can watch.
+
+The old headless path only survives as a fallback for machines without iTerm2.
+
+Nothing the model does happens off-screen.
+
+---
+
+## 3/5 — Fusion (F0–F9)
+
+Once the local thing was solid, I built an optional multi-model layer on top — Fusion, all in `FUSION_PLAN.md`.
+
+It's opt-in and off by default.
+
+When you flip it on, instead of one Claude rewrite you get a panel of models from different labs answering in parallel, and then a local judge synthesizes them.
+
+Two things make it safe to leave in:
+
+- With the toggle off, behavior is byte-for-byte identical to the normal local path
+- `run_fusion_json` literally never raises — if the panel comes up short it silently falls back to the plain single-Claude call
+
+It hands back the same `ClaudeRun` dataclass everything else already expects, so it just slots in.
+
+---
+
+**The panel — six labs, native APIs**
+
+Each provider is its own standalone script under `orchestrator/providers/`:
+
+- `deepseek.py` — `deepseek-chat`
+- `xai.py` — `grok-4`
+- `gemini.py` — `gemini-2.5-flash`
+- `minimax.py` — `MiniMax-Text-01`
+- `glm.py` — `glm-4.6`
+- `qwen.py` — `qwen-max`
+
+Each one speaks its lab's native API in whatever shape that lab wants, and they all return the same normalized JSON: `ok`, `text`, `model`, `prompt_tokens`, `completion_tokens`, `error`.
+
+Adding a new lab is one script + one registry line.
+
+No OpenRouter, no aggregator. Every dollar spent goes direct to the lab.
+
+One detail that took a while: GLM has to hit `/api/coding/paas/v4` (the flat-subscription endpoint), not `/api/paas/v4` (the prepaid one that times out at 1113s without a balance).
+
+---
+
+**Presets and cost**
+
+Three presets pick which seats fire:
+
+- `budget` — DeepSeek + MiniMax + Gemini
+- `balanced` — DeepSeek + Grok + Qwen
+- `max` — all six
+
+The fan-out runs through a `ThreadPoolExecutor` so wall-clock time is the slowest seat, not the sum of all of them.
+
+Every run reports real money:
+
+- Each script returns true token counts
+- `_panel_answer` prices them against per-provider dollar-per-million rates
+- Cost = `(input × price_in + output × price_out) / 1e6`, summed across seats
+- The judge adds $0 because it's the local Claude CLI
+
+---
+
+**Two modes**
+
+1. **Rewriter panel** — seats author the dispatched prompt (drop-in upgrade to the single-model rewriter)
+
+2. **Enrichment** (`fusion.py`) — the panel reasons about the task and the judge appends a fenced `## Multi-model analysis` block:
+   - consensus
+   - contradictions
+   - partial_coverage
+   - unique_insights
+   - blind_spots
+
+   The executor weighs that as context, not gospel. With non-frontier panelists, this mode is often the safer one — you're not trusting them to write the final thing.
+
+---
+
+**The judge pipeline**
+
+Not just a merge — it's judge → verify → re-judge:
+
+1. `_judge_prompt` synthesizes the panel
+2. `_verify_prompt` (opt-in critic) returns a strict JSON verdict: `defect` true/false + an issues list — deliberately conservative
+3. If there's a real defect, `_rejudge_prompt` fixes it. Otherwise it keeps the original.
+
+The engine is selectable (C3): a `judge_engine` param routes the judge, verifier, and re-judge through Claude (default) or Codex.
+
+Every one of those steps is a local-CLI call. Even the full multi-model path makes zero Anthropic API calls.
+
+---
+
+**Per-seat lenses (`_apply_lens`)**
+
+A lens makes one seat answer the same task through a single perspective — prepended so the original prompt stays verbatim and last.
+
+Ten lenses seeded:
+
+- `risks`, `simplest`, `ambiguity`, `first-principles`, `user-intent`
+- `long-horizon`, `concrete`, `adversary`, `precedent`, `evidence`
+
+Why this matters: clones share weights and blind spots. They tend to make the same mistake and agree on it. Diverse lenses force genuinely different angles — uncorrelated errors — which is what makes an ensemble worth anything.
+
+Assignment strategy in `FUSION_LENS_PLAYBOOK.md`:
+
+- Put your smartest model as judge, not a seat
+- Deep lenses (`first-principles`, `adversary`) go on strong seats; grounding lenses (`concrete`, `precedent`) on weaker ones
+- Pick lenses by the task's dominant failure mode
+
+---
+
+## 4/5 — Codex (C0–C6) + Supermax
+
+**Codex — $0 OpenAI executor**
+
+`CODEX_PLAN.md`, phases C0–C6.
+
+The whole thing hinged on whether `codex exec --json` could run non-interactively on a ChatGPT subscription with no `OPENAI_API_KEY`. Verified live — it does. That's the Branch A path, pinned to codex-cli 0.141.0.
+
+Codex shows up three ways:
+
+- Fusion panel seat (`kind:"codex_cli"`)
+- Selectable judge engine
+- Watchable dispatch executor at `-s danger-full-access` (full parity with Claude, reversible per machine in config)
+
+---
+
+**The hook gap problem**
+
+Codex never reads `~/.claude/settings.json`, so a codex dispatch gets none of the Stop or PreToolUse hooks.
+
+Solution — the in-band approach:
+
+- The run.sh writes codex's real PID through a FIFO (a pipeline `$$` would have orphaned the actual codex process)
+- It writes to the same `pids/` path the Claude watchdog uses, so manual-kill, kill-all, the cap, and the orphan reaper all just work for free
+- `_codex_dispatch_poller` tails the sidecar JSONL live, builds the timeline and loop-watchdog fingerprint, and on completion calls `_finalize_dispatch` — the exact same core that `/api/complete` uses
+- No Claude hooks, no self-POST
+
+---
+
+**Codex details worth knowing**
+
+- Live testing caught a stale model ID: `gpt-5-codex` gets rejected by a ChatGPT account. Corrected to `gpt-5.5`
+- Cap hits hard-kill (no resume — codex has no session-resume equivalent)
+- Default 2-dispatch concurrency cap so a fan-out doesn't blow the shared subscription window
+- `OPENAI_API_KEY` is scrubbed from the child env to ensure the $0 subscription path, never the billed API path
+
+---
+
+**Supermax — mid-session follow-up refining**
+
+`SUPERMAX_PLAN.md`.
+
+Once a session is running, every follow-up you type gets improved through the Fusion panel first.
+
+`POST /dispatch/{id}/refine`:
+
+- Reuses the exact seats you picked at dispatch time (so it fuses for free with seats you already know answer)
+- Two steps run in a `ThreadPoolExecutor` so a slow panel never stalls the FastAPI event loop
+- Resolves the live transcript (fingerprint-matched so it doesn't grab an unrelated manual session)
+- Builds a purpose-aware summary of that transcript so vague follow-ups like "do the same to the other one" resolve to real symbols
+
+The key fix that made this work: `run_fusion_json`'s `.text` is an **answer**, not a prompt. If you hand a raw follow-up to the panel, every seat tries to go do the work. `_supermax_refine_prompt` wraps the follow-up so "the task" literally becomes "rewrite this message" and the required output is plain improved text. The single-model fallback gets the same wrapper.
+
+---
+
+**Supermax v2 — designed but gated**
+
+Live injection (writing the improved text straight into the session's stdin) is designed but I deliberately didn't ship it.
+
+The targeting is solved — every tab is tagged with `user.orch_id` so I can find it. But reliable mid-TUI injection isn't there:
+
+- No idle signal over AppleScript
+- A trailing newline auto-submits
+- Quoting has to survive the cmd-to-AppleScript hop
+- The Codex executor is one-shot with no live stdin
+
+So I built the targeting half and refused to ship the fragile half.
+
+`write_text_to_session_by_var` genuinely doesn't exist in the code yet.
+
+---
+
+## 5/5 — What didn't get built, and where it stands
+
+**The things I evaluated and declined**
+
+**FAPO-style prompt optimizer** (`FAPO_PLAN.md` — design study, no-go):
+
+The integration seam was fine — FAPO's optimizer is itself a Claude CLI agent, which is exactly this project's pattern.
+
+The problem was internal:
+
+- No valid scorer. The only cheap one I could stand up is LLM-as-judge — Claude grading Claude — which is circular. It converges on prompts that flatter the judge.
+- The `outcomes` status enum I already have is confounded — it's not a quality grade.
+- The auto-push daemon would ship any un-reviewed `REWRITER.md` edit to origin/main within seconds.
+
+**Token compression tool** — evaluated and declined. No API seam on a $0 subscription, so there was nowhere to hook it in cleanly.
+
+Knowing what not to build, and writing down exactly why, is half the engineering.
+
+---
+
+**Where it stands**
+
+Built and offline-tested:
+
+- Phases 1–10 (walking skeleton through visible brain calls)
+- Fusion F0–F9 (six-provider panel, native APIs, judge/verify/re-judge, lenses)
+- Codex C0–C6 ($0 executor, Fusion seat, selectable judge)
+- Supermax v1 (follow-up refining through the Fusion panel)
+
+Suite: 491 green, 4 skipped.
+
+---
+
+Still open:
+
+- Paid live-provider verify for the four providers I don't have keys for yet
+- Supermax v2 live-injection (designed, gated)
+- Codex operational questions: subscription caps, ToS, judge calibration
+
+---
+
+The whole thing runs on one laptop.
+
+It spends $0 of API budget on its own thinking.
+
+It keeps every LLM call in a terminal tab I can watch.
+
+And it gets a little smarter with every dispatch — because every finished session gets summarized, embedded, and fed back into the next one.
+
+That's the build.
