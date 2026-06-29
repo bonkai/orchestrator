@@ -37,10 +37,9 @@
   --violet: #c08af0;
 
   /* shape / depth / motion — single tokens, reused everywhere */
-  --radius:    1rem;       /* rounded-2xl */
-  --radius-sm: 0.625rem;
-  --shadow: 0 22px 50px -26px rgba(0,0,0,0.92), 0 4px 14px -8px rgba(0,0,0,0.55);
-  --shadow-glow: 0 0 0 1px rgba(34,211,238,0.22), 0 10px 34px -12px rgba(34,211,238,0.40);
+  --radius:    1.1rem;      /* friendly, soft corners */
+  --radius-sm: 0.7rem;
+  --shadow: 0 8px 24px -10px rgba(0,0,0,0.5), 0 1px 3px -1px rgba(0,0,0,0.35);
   --ring:   inset 0 0 0 1px var(--border);
   --ease:   cubic-bezier(0.22, 1, 0.36, 1);
   --dur:    0.5s;
