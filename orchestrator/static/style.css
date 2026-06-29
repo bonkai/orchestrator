@@ -400,41 +400,58 @@ main { min-width: 0; }
 }
 .dispatch-controls {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem 1.15rem;          /* row-gap on wrap · wider col-gap separates groups */
-  margin-top: 0.85rem;
+  flex-direction: column;        /* stacked form rows — readable, never a cramped strip */
+  gap: 0.8rem;
+  margin-top: 1rem;
 }
-/* logical clusters — params · mode-toggles · actions. The wider parent gap
-   against the tighter within-group gap is what reads as grouping (no rules or
-   dividers needed); each group wraps as a unit so the row never ragged-breaks. */
+/* each settings row lays its controls out horizontally and wraps gracefully */
 .dispatch-controls .control-group {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.4rem 0.85rem;
+  gap: 0.5rem 1rem;
 }
+/* the optional 'brain' tier — a quiet recessed sub-panel so it reads as
+   advanced/skippable without crowding the primary executor row */
+.dispatch-controls .control-brain {
+  gap: 0.5rem 0.85rem;
+  padding: 0.65rem 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* footer — mode toggles on the left, the send actions pinned to the right */
+.dispatch-controls .control-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  margin-top: 0.15rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--divider);
+}
+.dispatch-controls .control-toggles { gap: 0.5rem 1.1rem; }
 .dispatch-controls .control-actions {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-left: auto;             /* keep the send cluster hard-right */
+  gap: 0.6rem;
+  margin-left: auto;             /* keep the send cluster hard-right, survives wrap */
 }
 .dispatch-controls label {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text-2);
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
 }
-.dispatch-controls input[type="number"] { width: 78px; padding: 0.35rem 0.5rem; }
-.dispatch-controls select { padding: 0.35rem 1.8rem 0.35rem 0.6rem; }
+.dispatch-controls input[type="number"] { width: 84px; padding: 0.4rem 0.55rem; }
+.dispatch-controls select { padding: 0.4rem 1.8rem 0.4rem 0.7rem; }
 .dispatch-controls .preview-link {
   color: var(--accent);
-  font-size: 12px;
-  padding: 0.45rem 0.7rem;
+  font-size: 13px;
+  padding: 0.5rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: 0.7rem;
   transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 .dispatch-controls .preview-link:hover { background: var(--surface-hover); border-color: var(--accent-3); text-decoration: none; }
