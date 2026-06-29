@@ -19,7 +19,7 @@
             <td class="task-cell">{{ r.user_task[:120] }}{% if r.user_task|length > 120 %}…{% endif %}</td>
             <td>{{ fmt_duration(r.duration_s) }}</td>
             <td>{{ fmt_rel(r.created_at) }}</td>
-            <td style="white-space: nowrap;">
+            <td class="run-actions">
               {% if r.status == 'running' %}
                 <button class="small" type="button"
                         hx-post="/dispatch/{{ r.id }}/open" hx-swap="none"
