@@ -241,21 +241,21 @@ header .bar {
 }
 header h1 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   white-space: nowrap;
 }
 header h1::before {                 /* accent status dot — "alive" mark */
   content: "";
-  width: 9px; height: 9px;
+  width: 10px; height: 10px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18), 0 0 14px var(--accent);
+  background: radial-gradient(circle at 35% 35%, var(--accent-2), var(--accent-3));
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.15), 0 0 18px var(--accent);
 }
 header .add-project { display: flex; gap: 0.5rem; flex: 1; min-width: 0; }
 header .add-project input { flex: 1; min-width: 0; }
