@@ -679,7 +679,6 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   }
   main { order: 1; }
   .sidebar { order: 2; position: static; top: auto; }
-  .runs-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
