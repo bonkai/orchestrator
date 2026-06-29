@@ -522,8 +522,7 @@ main { min-width: 0; }
   padding: 1.4rem 1.5rem;
   min-width: 0;                  /* let the column shrink so its table can't overflow main */
 }
-.runs-col table { table-layout: fixed; }
-.runs-col .task-cell { overflow-wrap: anywhere; }
+.runs-col .task-cell { overflow-wrap: anywhere; }   /* long task text breaks instead of widening the table */
 .runs-col h3 {
   margin: 0 0 0.6rem;
   font-size: 0.7rem;
