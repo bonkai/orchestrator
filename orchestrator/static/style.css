@@ -400,7 +400,7 @@ main { min-width: 0; }
 /* ─── dispatch form ─────────────────────────────────────────────────── */
 .dispatch-form textarea {
   width: 100%;
-  min-height: 6rem;
+  min-height: 5.25rem;
   resize: vertical;
   font-size: 14px;
   line-height: 1.6;
@@ -524,6 +524,13 @@ main { min-width: 0; }
   letter-spacing: 0.08em;
   color: var(--muted);
   text-transform: uppercase;
+}
+/* section eyebrows get a small glowing accent tick — quiet rhythm of cyan */
+.sidebar h3, .runs-col h3 { display: flex; align-items: center; gap: 0.55rem; }
+.sidebar h3::before, .runs-col h3::before {
+  content: ""; flex: none;
+  width: 16px; height: 2px; border-radius: 2px;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
 }
 .runs-col table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .runs-col th {
