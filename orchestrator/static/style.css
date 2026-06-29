@@ -24,10 +24,10 @@
   --text-2: #b7bac1;
   --muted:  #9296a0;
 
-  /* the one accent — cyan, used gently (clean fills, no neon glow) */
-  --accent:   #22d3ee;
-  --accent-2: #6fe3f7;   /* hover / lighter */
-  --accent-3: #0e9fc0;   /* press / border  */
+  /* the one accent — a calmer, slightly desaturated cyan (less neon) */
+  --accent:   #3bb8d4;
+  --accent-2: #5fcfe6;   /* hover / lighter */
+  --accent-3: #2a93ab;   /* press / border  */
   --on-accent:#05181f;
 
   /* status — restrained, soft-tinted (see .badge) */
