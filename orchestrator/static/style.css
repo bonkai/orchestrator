@@ -513,7 +513,10 @@ main { min-width: 0; }
 .drop-row input[type="file"] { font-size: 11px; }
 
 /* ─── runs panel ────────────────────────────────────────────────────── */
-.runs-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.1rem; }
+/* the two runs tables stack full-width — side-by-side never gave the dense
+   6-col table enough room once the sidebar took its share, so the task text
+   was always cramped; stacked, each table is wide and readable at every size */
+.runs-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
 .runs-col {
   background: var(--surface);
   border: 1px solid var(--border);
