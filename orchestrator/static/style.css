@@ -523,6 +523,7 @@ main { min-width: 0; }
   min-width: 0;                  /* let the column shrink so its table can't overflow main */
 }
 .runs-col .task-cell { overflow-wrap: anywhere; }   /* break long task text so the dense table never overflows its column at any width */
+.runs-col .run-actions { white-space: nowrap; }     /* keep the open/stop/resume/view buttons on one line on wider screens */
 .runs-col h3 {
   margin: 0 0 0.6rem;
   font-size: 0.7rem;
