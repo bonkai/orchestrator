@@ -675,8 +675,13 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   header .bar { flex-wrap: wrap; padding: 0.7rem 1rem; gap: 0.6rem; }
   header .add-project { order: 3; flex-basis: 100%; }
   header .killall { margin-left: auto; }
+  /* settings fields stack full-width so wide selects never overflow */
+  .dispatch-controls .control-group > label,
+  .dispatch-controls .control-brain > label { width: 100%; }
+  .dispatch-controls label > select { flex: 1 1 auto; }
+  .dispatch-controls .control-toggles { width: 100%; }
   /* send cluster spans full width; the two send buttons share it */
-  .dispatch-controls .control-actions { width: 100%; margin-left: 0; }
+  .dispatch-controls .control-actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
   .dispatch-controls #btn-send-raw,
   .dispatch-controls #btn-send-rewrite { flex: 1; }
   /* generous tap targets on the thumb-zone */
