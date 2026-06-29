@@ -443,9 +443,10 @@ main { min-width: 0; }
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  min-width: 0;                  /* let labels shrink so wide selects can't overflow */
 }
 .dispatch-controls input[type="number"] { width: 84px; padding: 0.4rem 0.55rem; }
-.dispatch-controls select { padding: 0.4rem 1.8rem 0.4rem 0.7rem; }
+.dispatch-controls select { padding: 0.4rem 1.8rem 0.4rem 0.7rem; min-width: 0; max-width: 100%; }
 .dispatch-controls .preview-link {
   color: var(--accent);
   font-size: 13px;
