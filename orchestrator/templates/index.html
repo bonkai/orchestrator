@@ -71,55 +71,61 @@
         </div>
 
         <div class="dispatch-controls">
-          <label>wall-cap (s, ≤6h): <input type="number" name="wall_cap_s" value="14400" min="60" max="21600" title="wall-clock cap in seconds — default 4h (14400), max 6h (21600). On timeout the dispatch is paused (resumable), not killed."></label>
-          <label title="Pick the reasoning effort for whichever engine your model uses. Claude and Codex have different ladders (Claude: low–max; Codex: minimal–xhigh) — a value that doesn't fit the chosen engine safely falls back to that engine's default, so nothing breaks.">effort:
-            <select name="effort">
-              <optgroup label="Claude (low–max)">
-                {% for e in claude_seat_efforts %}
-                <option value="{{ e }}"{% if e == 'max' %} selected{% endif %}>{{ e }}</option>
-                {% endfor %}
-              </optgroup>
-              {% if codex_seat_efforts %}
-              <optgroup label="Codex (minimal–xhigh)">
-                <option value="default">default (model's own)</option>
-                {% for e in codex_seat_efforts %}
-                <option value="{{ e }}">{{ e }}</option>
-                {% endfor %}
-              </optgroup>
-              {% endif %}
-            </select>
-          </label>
-          <label>model:
-            <select name="model">
-              <optgroup label="Anthropic">
-                <option value="" selected>default</option>
-                <option value="fable">fable 5</option>
-                <option value="opus">opus 4.8</option>
-                <option value="sonnet">sonnet 4.6</option>
-                <option value="haiku">haiku 4.5</option>
-              </optgroup>
-              {% if codex_seat_models %}
-              <optgroup label="Codex" title="Codex uses the ChatGPT subscription executor in a watchable, workspace-confined tab. Models are unavailable when the Codex CLI is absent or logged out.">
-                {% for m in codex_seat_models %}<option value="{{ m }}" {% if not codex_cli_available %}disabled{% endif %}>{{ m }}{% if not codex_cli_available %} (unavailable){% endif %}</option>{% endfor %}
-              </optgroup>
-              {% endif %}
-            </select>
-          </label>
-          <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
-            <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
-            fusion (multi-model) ⚡
-          </label>
-          <label class="fusion-toggle" title="enrich: run the same panel to ANALYZE the task and append a 'Multi-model analysis' block to the executor's prompt (it does not replace the rewrite). Works with both buttons.">
-            <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
-            enrich ⚡
-          </label>
-          <label class="fusion-toggle" title="verify (requires fusion): after the panel's judge synthesizes, a $0 Claude-CLI critic checks it and, on a found defect, triggers ONE re-judge to fix it.">
-            <input type="checkbox" id="verify-checkbox" {% if not fusion_available %}disabled{% endif %} {% if verify_default %}checked{% endif %}>
-            verify ⚡
-          </label>
-          <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
-          <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
-          <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+          <div class="control-group">
+            <label>wall-cap (s, ≤6h): <input type="number" name="wall_cap_s" value="14400" min="60" max="21600" title="wall-clock cap in seconds — default 4h (14400), max 6h (21600). On timeout the dispatch is paused (resumable), not killed."></label>
+            <label title="Pick the reasoning effort for whichever engine your model uses. Claude and Codex have different ladders (Claude: low–max; Codex: minimal–xhigh) — a value that doesn't fit the chosen engine safely falls back to that engine's default, so nothing breaks.">effort:
+              <select name="effort">
+                <optgroup label="Claude (low–max)">
+                  {% for e in claude_seat_efforts %}
+                  <option value="{{ e }}"{% if e == 'max' %} selected{% endif %}>{{ e }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% if codex_seat_efforts %}
+                <optgroup label="Codex (minimal–xhigh)">
+                  <option value="default">default (model's own)</option>
+                  {% for e in codex_seat_efforts %}
+                  <option value="{{ e }}">{{ e }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+              </select>
+            </label>
+            <label>model:
+              <select name="model">
+                <optgroup label="Anthropic">
+                  <option value="" selected>default</option>
+                  <option value="fable">fable 5</option>
+                  <option value="opus">opus 4.8</option>
+                  <option value="sonnet">sonnet 4.6</option>
+                  <option value="haiku">haiku 4.5</option>
+                </optgroup>
+                {% if codex_seat_models %}
+                <optgroup label="Codex" title="Codex uses the ChatGPT subscription executor in a watchable, workspace-confined tab. Models are unavailable when the Codex CLI is absent or logged out.">
+                  {% for m in codex_seat_models %}<option value="{{ m }}" {% if not codex_cli_available %}disabled{% endif %}>{{ m }}{% if not codex_cli_available %} (unavailable){% endif %}</option>{% endfor %}
+                </optgroup>
+                {% endif %}
+              </select>
+            </label>
+          </div>
+          <div class="control-group control-toggles">
+            <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
+              <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
+              fusion (multi-model) ⚡
+            </label>
+            <label class="fusion-toggle" title="enrich: run the same panel to ANALYZE the task and append a 'Multi-model analysis' block to the executor's prompt (it does not replace the rewrite). Works with both buttons.">
+              <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
+              enrich ⚡
+            </label>
+            <label class="fusion-toggle" title="verify (requires fusion): after the panel's judge synthesizes, a $0 Claude-CLI critic checks it and, on a found defect, triggers ONE re-judge to fix it.">
+              <input type="checkbox" id="verify-checkbox" {% if not fusion_available %}disabled{% endif %} {% if verify_default %}checked{% endif %}>
+              verify ⚡
+            </label>
+          </div>
+          <div class="control-actions">
+            <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
+            <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
+            <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+          </div>
         </div>
         <div class="fusion-extra">
           {% if fusion_available %}
