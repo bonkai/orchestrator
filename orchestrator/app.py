@@ -1402,7 +1402,7 @@ def _validate_executor_engine(engine: str, model: str, codex_models: set,
     return "codex", model
 
 
-async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False):
+async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_rewrite: bool, effort: str = "max", model: str = "", brain_model: str = "", brain_effort: str = "", do_fusion: bool = False, panel: list | None = None, do_enrich: bool = False, do_verify: bool = False):
     """Background task spawned by /send. If do_rewrite, run the rewriter
     first and use its output. If the rewrite FAILS we no longer silently
     fall back to dispatching the original task — that hid the failure behind
@@ -1423,18 +1423,46 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
     rewrite_error = ""
     rewrite_cost = 0.0          # F5: out-of-pocket spend stored on the dispatch row
     rewrite_fused = False       # F5: a real (>=2 seat) panel authored the rewrite
-    # "One knob": the dispatch's UI model/effort picker also drives the Fusion
-    # judge (rewrite synthesis) and the enrich judge — same model that runs the
-    # executor. Blank model ("default") keeps the judge on opus so an untouched
-    # picker never silently downgrades the synthesis seat. The judge is always a
-    # Claude brain call, so effort is validated against the Claude ladder
-    # (CLAUDE_SEAT_EFFORTS) — a codex-only pick (minimal/"default") or anything
-    # out of range falls back to "high".
-    _, claude_model, _ = _derive_executor(model)
-    judge_model = claude_model or "opus"
-    judge_effort = (effort or "").strip()
+    # ── Brain vs executor split ──────────────────────────────────────────────
+    # `effort`/`model` are the EXECUTOR picker — they drive the spawned session via
+    # _run_dispatch below (and pick its ENGINE: codex id → codex, else claude). The
+    # OPTIONAL brain picker (`brain_effort`/`brain_model`) drives the PRE-executor
+    # brain work — the rewrite brain call (+ retry) AND the fusion/enrich judge/
+    # verify/rejudge — so a cheaper brain can prep a beefier executor.
+    #
+    # The brain is ALWAYS a `claude` call (the engine is chosen ONLY by the executor
+    # field; judge_engine stays "claude"), so a codex/invalid brain id is collapsed
+    # to opus via _derive_executor and never rides `claude --model <codex>`
+    # (dispatch #3/#241). The UI brain picker offers Claude models only.
+    #
+    # Blank brain ⇒ byte-for-byte today — but the historical fallbacks DIFFER per
+    # call, so each is preserved independently:
+    #   - judge/rejudge inherit the EXECUTOR picker (their "one knob" source) — an
+    #     untouched form keeps judge=opus AND effort=max exactly (NOT "high").
+    #   - the rewrite brain call (+ retry) stays opus/high (its deliberate hardcode).
+    #   - verify stays opus/high (it never read the picker).
+    brain_model = (brain_model or "").strip()
+    brain_effort = (brain_effort or "").strip()
+
+    # judge + rejudge: brain field when set, else the executor picker (today). The
+    # judge is a Claude brain call, so the effort is validated against the Claude
+    # ladder (CLAUDE_SEAT_EFFORTS) — a codex-only/"default"/out-of-range pick → "high".
+    _, _judge_claude, _ = _derive_executor(brain_model or model)
+    judge_model = _judge_claude or "opus"
+    judge_effort = brain_effort or (effort or "").strip()
     if judge_effort not in CLAUDE_SEAT_EFFORTS:
         judge_effort = "high"
+
+    # The rewrite brain call (+ its retry) AND the verifier seat: brain field when
+    # set, else opus/high (today's hardcode / today's verify default — NOT the
+    # executor picker). A codex/invalid brain id collapses to opus here too.
+    if brain_model:
+        _, _brain_claude, _ = _derive_executor(brain_model)
+        rewrite_model = _brain_claude or "opus"
+        rewrite_effort = judge_effort            # == validated brain effort
+    else:
+        rewrite_model, rewrite_effort = "opus", "high"
+    verify_model, verify_effort = rewrite_model, rewrite_effort
     if do_rewrite:
         # Include staged attachments in the rewriter input so it can plan
         # around them. They get moved to the dispatch dir inside _run_dispatch.

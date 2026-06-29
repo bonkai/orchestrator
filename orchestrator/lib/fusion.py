@@ -121,7 +121,8 @@ def enrich(prompt: str, project_path: str = "",
         run = claude_runner.run_fusion_json(
             prompt=analysis_prompt, cwd=project_path or "",
             panel=panel, preset=preset, timeout_s=timeout_s,
-            judge_model=judge_model, judge_effort=judge_effort, verify=verify)
+            judge_model=judge_model, judge_effort=judge_effort, verify=verify,
+            verify_model=verify_model, verify_effort=verify_effort)
         if not run.ok:
             return FusionResult(ok=False, error=run.error or "fusion panel unavailable",
                                 cost_usd=run.cost_usd)
