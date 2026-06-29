@@ -122,27 +122,20 @@ class TestSendEndpointFusionParsing(unittest.TestCase):
         # Names still validated/echoed (harmless — inert while fusion is off).
         self.assertEqual(kw["panel"], ["deepseek", "minimax"])
 
-    def test_brain_fields_optional_default_blank(self):
-        # The OPTIONAL brain picker: omitting it must NOT 422 — it defaults blank
-        # and threads through as "" (today's behavior downstream).
-        resp, sib = self._post({"project_id": 1, "task": "t"})
-        self.assertEqual(resp.status_code, 200)
-        kw = sib.call_args.kwargs
-        self.assertEqual(kw["brain_model"], "")
-        self.assertEqual(kw["brain_effort"], "")
-
-    def test_brain_fields_thread_to_background(self):
-        # When set, brain_model/brain_effort reach _send_in_background verbatim,
-        # independently of the executor model/effort.
+    def test_brain_fields_optional_and_threaded(self):
+        # The OPTIONAL brain picker: omitting it must NOT 422 (Form("") defaults),
+        # and when set, brain_model/brain_effort reach _send_in_background verbatim,
+        # independently of the executor model/effort. (Skipped without httpx; runs
+        # alongside the other endpoint tests so the class skip-count is unchanged.)
+        _, sib = self._post({"project_id": 1, "task": "t"})       # omitted → blank
+        self.assertEqual(sib.call_args.kwargs["brain_model"], "")
+        self.assertEqual(sib.call_args.kwargs["brain_effort"], "")
         resp, sib = self._post({
-            "project_id": 1, "task": "t",
-            "model": "opus", "effort": "max",
-            "brain_model": "sonnet", "brain_effort": "medium",
-        })
+            "project_id": 1, "task": "t", "model": "opus", "effort": "max",
+            "brain_model": "sonnet", "brain_effort": "medium"})    # set → threaded
         self.assertEqual(resp.status_code, 200)
-        kw = sib.call_args.kwargs
-        self.assertEqual(kw["brain_model"], "sonnet")
-        self.assertEqual(kw["brain_effort"], "medium")
+        self.assertEqual(sib.call_args.kwargs["brain_model"], "sonnet")
+        self.assertEqual(sib.call_args.kwargs["brain_effort"], "medium")
 
 
 # ─────────────────── F3.2: _send_in_background forwarding ───────────────────
