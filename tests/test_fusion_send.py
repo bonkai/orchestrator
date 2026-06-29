@@ -286,6 +286,109 @@ class TestSendInBackgroundJudgeFromPicker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(en.call_args.kwargs["judge_effort"], "xhigh")
 
 
+# ─────────────── brain vs executor split: optional brain picker ─────────────
+
+class TestSendInBackgroundBrainExecutorSplit(unittest.IsolatedAsyncioTestCase):
+    """The OPTIONAL brain picker (brain_model/brain_effort) drives the PRE-executor
+    brain work — the rewrite brain call AND the fusion/enrich judge/verify/rejudge —
+    independently of the executor picker (effort/model), so the executor can be a
+    higher-power model than the brain.
+
+    rewriter.rewrite gets (positionally): judge_model=args[4], judge_effort=args[5],
+    rewrite_model=args[7], rewrite_effort=args[8], verify_model=args[9],
+    verify_effort=args[10]. The executor model/effort reach _run_dispatch
+    (args[3]=effort, args[4]=model).
+
+    Contract:
+      - blank brain ⇒ byte-for-byte today: judge inherits the EXECUTOR picker, while
+        the rewrite + verify stay opus/high (their historical hardcodes).
+      - set brain ⇒ rewrite + judge + verify ALL run on the brain model/effort, and
+        the executor is untouched.
+      - a non-Claude (codex/invalid) brain id collapses to opus on every brain path
+        (never `claude --model <codex>`), but the brain EFFORT is still honored."""
+
+    def _patches(self, rewrite_result, dispatch=(1, "")):
+        import contextlib
+        es = contextlib.ExitStack()
+        es.enter_context(mock.patch.object(
+            app_module.db, "get_project", return_value={"id": 1, "path": "/tmp/proj"}))
+        es.enter_context(mock.patch.object(
+            app_module.attachments_mod, "list_files", return_value=[]))
+        rw = es.enter_context(mock.patch.object(
+            app_module.rewriter, "rewrite", return_value=rewrite_result))
+        rd = es.enter_context(mock.patch.object(
+            app_module, "_run_dispatch", new_callable=mock.AsyncMock))
+        rd.return_value = dispatch
+        es.enter_context(mock.patch.object(app_module.db, "record_event"))
+        en = es.enter_context(mock.patch.object(app_module.fusion_mod, "enrich"))
+        return es, rw, rd, en
+
+    @staticmethod
+    def _ok_result():
+        return RewriteResult(ok=True, rewritten_prompt="REWRITTEN",
+                             cost_usd=0.01, duration_s=2.0, model="opus",
+                             bundle_chars=123)
+
+    async def test_blank_brain_is_byte_for_byte_today(self):
+        # No brain picker: judge inherits the executor (sonnet/max), but the rewrite
+        # + verify keep their historical opus/high hardcodes — exactly as before.
+        es, rw, rd, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "max", "sonnet",   # executor sonnet/max, brain blank
+                do_fusion=True, panel=["deepseek"])
+        a = rw.call_args.args
+        self.assertEqual((a[4], a[5]), ("sonnet", "max"))   # judge ← executor (today)
+        self.assertEqual((a[7], a[8]), ("opus", "high"))    # rewrite stays opus/high
+        self.assertEqual((a[9], a[10]), ("opus", "high"))   # verify stays opus/high
+        # The executor itself is the sonnet/max picker.
+        self.assertEqual((rd.call_args.args[3], rd.call_args.args[4]), ("max", "sonnet"))
+
+    async def test_set_brain_drives_rewrite_judge_verify_not_executor(self):
+        # Brain sonnet/medium prepping an opus/max executor: every brain call runs on
+        # sonnet/medium; the spawned session still runs opus/max.
+        es, rw, rd, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "max", "opus",
+                brain_model="sonnet", brain_effort="medium",
+                do_fusion=True, panel=["deepseek"])
+        a = rw.call_args.args
+        self.assertEqual((a[4], a[5]), ("sonnet", "medium"))    # judge ← brain
+        self.assertEqual((a[7], a[8]), ("sonnet", "medium"))    # rewrite ← brain
+        self.assertEqual((a[9], a[10]), ("sonnet", "medium"))   # verify ← brain
+        self.assertEqual((rd.call_args.args[3], rd.call_args.args[4]), ("max", "opus"))
+
+    async def test_set_brain_threads_to_enrich(self):
+        # The enrich judge/verify follow the brain too (kwargs into fusion.enrich).
+        es, _, _, en = self._patches(self._ok_result())
+        en.return_value = mock.Mock(ok=False, error="panel unavailable",
+                                    cost_usd=0.0, enrichment_md="", panel_models=[])
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "max", "opus",
+                brain_model="haiku", brain_effort="low",
+                do_fusion=True, panel=["deepseek"], do_enrich=True)
+        kw = en.call_args.kwargs
+        self.assertEqual((kw["judge_model"], kw["judge_effort"]), ("haiku", "low"))
+        self.assertEqual((kw["verify_model"], kw["verify_effort"]), ("haiku", "low"))
+
+    async def test_non_claude_brain_id_collapses_to_opus(self):
+        # A non-Claude (codex/typo) brain model must NEVER reach `claude --model`:
+        # it collapses to opus on every brain path. The brain EFFORT is still honored.
+        es, rw, _, _ = self._patches(self._ok_result())
+        with es:
+            await app_module._send_in_background(
+                1, "t", 600, True, "max", "opus",
+                brain_model="gpt-totally-bogus", brain_effort="low",
+                do_fusion=True, panel=["deepseek"])
+        a = rw.call_args.args
+        self.assertEqual(a[4], "opus")    # judge_model collapsed to opus
+        self.assertEqual(a[7], "opus")    # rewrite_model collapsed to opus
+        self.assertEqual(a[9], "opus")    # verify_model collapsed to opus
+        self.assertEqual((a[5], a[8], a[10]), ("low", "low", "low"))   # effort honored
+
+
 # ─────────────── C5.1: codex seat parse + executor engine seam ──────────────
 
 class TestParseFusionPanelCodexSeat(unittest.TestCase):
