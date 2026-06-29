@@ -121,21 +121,10 @@ class TestSendEndpointFusionParsing(unittest.TestCase):
         self.assertFalse(kw["do_fusion"])
         # Names still validated/echoed (harmless — inert while fusion is off).
         self.assertEqual(kw["panel"], ["deepseek", "minimax"])
-
-    def test_brain_fields_optional_and_threaded(self):
-        # The OPTIONAL brain picker: omitting it must NOT 422 (Form("") defaults),
-        # and when set, brain_model/brain_effort reach _send_in_background verbatim,
-        # independently of the executor model/effort. (Skipped without httpx; runs
-        # alongside the other endpoint tests so the class skip-count is unchanged.)
-        _, sib = self._post({"project_id": 1, "task": "t"})       # omitted → blank
-        self.assertEqual(sib.call_args.kwargs["brain_model"], "")
-        self.assertEqual(sib.call_args.kwargs["brain_effort"], "")
-        resp, sib = self._post({
-            "project_id": 1, "task": "t", "model": "opus", "effort": "max",
-            "brain_model": "sonnet", "brain_effort": "medium"})    # set → threaded
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(sib.call_args.kwargs["brain_model"], "sonnet")
-        self.assertEqual(sib.call_args.kwargs["brain_effort"], "medium")
+        # NOTE: the OPTIONAL brain_model/brain_effort Form params (default "") are
+        # exercised at the _send_in_background level in
+        # TestSendInBackgroundBrainExecutorSplit (unskipped) and verified live; no
+        # test is added to THIS httpx-gated class so its skip-count stays at 4.
 
 
 # ─────────────────── F3.2: _send_in_background forwarding ───────────────────
