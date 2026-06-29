@@ -172,7 +172,7 @@ button.danger, .btn.danger {
 }
 button.danger:hover { background: var(--bad); border-color: var(--bad); color: #1a0608; }
 
-button.small { padding: 0.28rem 0.6rem; min-height: 28px; font-size: 12px; border-radius: 0.55rem; }
+button.small { padding: 0.35rem 0.72rem; min-height: 30px; font-size: 13px; border-radius: 0.65rem; }
 
 button.link {
   background: none; border: none; color: var(--accent);
