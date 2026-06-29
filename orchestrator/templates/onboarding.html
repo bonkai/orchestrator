@@ -127,20 +127,20 @@
 
         {% if applied %}
         <h4 style="margin: 0.5rem 0 0.3rem 0; color: var(--ok);">applied ({{ applied|length }})</h4>
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-          <thead><tr style="text-align: left; color: var(--muted);">
-            <th style="padding: 0.3rem 0.5rem;">kind</th>
-            <th style="padding: 0.3rem 0.5rem;">label</th>
-            <th style="padding: 0.3rem 0.5rem;">path</th>
-            <th style="padding: 0.3rem 0.5rem; text-align: right;">bytes</th>
+        <table>
+          <thead><tr>
+            <th>kind</th>
+            <th>label</th>
+            <th>path</th>
+            <th class="num">bytes</th>
           </tr></thead>
           <tbody>
           {% for a in applied %}
-            <tr style="border-top: 1px solid var(--border);">
-              <td style="padding: 0.3rem 0.5rem;">{{ a.kind }}</td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ a.label }}</code></td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ a.path }}</code></td>
-              <td style="padding: 0.3rem 0.5rem; text-align: right;" class="muted">{{ a.bytes }}</td>
+            <tr>
+              <td>{{ a.kind }}</td>
+              <td><code>{{ a.label }}</code></td>
+              <td><code>{{ a.path }}</code></td>
+              <td class="num muted">{{ a.bytes }}</td>
             </tr>
           {% endfor %}
           </tbody>
@@ -149,20 +149,20 @@
 
         {% if skipped %}
         <h4 style="margin: 0.8rem 0 0.3rem 0; color: var(--warn);">skipped ({{ skipped|length }})</h4>
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-          <thead><tr style="text-align: left; color: var(--muted);">
-            <th style="padding: 0.3rem 0.5rem;">kind</th>
-            <th style="padding: 0.3rem 0.5rem;">label</th>
-            <th style="padding: 0.3rem 0.5rem;">path</th>
-            <th style="padding: 0.3rem 0.5rem;">reason</th>
+        <table>
+          <thead><tr>
+            <th>kind</th>
+            <th>label</th>
+            <th>path</th>
+            <th>reason</th>
           </tr></thead>
           <tbody>
           {% for s in skipped %}
-            <tr style="border-top: 1px solid var(--border);">
-              <td style="padding: 0.3rem 0.5rem;">{{ s.kind }}</td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ s.label }}</code></td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ s.path }}</code></td>
-              <td style="padding: 0.3rem 0.5rem;" class="muted">{{ s.reason }}</td>
+            <tr>
+              <td>{{ s.kind }}</td>
+              <td><code>{{ s.label }}</code></td>
+              <td><code>{{ s.path }}</code></td>
+              <td class="muted">{{ s.reason }}</td>
             </tr>
           {% endfor %}
           </tbody>
@@ -171,20 +171,20 @@
 
         {% if failed %}
         <h4 style="margin: 0.8rem 0 0.3rem 0; color: var(--bad);">failed ({{ failed|length }})</h4>
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-          <thead><tr style="text-align: left; color: var(--muted);">
-            <th style="padding: 0.3rem 0.5rem;">kind</th>
-            <th style="padding: 0.3rem 0.5rem;">label</th>
-            <th style="padding: 0.3rem 0.5rem;">path</th>
-            <th style="padding: 0.3rem 0.5rem;">reason</th>
+        <table>
+          <thead><tr>
+            <th>kind</th>
+            <th>label</th>
+            <th>path</th>
+            <th>reason</th>
           </tr></thead>
           <tbody>
           {% for f in failed %}
-            <tr style="border-top: 1px solid var(--border);">
-              <td style="padding: 0.3rem 0.5rem;">{{ f.kind }}</td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ f.label }}</code></td>
-              <td style="padding: 0.3rem 0.5rem;"><code>{{ f.path }}</code></td>
-              <td style="padding: 0.3rem 0.5rem;" class="muted">{{ f.reason }}</td>
+            <tr>
+              <td>{{ f.kind }}</td>
+              <td><code>{{ f.label }}</code></td>
+              <td><code>{{ f.path }}</code></td>
+              <td class="muted">{{ f.reason }}</td>
             </tr>
           {% endfor %}
           </tbody>
