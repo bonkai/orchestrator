@@ -1659,9 +1659,12 @@ async def send(
     panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models,
                                 _codex_seat_efforts())
 
-    # The single model picker determines the executor. The disabled Codex options
-    # are cosmetic; derive and validate server-side so a crafted codex request is
-    # rejected when unavailable instead of falling through to Claude.
+    # The EXECUTOR model picker (`model`) determines the executor engine — the
+    # OPTIONAL brain picker (`brain_model`) NEVER does, so engine routing stays bound
+    # to the executor field alone (a codex brain id is harmless: it collapses to opus
+    # on the claude-only brain path). The disabled Codex options are cosmetic; derive
+    # and validate server-side so a crafted codex request is rejected when unavailable
+    # instead of falling through to Claude.
     executor_engine, _, executor_model = _derive_executor(model, codex_models)
     try:
         executor_engine, executor_model = _validate_executor_engine(
