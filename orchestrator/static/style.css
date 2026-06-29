@@ -661,6 +661,12 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
 }
 
 /* ─── responsive ────────────────────────────────────────────────────── */
+/* the two runs tables need more width than the main column has once the
+   sidebar takes its share — stack them to one column before the dense
+   6-col table gets cramped (well before the sidebar layout itself collapses) */
+@media (max-width: 1024px) {
+  .runs-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 820px) {
   .layout {
     display: flex;
