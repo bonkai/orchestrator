@@ -18,7 +18,7 @@
   {% endif %}
 {% endmacro %}
 {% if not ok %}
-  <p style="color:#f0676f; font-size:12px; margin:0.6rem 0 0.2rem;">
+  <p class="text-bad" style="font-size:12px; margin:0.6rem 0 0.2rem;">
     refine failed: {{ error }}</p>
   {{ context_line(context_kind, context_source, context_note) }}
 {% else %}

@@ -71,7 +71,7 @@
         {% if rewrite.fusion_preset %}· preset <code>{{ rewrite.fusion_preset }}</code>{% endif %}
       </p>
       {% if rewrite.stage == 'rewrite_skipped' %}
-        <p style="color:#f0676f; font-size:12px; margin:0 0 0.6rem;">
+        <p class="text-bad" style="font-size:12px; margin:0 0 0.6rem;">
           rewrite not used: {{ rewrite.reason }}</p>
         {% if rewrite.raw_preview %}
           <pre style="white-space:pre-wrap; font-size:11px; max-height:160px; overflow:auto;">{{ rewrite.raw_preview }}</pre>
@@ -96,14 +96,14 @@
                 {% if s.subscription %}<span class="muted" title="Claude Code seat — subscription, no API charge">$0 (sub)</span>
                 {% else %}${{ '%.5f'|format(s.cost or 0) }}{% endif %}
               </td>
-              <td>{% if s.ok %}<span style="color:#5ed39a;">ok</span>
-                  {% else %}<span style="color:#f0676f;" title="{{ s.error }}">failed</span>{% endif %}</td>
+              <td>{% if s.ok %}<span class="text-ok">ok</span>
+                  {% else %}<span class="text-bad" title="{{ s.error }}">failed</span>{% endif %}</td>
             </tr>
             {% if s.ok and s.preview %}
             <tr><td colspan="6" class="muted"
                 style="font-size:11px; padding:0 0 6px 8px; white-space:pre-wrap;">{{ s.preview }}{% if s.preview|length >= 600 %}…{% endif %}</td></tr>
             {% elif not s.ok and s.error %}
-            <tr><td colspan="6" style="font-size:11px; color:#8a93a1; padding:0 0 6px 8px;">{{ s.error }}</td></tr>
+            <tr><td colspan="6" class="muted" style="font-size:11px; padding:0 0 6px 8px;">{{ s.error }}</td></tr>
             {% endif %}
           {% endfor %}
           </tbody>
