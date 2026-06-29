@@ -179,6 +179,10 @@ button.link {
   padding: 0; min-height: 0; text-align: left; border-radius: 0;
 }
 button.link:hover { background: none; color: var(--accent-2); text-decoration: underline; text-underline-offset: 3px; }
+/* link-styled button tinted danger (e.g. profile "delete") — needs the
+   combined selector to outrank button.link's color; token, not a raw hex */
+button.link.text-bad { color: var(--bad); }
+button.link.text-bad:hover { color: var(--bad); text-decoration: underline; text-underline-offset: 3px; }
 
 /* ghost chip — a quiet bordered link/button (e.g. "history") */
 .chip {
