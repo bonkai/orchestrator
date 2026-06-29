@@ -122,6 +122,28 @@ class TestSendEndpointFusionParsing(unittest.TestCase):
         # Names still validated/echoed (harmless — inert while fusion is off).
         self.assertEqual(kw["panel"], ["deepseek", "minimax"])
 
+    def test_brain_fields_optional_default_blank(self):
+        # The OPTIONAL brain picker: omitting it must NOT 422 — it defaults blank
+        # and threads through as "" (today's behavior downstream).
+        resp, sib = self._post({"project_id": 1, "task": "t"})
+        self.assertEqual(resp.status_code, 200)
+        kw = sib.call_args.kwargs
+        self.assertEqual(kw["brain_model"], "")
+        self.assertEqual(kw["brain_effort"], "")
+
+    def test_brain_fields_thread_to_background(self):
+        # When set, brain_model/brain_effort reach _send_in_background verbatim,
+        # independently of the executor model/effort.
+        resp, sib = self._post({
+            "project_id": 1, "task": "t",
+            "model": "opus", "effort": "max",
+            "brain_model": "sonnet", "brain_effort": "medium",
+        })
+        self.assertEqual(resp.status_code, 200)
+        kw = sib.call_args.kwargs
+        self.assertEqual(kw["brain_model"], "sonnet")
+        self.assertEqual(kw["brain_effort"], "medium")
+
 
 # ─────────────────── F3.2: _send_in_background forwarding ───────────────────
 
