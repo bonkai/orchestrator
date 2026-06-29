@@ -144,17 +144,17 @@ textarea:focus-visible {
 
 /* primary — the one accent fill + the micro-interaction */
 button.primary, .btn.primary {
-  background: var(--accent);
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
   border-color: transparent;
   color: var(--on-accent);
-  font-weight: 650;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset,
-              0 8px 22px -12px rgba(34, 211, 238, 0.65);
+  font-weight: 700;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset,
+              0 10px 26px -10px rgba(34, 211, 238, 0.75);
 }
 button.primary:hover {
   background: var(--accent-2);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset,
-              0 10px 26px -10px rgba(34, 211, 238, 0.8);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset,
+              0 14px 32px -8px rgba(34, 211, 238, 0.9);
   transform: translateY(-1px);
 }
 button.primary:active { transform: translateY(0) scale(0.985); }
