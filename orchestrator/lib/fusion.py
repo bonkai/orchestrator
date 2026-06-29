@@ -100,12 +100,18 @@ def enrich(prompt: str, project_path: str = "",
            panel: Optional[list] = None, preset: Optional[str] = None,
            timeout_s: Optional[int] = None,
            judge_model: str = "opus", judge_effort: str = "high",
-           verify: bool = False) -> FusionResult:
+           verify: bool = False,
+           verify_model: str = "opus", verify_effort: str = "high") -> FusionResult:
     """Run the analysis panel + judge over `prompt`'s task and return a rendered
     "## Multi-model analysis" block. NEVER raises — any shortfall (panel
     unavailable, unparseable/empty analysis, crash) returns ok=False so the caller
     dispatches the un-enriched prompt. `panel`/`preset` pick the seats exactly as
-    run_fusion_json does; an empty panel uses the configured preset."""
+    run_fusion_json does; an empty panel uses the configured preset.
+
+    `judge_model`/`judge_effort` (and `verify_model`/`verify_effort` for the opt-in
+    verifier) steer the enrich judge/verify/rejudge — the dispatch form points them
+    at the OPTIONAL brain picker so enrichment runs on the brain model too. All
+    default opus/high (today's behavior), so an omitting caller is unchanged."""
     try:
         task = (prompt or "").strip()
         if not task:

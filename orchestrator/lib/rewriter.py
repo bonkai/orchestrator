@@ -74,7 +74,9 @@ def _coerce_list_of_str(v) -> list[str]:
 def rewrite(user_task: str, project_path: str,
             fusion: bool = False, panel: Optional[list] = None,
             judge_model: str = "opus", judge_effort: str = "high",
-            verify: bool = False) -> RewriteResult:
+            verify: bool = False,
+            brain_model: str = "opus", brain_effort: str = "high",
+            verify_model: str = "opus", verify_effort: str = "high") -> RewriteResult:
     """Build the project bundle, ask claude to rewrite the task, return result.
 
     fusion=False is byte-for-byte the original single-claude path. fusion=True
@@ -83,10 +85,19 @@ def rewrite(user_task: str, project_path: str,
     `panel` (provider names) overrides the configured preset for this call. The
     auto-retry below always stays single-model — it never re-fans-out the panel.
 
-    `judge_model`/`judge_effort` drive the FUSION judge (the synthesis seat) so the
-    dispatch's UI model/effort picker controls it ("one knob"). They do NOT touch
-    the non-fusion brain or the single-model fallback/retry, which stay opus/high
-    by design — there is no judge on those paths to steer.
+    `brain_model`/`brain_effort` drive the actual rewrite brain call AND its
+    single-model fallback/retry — the "brain" half of the dispatch form's brain vs
+    executor split. They default to opus/high (the historical hardcode), so a caller
+    that omits them is byte-for-byte unchanged; an explicit value lets a cheaper or
+    different brain author the rewrite.
+
+    `judge_model`/`judge_effort` drive the FUSION judge (the synthesis seat) and
+    `verify_model`/`verify_effort` the opt-in verifier seat; both default opus/high.
+    The dispatch form aims all four of these (rewrite + judge + verify) at the same
+    OPTIONAL brain picker — blank ⇒ today's behavior. NB: these are ALL `claude`
+    brain calls, so callers pass a resolved Claude id (a codex/invalid brain pick is
+    collapsed to opus upstream), never a codex id — nothing rides `claude --model
+    <codex>` (dispatch #3/#241).
 
     `verify` (F11.c.1) forwards to the fusion judge's opt-in verifier seat; it is a
     no-op on the non-fusion path (no judge to verify)."""
@@ -114,9 +125,10 @@ def rewrite(user_task: str, project_path: str,
     })
 
     run = claude_runner.run_brain_json(prompt=prompt, cwd=str(project), fusion=fusion,
-                                       panel=panel, model="opus", effort="high",
+                                       panel=panel, model=brain_model, effort=brain_effort,
                                        judge_model=judge_model, judge_effort=judge_effort,
-                                       verify=verify, label="rewriter")
+                                       verify=verify, verify_model=verify_model,
+                                       verify_effort=verify_effort, label="rewriter")
     # F5: capture the fusion panel breakdown BEFORE the auto-retry (which swaps
     # `run` for a single-model claude call). A fused run carries the panel under
     # run.raw["panel"]; a plain/fallback claude run does not, so this stays empty
@@ -157,8 +169,11 @@ def rewrite(user_task: str, project_path: str,
         )
         # F2.2: the retry is ALWAYS a single model (run_claude_json directly),
         # never the panel — a flaky/parse-failing fusion call must not re-fan-out.
+        # It uses the SAME brain model/effort as the primary call (opus/high by
+        # default): the dispatch #4 lesson — any model/effort change to the primary
+        # call MUST be mirrored on this retry, or the two paths silently diverge.
         retry = claude_runner.run_claude_json(prompt=retry_prompt, cwd=str(project), label="rewriter",
-                                              model="opus", effort="high")
+                                              model=brain_model, effort=brain_effort)
         retry_cost = retry.cost_usd
         retry_duration = retry.duration_s
         if retry.ok and isinstance(retry.parsed_json, dict):
