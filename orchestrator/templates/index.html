@@ -136,25 +136,25 @@
           <a href="/settings" class="preview-link" title="edit the fusion registry + presets">⚙ fusion settings →</a>
           <div id="fusion-panel" class="fusion-panel" style="display:none;">
             <!-- Saved profiles: quick-switch the whole panel (your exact models + lenses). -->
-            <div id="fusion-profiles-bar" style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap; font-size:12px; margin:0 0 0.5rem; padding-bottom:0.5rem; border-bottom:1px solid #1e232c;">
+            <div id="fusion-profiles-bar" class="fusion-profiles-bar">
               <span class="muted">profile</span>
               <select id="fusion-profile-select" style="font-size:12px;"></select>
               <button type="button" id="profile-apply" class="secondary small" title="load this profile's models + lenses into the picker">apply</button>
               <button type="button" id="profile-save" class="secondary small" title="save the current seats as a new named profile">save as…</button>
               <button type="button" id="profile-update" class="secondary small" title="overwrite the selected profile with the current seats">update</button>
-              <button type="button" id="profile-delete" class="link" title="delete the selected profile" style="color:#f0676f;">delete</button>
+              <button type="button" id="profile-delete" class="link text-bad" title="delete the selected profile">delete</button>
               <a href="/playbook" target="_blank" class="preview-link" style="margin-left:auto;" title="recommended lens combos by task type">📖 lens guide →</a>
             </div>
             <div class="fusion-section" style="margin:0.3rem 0;">
-              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+              <div class="fusion-section-title">
                 Claude Code seats <span class="muted">— local <code>claude</code> CLI · no API · $0 · add as many as you like</span>
               </div>
               <div id="claude-seats" class="claude-seats"></div>
               <button type="button" id="add-claude-seat" class="secondary small" style="margin-top:0.25rem;">+ add Claude seat</button>
             </div>
             {% if codex_seat_models %}
-            <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
-              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+            <div class="fusion-section">
+              <div class="fusion-section-title">
                 Codex seats <span class="muted">— local <code>codex</code> CLI · ChatGPT subscription · no API · $0 · add as many as you like</span>
               </div>
               <div id="codex-seats" class="codex-seats"></div>
@@ -167,8 +167,8 @@
               {% endif %}
             </div>
             {% endif %}
-            <div class="fusion-section" style="margin:0.5rem 0 0.3rem;">
-              <div class="fusion-section-title" style="font-size:12px; margin-bottom:0.25rem;">
+            <div class="fusion-section">
+              <div class="fusion-section-title">
                 Cross-lab providers <span class="muted">— external API · costs tokens · key-gated · add as many as you like (even the same one)</span>
               </div>
               <div id="provider-seats" class="provider-seats"></div>
