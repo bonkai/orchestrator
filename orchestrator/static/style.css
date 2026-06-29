@@ -343,10 +343,12 @@ main { min-width: 0; }
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem 0.9rem;
-  margin-bottom: 1rem;
+  padding-bottom: 0.9rem;
+  margin-bottom: 1.1rem;
+  border-bottom: 1px solid var(--divider);   /* separate header from the form */
 }
 .pane-header h2 { margin: 0; color: var(--text); }
-.pane-header code { color: var(--muted); font-size: 12px; }
+.pane-header code { color: var(--muted); font-size: 12px; letter-spacing: -0.01em; }
 /* keep the project actions grouped on one line, aligned right */
 .pane-actions {
   display: flex;
