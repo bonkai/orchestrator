@@ -17,20 +17,20 @@
       <div class="pane">
         <details open>
           <summary style="cursor: pointer; color: var(--muted); margin-bottom: 0.5rem;">section summary</summary>
-          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-            <thead><tr style="color:var(--muted)">
-              <th style="text-align:left; padding: 4px;">#</th>
-              <th style="text-align:left; padding: 4px;">section</th>
-              <th style="text-align:left; padding: 4px;">source</th>
-              <th style="text-align:right; padding: 4px;">chars</th>
+          <table>
+            <thead><tr>
+              <th>#</th>
+              <th>section</th>
+              <th>source</th>
+              <th class="num">chars</th>
             </tr></thead>
             <tbody>
               {% for s in pack.sections %}
               <tr>
-                <td style="padding: 4px;">{{ loop.index }}</td>
-                <td style="padding: 4px;">{{ s.title }}</td>
-                <td style="padding: 4px;"><code>{{ s.source }}</code></td>
-                <td style="padding: 4px; text-align: right;">{{ s.chars }}{% if s.truncated %} ✂{% endif %}</td>
+                <td>{{ loop.index }}</td>
+                <td>{{ s.title }}</td>
+                <td><code>{{ s.source }}</code></td>
+                <td class="num">{{ s.chars }}{% if s.truncated %} ✂{% endif %}</td>
               </tr>
               {% endfor %}
             </tbody>
