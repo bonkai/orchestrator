@@ -390,8 +390,23 @@ main { min-width: 0; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.7rem 1rem;
-  margin-top: 0.7rem;
+  gap: 0.55rem 1.15rem;          /* row-gap on wrap · wider col-gap separates groups */
+  margin-top: 0.85rem;
+}
+/* logical clusters — params · mode-toggles · actions. The wider parent gap
+   against the tighter within-group gap is what reads as grouping (no rules or
+   dividers needed); each group wraps as a unit so the row never ragged-breaks. */
+.dispatch-controls .control-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+}
+.dispatch-controls .control-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;             /* keep the send cluster hard-right */
 }
 .dispatch-controls label {
   color: var(--muted);
@@ -411,24 +426,45 @@ main { min-width: 0; }
   transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 .dispatch-controls .preview-link:hover { background: var(--surface-hover); border-color: var(--accent-3); text-decoration: none; }
-/* push the two send buttons to the right, keep them grouped */
-.dispatch-controls #btn-send-raw { margin-left: auto; }
 
 /* fusion (multi-model) toggle + key-gated provider picker */
 .dispatch-controls .fusion-toggle { cursor: pointer; }
 .dispatch-controls .fusion-toggle input[disabled] { cursor: not-allowed; }
-.fusion-extra { margin-top: 0.5rem; }
-.fusion-hint { display: block; font-size: 11px; }
+.fusion-extra { margin-top: 0.6rem; }
+.fusion-hint { display: block; font-size: 11px; max-width: 70ch; }
 .fusion-panel {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 1rem;
+  flex-direction: column;        /* sections stack — vertical rhythm via gap */
+  gap: 0.6rem;
   margin-top: 0.5rem;
-  padding: 0.6rem 0.8rem;
+  padding: 0.8rem 0.9rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
 }
+/* profiles quick-switch bar — divider hairline uses the token, not #1e232c */
+.fusion-profiles-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin: 0;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+/* labeled seat groups (Claude / codex / cross-lab) */
+.fusion-section { margin: 0; }
+.fusion-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin: 0 0 0.35rem;
+}
+.fusion-section-title .muted { font-weight: 400; }
+.add-seat-btn { margin-top: 0.35rem; }
+.fusion-count { font-size: 12px; margin: 0.1rem 0 0; }
+
 /* drop zone */
 .drop-zone {
   border: 1px dashed var(--border-strong);
@@ -439,6 +475,12 @@ main { min-width: 0; }
   transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
 }
 .drop-zone.dragging { border-color: var(--accent); background: rgba(34, 211, 238, 0.06); }
+/* drop-zone internals — consolidated from inline styles (display stays inline,
+   it is JS-toggled: renderAttachments sets .style.display on #att-list/#drop-empty) */
+.drop-empty { font-size: 12px; text-align: center; }
+.att-list { list-style: none; padding: 0; margin: 0; }
+.drop-row { margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+.drop-row input[type="file"] { font-size: 11px; }
 
 /* ─── runs panel ────────────────────────────────────────────────────── */
 .runs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
@@ -590,8 +632,10 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   header .bar { flex-wrap: wrap; padding: 0.7rem 1rem; gap: 0.6rem; }
   header .add-project { order: 3; flex-basis: 100%; }
   header .killall { margin-left: auto; }
+  /* send cluster spans full width; the two send buttons share it */
+  .dispatch-controls .control-actions { width: 100%; margin-left: 0; }
   .dispatch-controls #btn-send-raw,
-  .dispatch-controls #btn-send-rewrite { margin-left: 0; flex: 1; }
+  .dispatch-controls #btn-send-rewrite { flex: 1; }
   /* generous tap targets on the thumb-zone */
   .dispatch-controls button,
   .dispatch-controls .preview-link { min-height: 44px; }
