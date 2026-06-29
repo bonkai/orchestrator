@@ -133,24 +133,26 @@
               </select>
             </label>
           </div>
-          <div class="control-group control-toggles">
-            <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
-              <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
-              fusion (multi-model) ⚡
-            </label>
-            <label class="fusion-toggle" title="enrich: run the same panel to ANALYZE the task and append a 'Multi-model analysis' block to the executor's prompt (it does not replace the rewrite). Works with both buttons.">
-              <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
-              enrich ⚡
-            </label>
-            <label class="fusion-toggle" title="verify (requires fusion): after the panel's judge synthesizes, a $0 Claude-CLI critic checks it and, on a found defect, triggers ONE re-judge to fix it.">
-              <input type="checkbox" id="verify-checkbox" {% if not fusion_available %}disabled{% endif %} {% if verify_default %}checked{% endif %}>
-              verify ⚡
-            </label>
-          </div>
-          <div class="control-actions">
-            <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
-            <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
-            <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+          <div class="control-footer">
+            <div class="control-group control-toggles">
+              <label class="fusion-toggle" title="multi-model panel — Claude Code seats are free ($0, no API); cross-lab providers cost API tokens. Best for architecture / research / high-stakes.">
+                <input type="checkbox" id="fusion-checkbox" {% if not fusion_available %}disabled{% endif %}>
+                fusion (multi-model) ⚡
+              </label>
+              <label class="fusion-toggle" title="enrich: run the same panel to ANALYZE the task and append a 'Multi-model analysis' block to the executor's prompt (it does not replace the rewrite). Works with both buttons.">
+                <input type="checkbox" id="enrich-checkbox" {% if not fusion_available %}disabled{% endif %}>
+                enrich ⚡
+              </label>
+              <label class="fusion-toggle" title="verify (requires fusion): after the panel's judge synthesizes, a $0 Claude-CLI critic checks it and, on a found defect, triggers ONE re-judge to fix it.">
+                <input type="checkbox" id="verify-checkbox" {% if not fusion_available %}disabled{% endif %} {% if verify_default %}checked{% endif %}>
+                verify ⚡
+              </label>
+            </div>
+            <div class="control-actions">
+              <a href="/bundle/{{ active_project.id }}" target="_blank" class="preview-link">view bundle →</a>
+              <button type="button" id="btn-send-raw" class="secondary">skip rewrite & send</button>
+              <button type="button" id="btn-send-rewrite" class="primary">rewrite & send →</button>
+            </div>
           </div>
         </div>
         <div class="fusion-extra">
