@@ -224,9 +224,12 @@ header {
   top: 0;
   z-index: 50;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: linear-gradient(180deg,
+              color-mix(in srgb, var(--surface-2) 88%, transparent),
+              color-mix(in srgb, var(--bg) 82%, transparent));
+  box-shadow: 0 1px 0 var(--highlight), 0 14px 34px -24px rgba(0,0,0,0.9);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
 }
 header .bar {
   display: flex;
