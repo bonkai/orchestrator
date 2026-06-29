@@ -14,9 +14,10 @@
   --surface-hover: #1b212b;
 
   /* hairlines — the "ring-white/10" card edge */
-  --border:        rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.15);
+  --border:        rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.16);
   --divider:       rgba(255, 255, 255, 0.06);
+  --highlight:     rgba(255, 255, 255, 0.05);   /* top-edge "lit from above" inset */
 
   /* text ramp (all AA ≥4.5:1 on --surface) */
   --text:   #e8ebf1;
@@ -38,7 +39,8 @@
   /* shape / depth / motion — single tokens, reused everywhere */
   --radius:    1rem;       /* rounded-2xl */
   --radius-sm: 0.625rem;
-  --shadow: 0 18px 40px -24px rgba(0,0,0,0.85), 0 2px 8px -4px rgba(0,0,0,0.5);
+  --shadow: 0 22px 50px -26px rgba(0,0,0,0.92), 0 4px 14px -8px rgba(0,0,0,0.55);
+  --shadow-glow: 0 0 0 1px rgba(34,211,238,0.22), 0 10px 34px -12px rgba(34,211,238,0.40);
   --ring:   inset 0 0 0 1px var(--border);
   --ease:   cubic-bezier(0.22, 1, 0.36, 1);
   --dur:    0.5s;
