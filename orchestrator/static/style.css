@@ -65,7 +65,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* faint top-of-page glow so the near-black isn't dead flat — pure treatment */
+/* faint top-of-page glow so the soft-dark canvas isn't dead flat — pure treatment */
 body::before {
   content: "";
   position: fixed;
