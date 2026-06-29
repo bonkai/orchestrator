@@ -73,9 +73,8 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(62rem 34rem at 10% -10%, rgba(34, 211, 238, 0.16), transparent 62%),
-    radial-gradient(54rem 32rem at 94% -12%, rgba(192, 138, 240, 0.12), transparent 62%),
-    radial-gradient(44rem 26rem at 50% 112%, rgba(34, 211, 238, 0.05), transparent 60%);
+    radial-gradient(60rem 32rem at 12% -12%, rgba(34, 211, 238, 0.06), transparent 60%),
+    radial-gradient(52rem 30rem at 92% -14%, rgba(192, 138, 240, 0.045), transparent 60%);
 }
 
 ::selection { background: rgba(34, 211, 238, 0.28); color: #fff; }
