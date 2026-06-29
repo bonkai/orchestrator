@@ -158,7 +158,7 @@
                 Codex seats <span class="muted">— local <code>codex</code> CLI · ChatGPT subscription · no API · $0 · add as many as you like</span>
               </div>
               <div id="codex-seats" class="codex-seats"></div>
-              <button type="button" id="add-codex-seat" class="secondary small" style="margin-top:0.25rem;"
+              <button type="button" id="add-codex-seat" class="secondary small add-seat-btn"
                       {% if not codex_cli_available %}disabled title="Codex CLI absent or logged out — run `codex login` to add codex seats"{% endif %}>+ add codex seat</button>
               {% if not codex_cli_available %}
               <span class="muted" style="display:block; font-size:12px; margin-top:0.25rem;">
