@@ -222,20 +222,10 @@ header {
   top: 0;
   z-index: 50;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg,
-              color-mix(in srgb, var(--surface-2) 88%, transparent),
-              color-mix(in srgb, var(--bg) 82%, transparent));
-  box-shadow: 0 1px 0 var(--highlight), 0 14px 34px -24px rgba(0,0,0,0.9);
-  backdrop-filter: blur(16px) saturate(150%);
-  -webkit-backdrop-filter: blur(16px) saturate(150%);
-}
-/* a thin cyan beam across the very top — quiet brand pop, stays mono-accent */
-header::before {
-  content: "";
-  position: absolute; top: 0; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent) 50%, transparent);
-  opacity: 0.7;
-  pointer-events: none;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  box-shadow: 0 1px 12px -6px rgba(0,0,0,0.4);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
 }
 header .bar {
   display: flex;
