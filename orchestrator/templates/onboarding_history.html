@@ -21,37 +21,35 @@
       {% if not runs %}
         <p class="muted">No runs yet. Click <em>analyze project</em> on the main pane to start.</p>
       {% else %}
-        <table class="row-link" style="width: 100%; font-size: 13px; border-collapse: collapse;">
-          <thead><tr style="text-align: left; color: var(--muted);">
-            <th style="padding: 0.4rem 0.5rem;">#</th>
-            <th style="padding: 0.4rem 0.5rem;">when</th>
-            <th style="padding: 0.4rem 0.5rem;">status</th>
-            <th style="padding: 0.4rem 0.5rem; text-align: right;">applied</th>
-            <th style="padding: 0.4rem 0.5rem; text-align: right;">skipped</th>
-            <th style="padding: 0.4rem 0.5rem; text-align: right;">failed</th>
-            <th style="padding: 0.4rem 0.5rem;">summary</th>
+        <table class="row-link">
+          <thead><tr>
+            <th>#</th>
+            <th>when</th>
+            <th>status</th>
+            <th class="num">applied</th>
+            <th class="num">skipped</th>
+            <th class="num">failed</th>
+            <th>summary</th>
           </tr></thead>
           <tbody>
           {% for r in runs %}
-            <tr style="border-top: 1px solid var(--border); cursor: pointer;"
-                onclick="window.location='/project/{{ project.id }}/onboard/run/{{ r.id }}'">
-              <td style="padding: 0.4rem 0.5rem;">
-                <a href="/project/{{ project.id }}/onboard/run/{{ r.id }}"
-                   style="color: var(--accent);">#{{ r.id }}</a>
+            <tr onclick="window.location='/project/{{ project.id }}/onboard/run/{{ r.id }}'">
+              <td>
+                <a href="/project/{{ project.id }}/onboard/run/{{ r.id }}">#{{ r.id }}</a>
               </td>
-              <td style="padding: 0.4rem 0.5rem;" class="muted">{{ fmt_rel(r.created_at) }}</td>
-              <td style="padding: 0.4rem 0.5rem;">
+              <td class="muted">{{ fmt_rel(r.created_at) }}</td>
+              <td>
                 {% if r.ok %}
-                  <span style="color: var(--ok);">ok</span>
+                  <span class="text-ok">ok</span>
                 {% else %}
-                  <span style="color: var(--bad);">failed</span>
+                  <span class="text-bad">failed</span>
                   {% if r.error %}<span class="muted" style="font-size: 11px;"> — {{ r.error|truncate(60) }}</span>{% endif %}
                 {% endif %}
               </td>
-              <td style="padding: 0.4rem 0.5rem; text-align: right; color: {% if r.applied_count %}var(--ok){% else %}var(--muted){% endif %};">{{ r.applied_count }}</td>
-              <td style="padding: 0.4rem 0.5rem; text-align: right; color: {% if r.skipped_count %}var(--warn){% else %}var(--muted){% endif %};">{{ r.skipped_count }}</td>
-              <td style="padding: 0.4rem 0.5rem; text-align: right; color: {% if r.failed_count %}var(--bad){% else %}var(--muted){% endif %};">{{ r.failed_count }}</td>
-              <td style="padding: 0.4rem 0.5rem;" class="muted">
+              <td class="num" style="color: {% if r.applied_count %}var(--ok){% else %}var(--muted){% endif %};">{{ r.applied_count }}</td>
+              <td class="num" style="color: {% if r.skipped_count %}var(--warn){% else %}var(--muted){% endif %};">{{ r.skipped_count }}</td>
+              <td class="num" style="color: {% if r.failed_count %}var(--bad){% else %}var(--muted){% endif %};">{{ r.failed_count }}</td>
+              <td class="muted">
                 {% if r.project_summary %}{{ r.project_summary|truncate(80) }}{% endif %}
               </td>
             </tr>
