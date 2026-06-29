@@ -238,8 +238,8 @@ header .bar {
 header h1 {
   margin: 0;
   font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-weight: 750;
+  letter-spacing: -0.02em;
   color: var(--text);
   display: flex;
   align-items: center;
@@ -248,10 +248,10 @@ header h1 {
 }
 header h1::before {                 /* accent status dot — "alive" mark */
   content: "";
-  width: 10px; height: 10px;
+  width: 9px; height: 9px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, var(--accent-2), var(--accent-3));
-  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.15), 0 0 18px var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12), 0 0 10px rgba(34, 211, 238, 0.5);
 }
 header .add-project { display: flex; gap: 0.5rem; flex: 1; min-width: 0; }
 header .add-project input { flex: 1; min-width: 0; }
@@ -512,12 +512,12 @@ main { min-width: 0; }
   color: var(--muted);
   text-transform: uppercase;
 }
-/* section eyebrows get a small glowing accent tick — quiet rhythm of cyan */
+/* section eyebrows get a small, soft accent tick — calm rhythm, no glow */
 .sidebar h3, .runs-col h3 { display: flex; align-items: center; gap: 0.55rem; }
 .sidebar h3::before, .runs-col h3::before {
   content: ""; flex: none;
-  width: 16px; height: 2px; border-radius: 2px;
-  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  width: 14px; height: 2px; border-radius: 2px;
+  background: var(--accent); opacity: 0.8;
 }
 .runs-col table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .runs-col th {
