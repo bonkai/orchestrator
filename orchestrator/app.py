@@ -1474,15 +1474,18 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
         loop = asyncio.get_running_loop()
         try:
             # F3.2: route the rewrite's ONE brain call through Fusion when the
-            # send asked for it. fusion/panel/judge_* are passed positionally
-            # (run_in_executor takes *args, not kwargs) — rewriter.rewrite's
-            # signature is (user_task, project_path, fusion, panel, judge_model,
-            # judge_effort, verify). With do_fusion=False this is byte-for-byte the
-            # original single-claude path (panel + judge_*/verify are inert
-            # downstream when fusion is off).
+            # send asked for it. Args are passed positionally (run_in_executor takes
+            # *args, not kwargs) — rewriter.rewrite's signature is (user_task,
+            # project_path, fusion, panel, judge_model, judge_effort, verify,
+            # brain_model, brain_effort, verify_model, verify_effort). brain_model/
+            # brain_effort drive the actual rewrite brain call (+ retry); the judge/
+            # verify tiers steer fusion. With do_fusion=False this is byte-for-byte
+            # the original single-claude path on the brain model (panel + judge_*/
+            # verify_* are inert downstream when fusion is off).
             result = await loop.run_in_executor(
                 None, rewriter.rewrite, task_for_rewriter, proj["path"],
                 do_fusion, panel, judge_model, judge_effort, do_verify,
+                rewrite_model, rewrite_effort, verify_model, verify_effort,
             )
             if result.ok and result.rewritten_prompt:
                 final_task = result.rewritten_prompt
@@ -1572,7 +1575,8 @@ async def _send_in_background(project_id: int, task: str, wall_cap_s: int, do_re
                 None, lambda: fusion_mod.enrich(
                     final_task, proj["path"], panel,
                     judge_model=judge_model, judge_effort=judge_effort,
-                    verify=do_verify))
+                    verify=do_verify, verify_model=verify_model,
+                    verify_effort=verify_effort))
             if fres.ok and fres.enrichment_md:
                 final_task = final_task + "\n\n" + fres.enrichment_md
                 rewrite_cost += fres.cost_usd                    # add to dispatch spend
@@ -1617,6 +1621,8 @@ async def send(
     rewrite: str = Form("false"),
     effort: str = Form("max"),
     model: str = Form(""),
+    brain_effort: str = Form(""),
+    brain_model: str = Form(""),
     fusion: str = Form("false"),
     fusion_panel: str = Form(""),
     fusion_seats: str = Form(""),
@@ -1677,6 +1683,7 @@ async def send(
     # mid-run when the browser tab disconnects after the immediate response.
     task = asyncio.create_task(_send_in_background(
         project_id, task, wall_cap_s, do_rewrite, effort, model,
+        brain_model=brain_model, brain_effort=brain_effort,
         do_fusion=do_fusion, panel=panel, do_enrich=do_enrich, do_verify=do_verify,
     ))
     _background_tasks.add(task)
