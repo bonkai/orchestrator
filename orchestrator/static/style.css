@@ -678,7 +678,7 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   /* settings fields stack full-width so wide selects never overflow */
   .dispatch-controls .control-group > label,
   .dispatch-controls .control-brain > label { width: 100%; }
-  .dispatch-controls label > select { flex: 1 1 auto; }
+  .dispatch-controls label > select { flex: 1 1 0; }   /* basis 0 — shrink to fit, don't widen the pane */
   .dispatch-controls .control-toggles { width: 100%; }
   /* send cluster spans full width; the two send buttons share it */
   .dispatch-controls .control-actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
