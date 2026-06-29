@@ -7,11 +7,11 @@
 
 :root {
   /* surfaces — cool near-black neutral ramp */
-  --bg:            #0a0c10;
-  --surface:       #11141b;   /* cards / panes                */
-  --surface-2:     #161a22;   /* raised: header, sidebar, tabs */
-  --surface-inset: #0b0e13;   /* inputs, code blocks (recessed)*/
-  --surface-hover: #1b212b;
+  --bg:            #070809;   /* near-black so elevated cards clearly float */
+  --surface:       #13161e;   /* cards / panes                 */
+  --surface-2:     #1a1f2a;   /* raised: header, sidebar, tabs */
+  --surface-inset: #0c0e13;   /* inputs, code blocks (recessed)*/
+  --surface-hover: #20262f;
 
   /* hairlines — the "ring-white/10" card edge */
   --border:        rgba(255, 255, 255, 0.10);
