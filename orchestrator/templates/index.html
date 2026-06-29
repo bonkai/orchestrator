@@ -73,7 +73,7 @@
         <div class="dispatch-controls">
           <div class="control-group">
             <label>wall-cap (s, ≤6h): <input type="number" name="wall_cap_s" value="14400" min="60" max="21600" title="wall-clock cap in seconds — default 4h (14400), max 6h (21600). On timeout the dispatch is paused (resumable), not killed."></label>
-            <label title="Pick the reasoning effort for whichever engine your model uses. Claude and Codex have different ladders (Claude: low–max; Codex: minimal–xhigh) — a value that doesn't fit the chosen engine safely falls back to that engine's default, so nothing breaks.">effort:
+            <label title="EXECUTOR reasoning effort — the spawned session that does the work. Claude and Codex have different ladders (Claude: low–max; Codex: minimal–xhigh) — a value that doesn't fit the chosen engine safely falls back to that engine's default, so nothing breaks.">executor effort:
               <select name="effort">
                 <optgroup label="Claude (low–max)">
                   {% for e in claude_seat_efforts %}
@@ -90,7 +90,7 @@
                 {% endif %}
               </select>
             </label>
-            <label>model:
+            <label title="EXECUTOR model — the spawned session that does the work. This ALSO picks the engine: a Codex id routes to the Codex executor, everything else to Claude. Can be a higher-power model than the brain below.">executor model:
               <select name="model">
                 <optgroup label="Anthropic">
                   <option value="" selected>default</option>
@@ -104,6 +104,32 @@
                   {% for m in codex_seat_models %}<option value="{{ m }}" {% if not codex_cli_available %}disabled{% endif %}>{{ m }}{% if not codex_cli_available %} (unavailable){% endif %}</option>{% endfor %}
                 </optgroup>
                 {% endif %}
+              </select>
+            </label>
+          </div>
+          <!-- Brain (pre-executor) controls — OPTIONAL. The brain does the rewrite +
+               the fusion/enrich judge/verify/rejudge; the executor above does the work.
+               Blank ⇒ today's behavior (rewrite stays opus/high; the fusion judge follows
+               the executor picker). Claude-only: the brain is always a `claude` call, so
+               NO Codex optgroup here (a codex id would just collapse to opus server-side).
+               These four <option>s mirror the executor's Anthropic optgroup; keep in sync. -->
+          <div class="control-group control-brain">
+            <span class="muted hint-xs" title="Optional 'brain' tier for the PRE-executor work — the rewrite and the fusion/enrich judge/verify/rejudge. Leave both on 'default' to reproduce today's behavior. Set them to run the brain on a cheaper/different model than the executor.">brain (pre-executor) — optional:</span>
+            <label title="BRAIN model — the rewrite + fusion/enrich judge/verify/rejudge. 'default' keeps today's behavior (rewrite opus/high; fusion judge follows the executor model). Claude-only — the brain is always a `claude` call.">brain model:
+              <select name="brain_model">
+                <option value="" selected>default</option>
+                <option value="fable">fable 5</option>
+                <option value="opus">opus 4.8</option>
+                <option value="sonnet">sonnet 4.6</option>
+                <option value="haiku">haiku 4.5</option>
+              </select>
+            </label>
+            <label title="BRAIN reasoning effort. 'default' keeps today's behavior (rewrite stays high; the fusion judge follows the executor effort). Claude ladder only.">brain effort:
+              <select name="brain_effort">
+                <option value="" selected>default</option>
+                {% for e in claude_seat_efforts %}
+                <option value="{{ e }}">{{ e }}</option>
+                {% endfor %}
               </select>
             </label>
           </div>
@@ -880,6 +906,10 @@
           fd.append('wall_cap_s', form.querySelector('input[name=wall_cap_s]').value);
           fd.append('effort', form.querySelector('select[name=effort]').value);
           fd.append('model', form.querySelector('select[name=model]').value);
+          // OPTIONAL brain (pre-executor) tier — drives the rewrite + fusion/enrich
+          // judge/verify/rejudge. Blank ('default') ⇒ today's behavior server-side.
+          fd.append('brain_effort', form.querySelector('select[name=brain_effort]').value);
+          fd.append('brain_model', form.querySelector('select[name=brain_model]').value);
           fd.append('rewrite', rewrite ? 'true' : 'false');
           // Multi-model Fusion for the rewrite brain call. Only meaningful when
           // rewrite is on (fusion routes the rewriter's ONE brain call); the
