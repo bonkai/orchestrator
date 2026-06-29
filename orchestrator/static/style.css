@@ -281,11 +281,11 @@ header .killall { margin-left: auto; }
 .sidebar {
   position: sticky;
   top: 3.25rem;
-  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 78%);
+  background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--highlight);
+  box-shadow: var(--shadow);
   border-radius: var(--radius);
-  padding: 1.25rem;
+  padding: 1.5rem;
 }
 .sidebar h3 {
   margin: 0 0 0.85rem;
