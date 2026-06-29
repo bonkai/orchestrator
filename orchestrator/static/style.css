@@ -259,11 +259,11 @@ header .killall { margin-left: auto; }
 /* ─── layout (centered dashboard) ───────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: 256px minmax(0, 1fr);
+  gap: 1.75rem;
   max-width: 2400px;
   margin: 0 auto;
-  padding: 1.25rem 2rem 3rem;
+  padding: 1.5rem 2rem 3.5rem;
   align-items: start;
 }
 
@@ -315,7 +315,7 @@ main { min-width: 0; }
   border-color: var(--accent-3);
   box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2);
 }
-.tab-label { padding: 0.45rem 0.75rem; color: var(--text-2); font-size: 13px; font-weight: 550; }
+.tab-label { padding: 0.5rem 0.9rem; color: var(--text-2); font-size: 14px; font-weight: 550; }
 .tab.active .tab-label { color: var(--accent-2); }
 .tab-close-form { display: inline; margin: 0; }
 .tab-close {
