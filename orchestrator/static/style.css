@@ -6,29 +6,29 @@
    ════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* surfaces — cool near-black neutral ramp */
-  --bg:            #070809;   /* near-black so elevated cards clearly float */
-  --surface:       #13161e;   /* cards / panes                 */
-  --surface-2:     #1a1f2a;   /* raised: header, sidebar, tabs */
-  --surface-inset: #0c0e13;   /* inputs, code blocks (recessed)*/
-  --surface-hover: #20262f;
+  /* surfaces — soft, neutral dark (comfortable, not harsh black) */
+  --bg:            #1a1b1f;   /* app canvas — soft dark gray   */
+  --surface:       #222429;   /* cards / panes — gently lifted */
+  --surface-2:     #2a2d33;   /* raised: header, sidebar, tabs */
+  --surface-inset: #16171b;   /* inputs, code blocks (recessed)*/
+  --surface-hover: #30333a;
 
-  /* hairlines — the "ring-white/10" card edge */
-  --border:        rgba(255, 255, 255, 0.10);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* hairlines — soft, low-contrast edges */
+  --border:        rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.15);
   --divider:       rgba(255, 255, 255, 0.06);
-  --highlight:     rgba(255, 255, 255, 0.05);   /* top-edge "lit from above" inset */
+  --highlight:     rgba(255, 255, 255, 0.04);
 
-  /* text ramp (all AA ≥4.5:1 on --surface) */
-  --text:   #e8ebf1;
-  --text-2: #aeb6c4;
-  --muted:  #8a93a1;
+  /* text ramp — soft off-white, easy on the eyes (AA+ on --surface) */
+  --text:   #edeef1;
+  --text-2: #b7bac1;
+  --muted:  #9296a0;
 
-  /* the one accent — cyan, used only on interactive / live elements */
+  /* the one accent — cyan, used gently (clean fills, no neon glow) */
   --accent:   #22d3ee;
-  --accent-2: #67e8f9;   /* hover / lighter */
-  --accent-3: #06b6d4;   /* press / border  */
-  --on-accent:#04151b;
+  --accent-2: #6fe3f7;   /* hover / lighter */
+  --accent-3: #0e9fc0;   /* press / border  */
+  --on-accent:#05181f;
 
   /* status — restrained, soft-tinted (see .badge) */
   --ok:     #5ed39a;
