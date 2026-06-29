@@ -62,11 +62,11 @@
                   placeholder="What do you want claude to do in this project? (drag files anywhere into this pane to attach them)" required></textarea>
 
         <div id="drop-zone" class="drop-zone">
-          <div id="drop-empty" class="muted" style="font-size: 12px; text-align: center;">drop files here to attach (or use the file picker below)</div>
-          <ul id="att-list" style="list-style: none; padding: 0; margin: 0; display: none;"></ul>
-          <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-            <input type="file" id="file-picker" multiple style="font-size: 11px;">
-            <span id="att-status" class="muted" style="font-size: 11px;"></span>
+          <div id="drop-empty" class="muted drop-empty">drop files here to attach (or use the file picker below)</div>
+          <ul id="att-list" class="att-list" style="display: none;"></ul>
+          <div class="drop-row">
+            <input type="file" id="file-picker" multiple>
+            <span id="att-status" class="muted hint-xs"></span>
           </div>
         </div>
 
