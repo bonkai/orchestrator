@@ -663,6 +663,9 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   .layout {
     display: flex;
     flex-direction: column;
+    align-items: stretch;        /* override the grid's align-items:start, else
+                                    column children size to content and the wide
+                                    tab strip blows main past the viewport */
     padding: 1.25rem 1rem 3rem;
     gap: 1.25rem;
   }
