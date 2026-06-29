@@ -316,9 +316,9 @@ main { min-width: 0; }
 }
 .tab:hover { background: var(--surface-hover); }
 .tab.active {
-  background: var(--surface-hover);
+  background: linear-gradient(180deg, rgba(34,211,238,0.16), rgba(34,211,238,0.04));
   border-color: var(--accent-3);
-  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25), 0 6px 18px -12px rgba(34, 211, 238, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(34, 211, 238, 0.3), 0 8px 20px -12px rgba(34, 211, 238, 0.6);
 }
 .tab-label { padding: 0.45rem 0.75rem; color: var(--text-2); font-size: 13px; font-weight: 550; }
 .tab.active .tab-label { color: var(--accent-2); }
@@ -564,13 +564,15 @@ main { min-width: 0; }
   line-height: 1.5;
 }
 .badge-pending   { background: rgba(255,255,255,0.06); color: var(--text-2);  border-color: var(--border); }
-.badge-running   { background: rgba(34, 211, 238, 0.12); color: var(--accent-2); border-color: rgba(34,211,238,0.3); }
+.badge-running   { background: rgba(34, 211, 238, 0.16); color: var(--accent-2); border-color: rgba(34,211,238,0.45);
+                   box-shadow: 0 0 0 1px rgba(34,211,238,0.15), 0 0 16px -4px rgba(34,211,238,0.7); }
 .badge-running::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 8px var(--accent);
   animation: orch-pulse 1.4s var(--ease) infinite;
 }
-.badge-completed { background: rgba(94, 211, 154, 0.13); color: var(--ok);     border-color: rgba(94,211,154,0.3); }
+/* completed is the default "done" state — keep it calm so 40+ of them don't shout */
+.badge-completed { background: rgba(94, 211, 154, 0.08); color: #7fc4a3;      border-color: rgba(94,211,154,0.18); }
 .badge-killed    { background: rgba(240, 103, 111, 0.14); color: #ff8b91;      border-color: rgba(240,103,111,0.32); }
 .badge-paused    { background: rgba(240, 198, 89, 0.14);  color: var(--warn);   border-color: rgba(240,198,89,0.32); }
 .badge-failed    { background: rgba(192, 138, 240, 0.14); color: var(--violet); border-color: rgba(192,138,240,0.3); }
