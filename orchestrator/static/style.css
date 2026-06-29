@@ -513,14 +513,17 @@ main { min-width: 0; }
 .drop-row input[type="file"] { font-size: 11px; }
 
 /* ─── runs panel ────────────────────────────────────────────────────── */
-.runs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+.runs-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.1rem; }
 .runs-col {
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   border-radius: var(--radius);
   padding: 1.4rem 1.5rem;
+  min-width: 0;                  /* let the column shrink so its table can't overflow main */
 }
+.runs-col table { table-layout: fixed; }
+.runs-col .task-cell { overflow-wrap: anywhere; }
 .runs-col h3 {
   margin: 0 0 0.6rem;
   font-size: 0.7rem;
