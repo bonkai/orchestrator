@@ -698,4 +698,9 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   /* generous tap targets on the thumb-zone */
   .dispatch-controls button,
   .dispatch-controls .preview-link { min-height: 44px; }
+  /* dense runs table: tighten + let the action buttons wrap so 6 columns fit a phone */
+  .runs-col { padding: 1rem 0.85rem; }
+  .runs-col table { font-size: 12px; }
+  .runs-col th, .runs-col td { padding: 0.4rem 0.3rem; }
+  .runs-col .run-actions { white-space: normal; }
 }
