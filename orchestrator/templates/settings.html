@@ -14,8 +14,8 @@
         · claude CLI {{ 'present' if claude_cli_available else 'absent' }}</span>
     </div>
 
-    {% if ok %}<div class="pane" style="border-color:#5ed39a;"><strong style="color:#5ed39a;">✓</strong> {{ ok }}</div>{% endif %}
-    {% if err %}<div class="pane" style="border-color:#f0676f;"><strong style="color:#f0676f;">✗</strong> {{ err }}</div>{% endif %}
+    {% if ok %}<div class="pane" style="border-color:var(--ok);"><strong class="text-ok">✓</strong> {{ ok }}</div>{% endif %}
+    {% if err %}<div class="pane" style="border-color:var(--bad);"><strong class="text-bad">✗</strong> {{ err }}</div>{% endif %}
 
     <div class="pane reveal">
       <p class="muted" style="margin-top:0; font-size:12px;">
@@ -77,7 +77,7 @@
           <tr>
             <td>
               {{ p.name }}
-              {% if p.active %}<span title="keyed + enabled → usable" style="color:#5ed39a;">●</span>{% endif %}
+              {% if p.active %}<span title="keyed + enabled → usable" class="text-ok">●</span>{% endif %}
             </td>
             <td>
               <form method="post" action="/settings/provider" style="display:flex; gap:0.25rem; align-items:center;">
@@ -94,7 +94,7 @@
             <td style="text-align:right;" class="muted">{{ p.price_in }}/{{ p.price_out }}</td>
             <td style="text-align:center;">
               {% if p.kind == 'claude_cli' %}<span class="muted" title="local CLI seat — no key">n/a</span>
-              {% elif p.has_key %}<span style="color:#5ed39a;" title="a key resolves (env or config.json)">set ✓</span>
+              {% elif p.has_key %}<span class="text-ok" title="a key resolves (env or config.json)">set ✓</span>
               {% else %}<span class="muted" title="no key — paste one into config.json">—</span>{% endif %}
             </td>
             <td style="text-align:center;">
