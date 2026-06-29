@@ -188,13 +188,13 @@ button.link.text-bad:hover { color: var(--bad); text-decoration: underline; text
 .chip {
   display: inline-flex;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
   color: var(--text-2);
-  padding: 0.45rem 0.75rem;
-  min-height: 36px;
+  padding: 0.5rem 0.85rem;
+  min-height: 38px;
   border: 1px solid var(--border);
-  border-radius: 0.7rem;
+  border-radius: 0.8rem;
   background: transparent;
   transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease);
 }
