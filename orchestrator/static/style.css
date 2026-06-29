@@ -674,8 +674,6 @@ button.primary .spinner { border-top-color: var(--on-accent); border-color: rgba
   main { order: 1; }
   .sidebar { order: 2; position: static; top: auto; }
   .runs-grid { grid-template-columns: minmax(0, 1fr); }
-  /* single-column runs are roomy — break anywhere so the 6-col table never overflows */
-  .runs-col .task-cell { overflow-wrap: anywhere; }
 }
 
 @media (max-width: 560px) {
