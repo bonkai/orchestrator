@@ -2,10 +2,28 @@
   "name": "orchestrator",
   "description": "Browser UI that dispatches enriched tasks to Claude Code across many projects, learns from outcomes.",
   "layout": {
-    "memory_dirs": ["memory"],
-    "knowledge_dirs": ["knowledge"],
-    "task_dirs": ["tasks"],
+    "memory_dirs": [
+      "memory"
+    ],
+    "knowledge_dirs": [
+      "knowledge"
+    ],
+    "task_dirs": [
+      "tasks"
+    ],
     "claude_md": "CLAUDE.md",
     "plan_md": "PLAN.md"
-  }
+  },
+  "context_priority": [
+    "AGENTS.md",
+    "PLAN.md",
+    "products/INDEX.md",
+    "sessions/INDEX.md",
+    "knowledge/PRINCIPLES.md",
+    "knowledge/MISTAKES.md",
+    "knowledge/WINS.md",
+    "knowledge/HAZARDS.md",
+    "knowledge/DECISIONS.md",
+    "knowledge/TECH_STACK.md"
+  ]
 }

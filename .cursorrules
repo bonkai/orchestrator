@@ -1,0 +1,4 @@
+The canonical instructions for this project are in AGENTS.md at the project root.
+Read AGENTS.md in full before doing anything else — it is the single source of truth
+for how to work here (directory layout, workflow, and rules), shared by every AI
+assistant. Do not duplicate instructions here; edit AGENTS.md instead.
