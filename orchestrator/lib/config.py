@@ -133,29 +133,39 @@ FUSION_LENSES_SEED = {
 # claude_runner IMPORTS these (the run_codex_* flag set + the selectable judge's
 # model resolution) instead of redefining the literals, so the codex `-m` id and
 # flags have ONE source of truth, swappable by a config.json edit. Flags + event
-# schema are version-pinned to codex-cli 0.141.0 (CODEX_PLAN.md §3); codex churns
-# them, so re-verify on upgrade.
+# schema are version-pinned to codex-cli 0.144.4 (originally 0.141.0, CODEX_PLAN.md
+# §3; flags + exec JSONL schema re-verified live on 0.144.4, 2026-07-14); codex
+# churns them, so re-verify on upgrade.
 #
 # `model` is a codex id, NEVER a Claude id: the Fusion judge/verify defaults are
 # Claude ids (opus), and feeding one to `codex -m` is a silent downgrade (dispatch
 # #3) — so the codex judge path resolves its model from HERE, not the Claude default.
 CODEX_ENGINE_SEED = {
     # `-m` value codex passes. On a ChatGPT-subscription account (Branch A) the valid
-    # ids are the plain GPT models codex routes to — `gpt-5.5` (default/best), `gpt-5.4`
-    # (more 5h-window runway), `gpt-5.4-mini` (most runway, lightest) — NEVER a Claude id,
-    # and NOT the `-codex`-suffixed ids: `gpt-5-codex` is API-only/retired and a ChatGPT
-    # account REJECTS it ("model is not supported when using Codex with a ChatGPT account"
-    # — verified live 2026-06-23). Codex churns these, so re-verify on upgrade; override
-    # per-machine via config.json `fusion.codex.model` (e.g. to gpt-5.4-mini for a tight
-    # Plus cap) with no code change.
-    "model": "gpt-5.5",
+    # ids are the plain GPT models codex routes to — the GPT-5.6 family `gpt-5.6-sol`
+    # (flagship, best coding), `gpt-5.6-terra` (balanced), `gpt-5.6-luna` (fastest,
+    # most runway), plus the prior gen `gpt-5.5`/`gpt-5.4`/`gpt-5.4-mini` — NEVER a
+    # Claude id, and NOT the bare family alias: `gpt-5.6` (the docs shorthand) is
+    # REJECTED ("model is not supported when using Codex with a ChatGPT account" —
+    # verified live 2026-07-14 on BOTH codex-cli 0.141.0 and 0.144.4), exactly like the
+    # `-codex`-suffixed `gpt-5-codex` (API-only/retired, verified 2026-06-23). The 5.6
+    # family needs codex-cli >= 0.143.0 — on 0.141.0 it 400s "requires a newer version
+    # of Codex" (this machine upgraded to 0.144.4, 2026-07-14). Codex churns these, so
+    # re-verify on upgrade; override per-machine via config.json `fusion.codex.model`
+    # (e.g. to gpt-5.6-luna for a tight Plus cap) with no code change.
+    "model": "gpt-5.6-sol",
     # The full set of valid ChatGPT-account codex `-m` ids — the dispatch picker's codex
     # model options AND the validation whitelist (app._codex_seat_models unions these).
-    # All live-verified 2026-06-23: gpt-5.5 / gpt-5.4 / gpt-5.4-mini ACCEPTED; gpt-5-codex
-    # and gpt-5.5-mini REJECTED ("not supported when using Codex with a ChatGPT account").
-    # Per-window Plus runway grows DOWN the list (≈15-80 / 20-100 / 60-350 msgs per 5h).
-    # `model` above must be one of these; override the whole list via `fusion.codex.models`.
-    "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+    # gpt-5.6-sol / -terra / -luna live-verified ACCEPTED 2026-07-14 (codex-cli 0.144.4;
+    # each returned a real answer, and the bogus-id negative control still 400s).
+    # gpt-5.5 / gpt-5.4 / gpt-5.4-mini verified 2026-06-23 and KEPT VALID so saved
+    # dispatches/profiles still validate; gpt-5-codex and gpt-5.5-mini REJECTED ("not
+    # supported when using Codex with a ChatGPT account"). Per-window Plus runway grows
+    # DOWN the list (5.6-era runway unmeasured; 5.5-era was ≈15-80 / 20-100 / 60-350
+    # msgs per 5h). `model` above must be one of these; override the whole list via
+    # `fusion.codex.models`.
+    "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+               "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
     "effort": "",                    # default reasoning effort; "" ⇒ codex's own model default (no -c override)
     # The selectable reasoning-effort ladder offered by the Fusion codex-seat picker
     # AND the /send validation whitelist (app._codex_seat_efforts unions these). These
