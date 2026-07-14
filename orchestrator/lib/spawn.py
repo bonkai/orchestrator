@@ -973,12 +973,13 @@ def finish_fusion_tab(fusion_id: str, success: bool = False):
 # new sidecar dir + codex_run.sh + the `user.orch_codex` tab tag differ. Sets
 # ORCHESTRATOR_CODEX_ID, NEVER ORCHESTRATOR_RUN_ID, so the env-gated Stop hook
 # stays a no-op for codex tabs. Flags + event schema are version-pinned to
-# codex-cli 0.141.0 (CODEX_PLAN.md §0); codex churns them, so re-verify on upgrade.
+# codex-cli 0.144.4 (originally 0.141.0, CODEX_PLAN.md §0; re-verified live
+# 2026-07-14); codex churns them, so re-verify on upgrade.
 
 CODEX_DIR = DATA_DIR / "codex"
 CODEX_RUN_SH = BIN_DIR / "codex_run.sh"
 
-CODEX_RUN_SH_CONTENT = """#!/bin/bash
+_CODEX_RUN_SH_TEMPLATE = """#!/bin/bash
 # Orchestrator codex-call runner — execed inside an iTerm2 tab so a codex seat /
 # judge call is WATCHABLE live, the codex twin of brain_run.sh. codex runs with
 # `exec --json` so its events stream as JSONL; `tee` mirrors the raw stream to a
@@ -989,7 +990,7 @@ CODEX_RUN_SH_CONTENT = """#!/bin/bash
 # JSONL to the sidecar, which the orchestrator parses unchanged. PIPESTATUS[0]
 # keeps codex's exit code (codex is first in the pipe; the formatter is last).
 #
-# codex specifics vs claude (codex-cli 0.141.0 — re-verify on upgrade):
+# codex specifics vs claude (codex-cli 0.144.4 — re-verify on upgrade):
 #   - subcommand `exec` (the `claude -p` analogue), `--json` (NOT stream-json)
 #   - `-m MODEL` passed EXPLICITLY: codex's JSON omits the model, so the parser
 #     falls back to it (dispatch #3 lesson)
@@ -1003,11 +1004,12 @@ CODEX_RUN_SH_CONTENT = """#!/bin/bash
 #     input from stdin…" on a non-TTY (exactly like claude -p). The redirect
 #     attaches to codex (first pipe stage), so PIPESTATUS[0] stays codex's exit.
 #
-# ⚠ The codex flag set + model fallback in the command below DUPLICATE
-#   config.CODEX_ENGINE_SEED (C4). Deduping them needs seed→bash interpolation at
-#   spawn time (bash can't import Python) = C6 work; until then they are PINNED to
-#   the seed by tests/test_codex_config.py (TestSpawnCodexRunShPinnedToSeed), so a
-#   seed change that forgets this runner fails LOUDLY. Edit the SEED, then here.
+# ⚠ The MODEL fallback below is INTERPOLATED from config.CODEX_ENGINE_SEED at
+#   import (@@MODEL_DEFAULT@@ — the C4-deferred seed→bash interp, done 2026-07-14
+#   exactly like the executor runner), so a seed bump moves it by construction.
+#   The FLAG set (exec/-s/--json/-c) still DUPLICATES the seed in bash and stays
+#   PINNED by tests/test_codex_config.py (TestSpawnCodexRunShPinnedToSeed), so a
+#   seed flag change that forgets this runner fails LOUDLY. Edit the SEED first.
 #
 # Completion signalling mirrors brain_run.sh:
 #   <id>.done — codex's exit code, written AFTER tee flushes (so .jsonl is whole)
@@ -1026,7 +1028,7 @@ PROMPT_FILE="$CODEX_DIR/${ID}.prompt"
 OUT_FILE="$CODEX_DIR/${ID}.jsonl"
 DONE_FILE="$CODEX_DIR/${ID}.done"
 PID_FILE="$CODEX_DIR/${ID}.pid"
-MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo gpt-5.5)
+MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
 EFFORT=$(cat "$CODEX_DIR/${ID}.effort" 2>/dev/null || echo "")
 echo $$ > "$PID_FILE"
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -1084,6 +1086,13 @@ echo "$code" > "$DONE_FILE"
 echo
 echo "---- codex call finished (exit $code) ----"
 """
+
+# The SEAT runner with the seed's model interpolated at import — the same
+# seed→bash pattern as CODEX_DISPATCH_RUN_SH_CONTENT below, so the bash model
+# fallback can never drift from config.CODEX_ENGINE_SEED["model"] (pinned by
+# tests/test_codex_config.py all the same).
+CODEX_RUN_SH_CONTENT = _CODEX_RUN_SH_TEMPLATE.replace(
+    "@@MODEL_DEFAULT@@", config.CODEX_ENGINE_SEED["model"])
 
 
 def ensure_codex_runner():
