@@ -170,8 +170,10 @@ CODEX_ENGINE_SEED = {
     # The selectable reasoning-effort ladder offered by the Fusion codex-seat picker
     # AND the /send validation whitelist (app._codex_seat_efforts unions these). These
     # are codex's OWN values, NOT claude's (claude = low/medium/high/xhigh/max): the
-    # live API (codex-cli 0.141.0) rejects an unknown value with a 400 listing the
-    # supported set — verified 2026-06-24: 'none','minimal','low','medium','high','xhigh'.
+    # live API rejects an unknown value with a 400 listing the supported set —
+    # verified 2026-06-24 (codex-cli 0.141.0), re-verified IDENTICAL 2026-07-14
+    # (0.144.4) for BOTH gpt-5.6-sol and gpt-5.5: 'none','minimal','low','medium',
+    # 'high','xhigh' (ChatGPT's "5.6 max reasoning" is NOT a wire-level enum value).
     # We offer the meaningful ladder and OMIT 'none' (it disables reasoning — a footgun
     # for a perspective seat; add it back per-machine via `fusion.codex.efforts` if
     # wanted). The picker also offers a "default" option that maps to the empty string
@@ -200,7 +202,8 @@ CODEX_ENGINE_SEED = {
     #                              to a continued claude one (operator, 2026-06-25: "no
     #                              noticeable difference between picking codex vs claude").
     # (`-a` is interactive-only — NOT valid on `exec` — so it lives here, not on turn 1.)
-    # 0.141.0-pinned; interpolated into spawn.codex_dispatch_run.sh + pinned by tests.
+    # 0.144.4-pinned (both flags re-verified in `codex resume --help`, 2026-07-14);
+    # interpolated into spawn.codex_dispatch_run.sh + pinned by tests.
     "resume_subcmd": "resume",
     "resume_flags": "--include-non-interactive -a never",
     "sandbox": "read-only",          # `-s <mode>` for a $0 SEAT/judge (read-only — it only READS to answer)
@@ -235,8 +238,8 @@ CODEX_ENGINE_SEED = {
     # so the judge sees genuinely different angles). Unused until C5 — here so the
     # picker's default lives in config, not code, like FUSION_PRESETS_SEED.
     "seats": [
-        {"kind": "codex_cli", "model": "gpt-5.5", "lens": "risks"},
-        {"kind": "codex_cli", "model": "gpt-5.5", "lens": "simplest"},
+        {"kind": "codex_cli", "model": "gpt-5.6-sol", "lens": "risks"},
+        {"kind": "codex_cli", "model": "gpt-5.6-sol", "lens": "simplest"},
     ],
 }
 
@@ -478,8 +481,9 @@ def codex_cli_available() -> bool:
       - CANNOT hang — a finite timeout + closed stdin.
 
     Interprets the EXIT CODE (more version-robust than parsing "Logged in using
-    ChatGPT"); pinned to codex-cli 0.141.0's `login status`, and — like the C1
-    parsers — a re-verify-on-upgrade surface."""
+    ChatGPT"); pinned to codex-cli 0.144.4's `login status` (exit-0 probe
+    re-verified 2026-07-14; originally 0.141.0), and — like the C1 parsers — a
+    re-verify-on-upgrade surface."""
     if shutil.which("codex") is None:
         return False
     # Scrub OPENAI_API_KEY so the probe checks the SUBSCRIPTION login only (mirror
