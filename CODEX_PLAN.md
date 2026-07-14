@@ -39,6 +39,13 @@
 > executor run.sh was validated end-to-end live (`.done`=0, a real workspace write, the
 > command_execution/file_change/agent_message tool events + turn.completed all flowing).
 > Re-verify the id on codex upgrades; override via `fusion.codex.model`.
+> **[2026-07-14: default bumped to `gpt-5.6-sol` — the GPT-5.6 family (`gpt-5.6-sol`/
+> `gpt-5.6-terra`/`gpt-5.6-luna`) live-verified answering on codex-cli 0.144.4 (0.141.0
+> was version-gated: 400 "requires a newer version of Codex"; the bare `gpt-5.6` docs
+> shorthand is still REJECTED for ChatGPT accounts). Prior-gen ids remain valid
+> whitelist entries; the SEAT runner's bash model fallback is now seed-interpolated
+> like the executor's; effort ladder + exec/resume flags + JSONL schema re-verified
+> unchanged on 0.144.4.]**
 
 Adding the OpenAI **`codex` CLI** to the orchestrator as **three near-independent
 deliverables that share one verification gate**:

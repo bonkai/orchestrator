@@ -186,7 +186,7 @@ def _view_ctx() -> dict:
     # codex SEED via config — no codex-id literal in the template).
     codex_available = config.codex_cli_available()
     # Picker options: the DEFAULT model first, then
-    # the rest sorted — a bare sort would surface gpt-5.4 ahead of the gpt-5.5 default.
+    # the rest sorted — a bare sort would surface an older id ahead of the seeded default.
     codex_models = _codex_seat_models()
     codex_default = str(config.codex_engine().get("model", "")).strip()
     codex_models_ordered = (([codex_default] if codex_default in codex_models else [])
