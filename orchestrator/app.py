@@ -49,7 +49,7 @@ def _codex_seat_models() -> set[str]:
     config.json's `fusion.codex` (C4: IMPORT the codex model, never redefine it; no
     codex-id literal lives in app.py). Returns the engine's default model plus every
     model in its default seat panel, so a `fusion.codex` override is honored and the
-    set grows as codex adds models (today this is the degenerate {"gpt-5.5"}).
+    set grows as codex adds models (seeded today: the gpt-5.6 family + prior gen).
 
     Deliberately SEPARATE from CLAUDE_SEAT_MODELS: a codex model is a codex id,
     NEVER a Claude id. A shared/merged list would let a Claude id (e.g. "opus") pass
@@ -57,7 +57,7 @@ def _codex_seat_models() -> set[str]:
     Kept apart, codex validation rejects every Claude id."""
     eng = config.codex_engine()
     models = {str(eng.get("model", "")).strip()}
-    # The full valid-model list (C6: gpt-5.5/gpt-5.4/gpt-5.4-mini) — the picker's options
+    # The full valid-model list (C6; the seed's `models`) — the picker's options
     # + the validation whitelist. Unioned with the default `model` + the seat-panel models
     # so a `fusion.codex` override of ANY of them is honored.
     for m in eng.get("models", []) or []:

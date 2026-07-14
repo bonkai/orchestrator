@@ -62,7 +62,7 @@ class _IsolatedConfig(unittest.TestCase):
 class TestCodexEngineSeedMerge(_IsolatedConfig):
     def test_seed_when_no_file(self):
         ce = config.codex_engine()
-        self.assertEqual(ce["model"], "gpt-5.5")
+        self.assertEqual(ce["model"], "gpt-5.6-sol")
         self.assertEqual(ce["effort"], "")
         self.assertEqual(ce["exec_subcmd"], "exec")
         self.assertEqual(ce["sandbox"], "read-only")
@@ -70,9 +70,11 @@ class TestCodexEngineSeedMerge(_IsolatedConfig):
         self.assertEqual(ce["auth_probe"], ["codex", "login", "status"])
         self.assertEqual(ce["auto_bypass_flag"],
                          "--dangerously-bypass-approvals-and-sandbox")
-        # C6: the full valid ChatGPT-account model set (live-verified 2026-06-23) + the
-        # executor sandbox + the concurrency-cap knob.
-        self.assertEqual(ce["models"], ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
+        # C6: the full valid ChatGPT-account model set (gpt-5.6 family live-verified
+        # 2026-07-14 on codex-cli 0.144.4; prior gen 2026-06-23) + the executor
+        # sandbox + the concurrency-cap knob.
+        self.assertEqual(ce["models"], ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                                        "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"])
         self.assertIn(ce["model"], ce["models"])       # the default is one of the valid ids
         self.assertEqual(ce["executor_sandbox"], "danger-full-access")
         self.assertEqual(ce["max_concurrent_dispatches"], 2)
@@ -96,19 +98,19 @@ class TestCodexEngineSeedMerge(_IsolatedConfig):
         ce = config.codex_engine()
         self.assertEqual(ce["sandbox"], "workspace-write")
         self.assertEqual(ce["effort"], "high")
-        self.assertEqual(ce["model"], "gpt-5.5")           # seed kept
+        self.assertEqual(ce["model"], "gpt-5.6-sol")       # seed kept
 
     def test_no_codex_block_returns_seed(self):
         self._write({"fusion": {"preset": "max"}})             # codex absent
-        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.6-sol")
 
     def test_garbage_codex_block_ignored(self):
         self._write({"fusion": {"codex": "not-a-dict"}})
-        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.6-sol")
 
     def test_garbage_top_level_config_returns_seed(self):
         config.CONFIG_PATH.write_text("{ not valid json", encoding="utf-8")
-        self.assertEqual(config.codex_engine()["model"], "gpt-5.5")
+        self.assertEqual(config.codex_engine()["model"], "gpt-5.6-sol")
 
     def test_fusion_config_codex_key_matches_accessor(self):
         # The accessor is just sugar over fusion_config()["codex"] (mirror of
@@ -254,19 +256,18 @@ class TestCodexJudgeResolvesSeededModel(unittest.TestCase):
 # ── C4 drift guard: spawn's codex run.sh heredoc stays pinned to the seed ────
 
 class TestSpawnCodexRunShPinnedToSeed(unittest.TestCase):
-    """The codex run.sh heredoc (spawn.CODEX_RUN_SH_CONTENT) still DUPLICATES the
-    codex flag set + model fallback in bash — deduping it needs seed→bash
-    interpolation at spawn time (bash can't import Python), which is C6's
-    codex-dispatch-runner work. Until then, pin those copies to the seed here.
+    """The codex SEAT run.sh (spawn.CODEX_RUN_SH_CONTENT): its MODEL fallback is
+    now INTERPOLATED from the seed at import (@@MODEL_DEFAULT@@ — the C4-deferred
+    seed→bash interp, done 2026-07-14 exactly like the executor runner), while the
+    FLAG set still duplicates the seed in bash. Pin BOTH to the seed here.
 
     Direction this guards (the realistic drift): the SEED is now the source of
     truth, so a flag/model change ORIGINATES there. After editing the seed (e.g. a
     codex upgrade renames `--json`), the assertion looks for the NEW seed value in
-    the heredoc; it isn't there until the runner is updated too → RED test instead
-    of a silently stale flag shipping in the watchable tab. (The values also live
-    in this heredoc's prose, so the reverse — editing the command but not the seed
-    — is not fully caught; that's an anti-pattern post-C4: edit the seed, not the
-    runner. The seed→runner direction is the one that matters.)"""
+    the emitted runner; a hardcoded/stale literal goes RED instead of silently
+    shipping in the watchable tab. (Flag values also live in this heredoc's prose,
+    so the reverse — editing the command but not the seed — is not fully caught;
+    that's an anti-pattern post-C4: edit the seed, not the runner.)"""
 
     SH = spawn.CODEX_RUN_SH_CONTENT
     SEED = config.CODEX_ENGINE_SEED
@@ -281,8 +282,14 @@ class TestSpawnCodexRunShPinnedToSeed(unittest.TestCase):
         self.assertIn(self.SEED["json_flag"], self.SH)
 
     def test_model_fallback_matches_seed(self):
-        # the bash `... || echo <model>` fallback must be the seed model id.
-        self.assertIn(self.SEED["model"], self.SH)
+        # the bash `... || echo <model>)` fallback must be the seed model id —
+        # anchored on the fallback slot itself (not a bare substring), so a stale
+        # old default elsewhere in the file can't vacuously satisfy it.
+        self.assertIn(f"|| echo {self.SEED['model']})", self.SH)
+
+    def test_no_unresolved_model_placeholder(self):
+        # The @@MODEL_DEFAULT@@ placeholder must be fully interpolated at import.
+        self.assertNotIn("@@MODEL_DEFAULT@@", self.SH)
 
 
 class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
@@ -311,7 +318,9 @@ class TestSpawnCodexDispatchRunShPinnedToSeed(unittest.TestCase):
         self.assertIn(self.SEED["json_flag"], self.SH)
 
     def test_model_fallback_matches_seed(self):
-        self.assertIn(self.SEED["model"], self.SH)
+        # Anchored on the `|| echo <model>)` fallback slot, mirroring the seat
+        # runner's test — a bare-substring match can be vacuously satisfied.
+        self.assertIn(f"|| echo {self.SEED['model']})", self.SH)
 
     def test_reads_effort_sidecar_and_can_forward_it(self):
         # C6: the executor forwards an OPTIONAL reasoning effort. The run.sh reads the
