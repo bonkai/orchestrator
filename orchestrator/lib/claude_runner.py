@@ -352,8 +352,9 @@ def run_claude_json(
 # verified 2026-06-22 on codex-cli 0.141.0): subscription auth works
 # non-interactively at $0, so cost_usd is 0.0 by POLICY — usage IS present and is
 # stashed in `raw` so a future paid seat stays priceable, we just never bill it.
-# Schema + flags are version-pinned to 0.141.0; codex churns them, so the parser
-# is fail-soft (ok=False, never a raise) and should be re-verified on upgrade.
+# Schema + flags are version-pinned to 0.144.4 (originally 0.141.0; schema
+# re-verified live 2026-07-14); codex churns them, so the parser is fail-soft
+# (ok=False, never a raise) and should be re-verified on upgrade.
 
 # The codex model id, IMPORTED from the config SEED (C4) — single source of truth,
 # no duplicate literal here (this re-points the old inline model literal). It is the
@@ -368,7 +369,8 @@ DEFAULT_CODEX_MODEL = config.CODEX_ENGINE_SEED["model"]
 def _codex_envelope_from_lines(lines) -> Optional[dict]:
     """Aggregate a `codex exec --json` JSONL transcript (an iterable of lines)
     into ONE envelope _build_codex_run consumes. Codex's schema (codex-cli
-    0.141.0, §0) keys off `type`, NOT claude's result/system/assistant:
+    0.144.4, §0 — re-verified 2026-07-14) keys off `type`, NOT claude's
+    result/system/assistant:
         {"type":"thread.started","thread_id":...}
         {"type":"turn.started"}
         {"type":"item.completed","item":{"type":"agent_message","text":...}}
@@ -453,7 +455,8 @@ def _build_codex_run(envelope: dict, requested_model: str) -> ClaudeRun:
 
 
 def _codex_tool_event(obj: dict) -> Optional[dict]:
-    """Map ONE codex `exec --json` stream event (C6.0 schema, codex-cli 0.141.0) to
+    """Map ONE codex `exec --json` stream event (C6.0 schema, codex-cli 0.144.4 —
+    re-verified 2026-07-14) to
     a normalized tool event the C6 EXECUTOR poller feeds to the UI timeline + the
     loop watchdog — or None for a non-tool event (agent_message / thread / turn /
     anything else). The codex twin of the PreToolUse/PostToolUse hook payloads the
