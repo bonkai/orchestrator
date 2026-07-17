@@ -891,7 +891,7 @@
 
           function profilePayload() {
             return { claude_seats: claudeSeats(), codex_seats: codexSeats(),
-                     provider_seats: providerSeats() };
+                     kimi_seats: kimiSeats(), provider_seats: providerSeats() };
           }
 
           // POST a form-encoded body; on success refresh PROFILES from the response.
@@ -920,7 +920,7 @@
           var pSave = document.getElementById('profile-save');
           if (pSave) pSave.addEventListener('click', function() {
             var seats = profilePayload();
-            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.provider_seats.length) {
+            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.kimi_seats.length && !seats.provider_seats.length) {
               flashStatus('add at least one seat before saving', true); return;
             }
             var name = (window.prompt('Save current panel as profile name:') || '').trim();
@@ -933,7 +933,7 @@
             var name = profileSelect ? profileSelect.value : '';
             if (!name) { flashStatus('no profile selected', true); return; }
             var seats = profilePayload();
-            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.provider_seats.length) {
+            if (!seats.claude_seats.length && !seats.codex_seats.length && !seats.kimi_seats.length && !seats.provider_seats.length) {
               flashStatus('add at least one seat before updating', true); return;
             }
             postProfile('/fusion/profile', { name: name, profile: JSON.stringify(seats) },
@@ -995,8 +995,8 @@
           // single-model rewrite. (Only the rewrite path uses fusion.)
           var fusionWanted = !!(fusionCheckbox && fusionCheckbox.checked && !fusionCheckbox.disabled);
           if (rewrite && fusionWanted &&
-              (claudeSeats().length + codexSeats().length + providerSeats().length) < 2) {
-            flashStatus('fusion needs ≥2 seats — add another Claude, Codex, or provider seat', true);
+              (claudeSeats().length + codexSeats().length + kimiSeats().length + providerSeats().length) < 2) {
+            flashStatus('fusion needs ≥2 seats — add another Claude, Codex, Kimi, or provider seat', true);
             return;
           }
           // Persist the draft BEFORE dispatching so it survives any failure on
@@ -1034,6 +1034,14 @@
           codexSeats().forEach(function(s) {
             var seat = { type: 'codex', model: s.model };
             if (s.effort) seat.effort = s.effort;
+            if (s.lens) seat.lens = s.lens;
+            fusionSeats.push(seat);
+          });
+          // Kimi seats ($0 Kimi-subscription `kimi -p`, NO billed API). No effort field
+          // (kimi-code has none). _parse_fusion_panel validates the alias server-side and
+          // drops anything unhonorable (a Claude/codex id can never reach `kimi -m`).
+          kimiSeats().forEach(function(s) {
+            var seat = { type: 'kimi', model: s.model };
             if (s.lens) seat.lens = s.lens;
             fusionSeats.push(seat);
           });
