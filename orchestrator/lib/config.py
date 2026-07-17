@@ -264,7 +264,12 @@ KIMI_ENGINE_SEED = {
     "output_format": "stream-json",             # JSONL the parser reads
     "resume_flag": "-r",                         # resume-by-id (== -S/--session); id from the session.resume_hint line
     "continue_flag": "-c",                       # continue the cwd's last session (alt resume)
-    "auto_flag": "--auto",                       # auto-permission for the interactive executor hand-off (-p forbids -y)
+    # K5 EXECUTOR: turn-1 `-p` auto-approves tool use (verified 2026-07-17) and CANNOT take
+    # -y/--auto; the INTERACTIVE resume hand-off (`kimi -r <id>`) adds this flag for the
+    # never-prompt, claude-parity continuation ([[codex-claude-dispatch-parity]]). Re-verify
+    # `-r <id> -y` on `kimi upgrade`; if it ever errors, the runner falls back to a kept-open
+    # tab (no data loss) — drop this to "" via config.json fusion.kimi.resume_approve_flag.
+    "resume_approve_flag": "-y",
     "auth_probe": ["kimi", "provider", "list"],  # cheap NON-BILLING login probe (exit 0 + source=oauth)
     "bin_fallback": "~/.kimi-code/bin/kimi",     # PATH has ~/.kimi-code/bin only in interactive .zshrc; resolve here if which() misses
     "creds_path": "~/.kimi-code/credentials/kimi-code.json",  # OAuth credential; absent ⇒ never logged in
