@@ -353,7 +353,9 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     try:
         executor_engine, executor_model = _validate_executor_engine(
             executor_engine, executor_model, _codex_seat_models(),
-            codex_available=config.codex_cli_available())
+            codex_available=config.codex_cli_available(),
+            kimi_models=_kimi_seat_models(),
+            kimi_available=config.kimi_cli_available())
     except ValueError as e:
         return None, str(e)
     # Effort is engine-specific and the two vocabularies differ, so an out-of-set pick
@@ -369,6 +371,8 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
     if executor_engine == "codex":
         if effort not in _codex_seat_efforts():
             effort = ""
+    elif executor_engine == "kimi":
+        effort = ""                       # kimi-code has no reasoning effort
     elif effort not in CLAUDE_SEAT_EFFORTS:
         effort = "max"
 
@@ -453,6 +457,51 @@ async def _run_dispatch(project_id: int, task: str, wall_cap_s: int, effort: str
         watchdog.schedule_codex_poller(dispatch_id)   # §5 fix iii: the SOLE finalizer
         db.record_event(dispatch_id, "stage", {
             "stage": "running", "pid": pid, "engine": "codex"})
+        return dispatch_id, ""
+
+    # K5: the $0 kimi EXECUTOR — the kimi twin of the codex branch above. engine+model were
+    # validated in /send. Spawns a watchable kimi tab (turn-1 `-p` auto-approves tool use —
+    # full access, kimi-code has no sandbox modes) and NEVER falls through to the claude spawn
+    # below (a kimi pick must never become a silent claude executor). A spawn failure / cap
+    # rejection is a VISIBLE failed row, still no claude fallback. The in-band poller is the
+    # SOLE finalizer (kimi has no Stop hook), and the cap watcher uses the kimi/codex hard-kill.
+    if executor_engine == "kimi":
+        cap = int(config.kimi_engine().get("max_concurrent_dispatches", 0) or 0)
+        if cap > 0:
+            running_kimi = sum(1 for d in db.running_dispatches()
+                               if spawn.is_kimi_dispatch(d["id"]))
+            if running_kimi >= cap:
+                reason = (f"kimi concurrency cap reached: {running_kimi}/{cap} kimi "
+                          f"dispatches already running — wait or kill one (raise "
+                          f"fusion.kimi.max_concurrent_dispatches to change)")
+                db.mark_failed_to_spawn(dispatch_id, reason)
+                db.record_event(dispatch_id, "stage", {
+                    "stage": "spawn_failed", "error": reason, "engine": "kimi",
+                    "model": executor_model, "running_kimi": running_kimi, "cap": cap})
+                spawn.cleanup_dispatch_files(dispatch_id)
+                return None, reason
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None, spawn.spawn_kimi_dispatch, proj["path"], dispatch_id, task,
+                executor_model,
+            )
+        except Exception as e:
+            db.mark_failed_to_spawn(dispatch_id, str(e))
+            db.record_event(dispatch_id, "stage", {
+                "stage": "spawn_failed", "error": str(e),
+                "engine": "kimi", "model": executor_model})
+            spawn.cleanup_dispatch_files(dispatch_id)
+            return None, f"kimi spawn failed: {e}"
+        db.record_event(dispatch_id, "stage", {
+            "stage": "iterm2_spawned", "engine": "kimi", "model": executor_model})
+        pid = await loop.run_in_executor(None, spawn.read_claude_pid, dispatch_id, 5.0)
+        db.mark_started(dispatch_id, terminal_pid=None, claude_pid=pid)
+        db.touch_project(project_id)
+        watchdog.schedule(dispatch_id, pid, wall_cap_s, engine="kimi")
+        watchdog.schedule_kimi_poller(dispatch_id)   # the SOLE finalizer (kimi has no Stop hook)
+        db.record_event(dispatch_id, "stage", {
+            "stage": "running", "pid": pid, "engine": "kimi"})
         return dispatch_id, ""
 
     # MIRROR of the codex branch's no-fallthrough guard (and _derive_executor's total
@@ -1543,11 +1592,22 @@ def _validate_executor_engine(engine: str, model: str, codex_models: set,
             f"unknown model {model!r}: not a known Claude model "
             f"(opus/sonnet/haiku/fable) or codex model — refusing to run it as "
             f"`claude --model {model}` (a codex/gpt id must route to the codex executor)")
-    if engine not in ("claude", "codex"):
+    if engine not in ("claude", "codex", "kimi"):
         raise ValueError(f"unknown executor engine: {engine!r}")
     if engine == "claude":
         return "claude", ""
     model = (model or "").strip()
+    if engine == "kimi":
+        # K5: mirror the codex guards — a kimi executor needs an explicit kimi alias (no
+        # silent downgrade) and a resolvable+logged-in kimi CLI; it NEVER falls back to claude.
+        kimi_models = _kimi_seat_models() if kimi_models is None else kimi_models
+        if not model:
+            raise ValueError("kimi executor requires an explicit kimi model (no silent downgrade)")
+        if model not in kimi_models:
+            raise ValueError(f"unknown kimi executor model: {model!r}")
+        if not kimi_available:
+            raise ValueError("kimi executor is unavailable: install and log in to the Kimi CLI (`kimi login`)")
+        return "kimi", model
     if not model:
         raise ValueError("codex executor requires an explicit codex model (no silent downgrade)")
     if model not in codex_models:
@@ -1824,7 +1884,9 @@ async def send(
     try:
         executor_engine, executor_model = _validate_executor_engine(
             executor_engine, executor_model, codex_models,
-            codex_available=config.codex_cli_available())
+            codex_available=config.codex_cli_available(),
+            kimi_models=_kimi_seat_models(),
+            kimi_available=config.kimi_cli_available())
     except ValueError as e:
         raise HTTPException(400, str(e))
     # F7: enrichment mode — analyze the task with a panel and APPEND the analysis
