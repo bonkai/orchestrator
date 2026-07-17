@@ -89,6 +89,42 @@ def cancel_codex_poller(dispatch_id: int):
         t.cancel()
 
 
+# ─── kimi EXECUTOR in-band pollers (K5) — the kimi twin of the codex pollers above ──
+_kimi_pollers: dict[int, asyncio.Task] = {}
+_kimi_poller_factory = None   # set by app.py: (dispatch_id: int, tail_only: bool) -> coroutine
+
+
+def set_kimi_poller_factory(factory):
+    """Inject the kimi poller coroutine factory (app.py at startup). Without it,
+    schedule_kimi_poller is a no-op (mirror of set_codex_poller_factory)."""
+    global _kimi_poller_factory
+    _kimi_poller_factory = factory
+
+
+def _discard_kimi_poller(dispatch_id: int, task: asyncio.Task):
+    if _kimi_pollers.get(dispatch_id) is task:
+        _kimi_pollers.pop(dispatch_id, None)
+
+
+def schedule_kimi_poller(dispatch_id: int, tail_only: bool = False):
+    """Start the in-band kimi finalizer poller for this dispatch (no-op if no factory was
+    injected). Replaces any existing poller; tail_only=True on boot re-attach seeks past the
+    already-consumed sidecar prefix (mirror of schedule_codex_poller)."""
+    if _kimi_poller_factory is None:
+        return
+    cancel_kimi_poller(dispatch_id)
+    task = asyncio.create_task(_kimi_poller_factory(dispatch_id, tail_only))
+    _kimi_pollers[dispatch_id] = task
+    task.add_done_callback(lambda t, d=dispatch_id: _discard_kimi_poller(d, t))
+
+
+def cancel_kimi_poller(dispatch_id: int):
+    """Stop a kimi poller (manual kill / kill-all / cap hard-kill / shutdown)."""
+    t = _kimi_pollers.pop(dispatch_id, None)
+    if t and not t.done():
+        t.cancel()
+
+
 def schedule(dispatch_id: int, claude_pid: int | None, cap_s: int, engine: str = "claude"):
     """Start a wall-clock watchdog for this dispatch. `engine="codex"` selects the
     hard-kill cap branch in _run (no claude pause-resume — codex has no resume in v1);
@@ -108,16 +144,17 @@ async def _run(dispatch_id: int, claude_pid: int | None, cap_s: int, engine: str
     from orchestrator.lib import loop_watchdog
     try:
         await asyncio.sleep(cap_s)
-        if engine == "codex":
-            # Codex cap hit: no Stop-hook session_id and no resume in v1 (CODEX_PLAN
+        if engine in ("codex", "kimi"):
+            # Codex/kimi cap hit: no Stop-hook session_id and no resume in v1 (CODEX_PLAN
             # note 5), so a cap HARD-KILLS — skip the claude pause-and-resume entirely.
             # Write a DISTINCT outcome reason so the learning loop sees a codex cap-kill
             # (more disruptive — the project may be left mid-edit) vs a resumable claude
             # timeout. Cancel the in-band poller so it doesn't redundantly try to
             # finalize the row this writes (the atomic guard would no-op it anyway).
-            log.warning("Codex dispatch %s exceeded %ss wall-clock cap — hard-killing "
-                        "(not resumable)", dispatch_id, cap_s)
+            log.warning("%s dispatch %s exceeded %ss wall-clock cap — hard-killing "
+                        "(not resumable)", engine, dispatch_id, cap_s)
             cancel_codex_poller(dispatch_id)
+            cancel_kimi_poller(dispatch_id)
             if not claude_pid:
                 claude_pid = spawn.read_pid_now(dispatch_id)
                 if claude_pid:
@@ -125,7 +162,7 @@ async def _run(dispatch_id: int, claude_pid: int | None, cap_s: int, engine: str
             if claude_pid:
                 await spawn.kill_pid_async(claude_pid)
             db.kill_dispatch_record(
-                dispatch_id, reason="timeout (codex cap — hard-kill, not resumable)")
+                dispatch_id, reason=f"timeout ({engine} cap — hard-kill, not resumable)")
             spawn.cleanup_dispatch_files(dispatch_id)
             loop_watchdog.clear(dispatch_id)
             idle_notifier.clear(dispatch_id)
@@ -195,6 +232,7 @@ async def manual_kill(dispatch_id: int, reason: str = "manual") -> bool:
         return False
     cancel(dispatch_id)
     cancel_codex_poller(dispatch_id)   # C6: stop the in-band finalizer if it's a codex dispatch (no-op otherwise)
+    cancel_kimi_poller(dispatch_id)    # K5: same for a kimi dispatch (no-op otherwise)
     pid = d.get("claude_pid")
     if not pid:
         pid = spawn.read_pid_now(dispatch_id)
@@ -289,5 +327,11 @@ def resume_watchers_on_boot():
             # re-emit timeline events or re-trip the loop watchdog on old tool calls.
             schedule(d["id"], d.get("claude_pid"), remaining, engine="codex")
             schedule_codex_poller(d["id"], tail_only=True)
+        elif spawn.is_kimi_dispatch(d["id"]):
+            # K5: a still-running kimi dispatch — re-attach the cap watcher (kimi branch,
+            # same hard-kill) + the in-band poller (the SOLE finalizer). tail_only=True so a
+            # restart doesn't re-emit timeline events or re-trip the loop watchdog.
+            schedule(d["id"], d.get("claude_pid"), remaining, engine="kimi")
+            schedule_kimi_poller(d["id"], tail_only=True)
         else:
             schedule(d["id"], d.get("claude_pid"), remaining)
