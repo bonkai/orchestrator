@@ -50,9 +50,17 @@ CODEX_ENGINE = {"model": "gpt-5.5",
                 "efforts": ["minimal", "low", "medium", "high", "xhigh"],
                 "seats": [{"kind": "codex_cli", "model": "gpt-5.5"}]}
 
+# K4: _view_ctx also surfaces kimi availability + the kimi model-alias list (default +
+# `models` + seat-panel, from the kimi ENGINE config). Stub config.kimi_engine so
+# _kimi_seat_models() doesn't read the real config.json. kimi-code has NO effort.
+KIMI_ENGINE = {"model": "kimi-code/k3",
+               "models": ["kimi-code/k3", "kimi-code/kimi-for-coding",
+                          "kimi-code/kimi-for-coding-highspeed"],
+               "seats": [{"kind": "kimi_cli", "model": "kimi-code/k3"}]}
+
 
 class TestViewCtxFusion(unittest.TestCase):
-    def _ctx(self, active, codex_available=False):
+    def _ctx(self, active, codex_available=False, kimi_available=False):
         """_view_ctx() with the DB + config seams mocked. `active` is the
         active_providers() return (name → merged entry; only the names matter);
         `codex_available` drives the (mocked) codex_cli_available()."""
@@ -66,8 +74,9 @@ class TestViewCtxFusion(unittest.TestCase):
                 mock.patch.object(app_module.config, "fusion_config", return_value=FCFG), \
                 mock.patch.object(app_module.config, "claude_cli_available", return_value=False), \
                 mock.patch.object(app_module.config, "codex_cli_available", return_value=codex_available), \
-                mock.patch.object(app_module.config, "kimi_cli_available", return_value=False), \
+                mock.patch.object(app_module.config, "kimi_cli_available", return_value=kimi_available), \
                 mock.patch.object(app_module.config, "codex_engine", return_value=CODEX_ENGINE), \
+                mock.patch.object(app_module.config, "kimi_engine", return_value=KIMI_ENGINE), \
                 mock.patch.object(app_module.config, "active_providers", return_value=active):
             return app_module._view_ctx()
 
@@ -99,7 +108,8 @@ class TestViewCtxFusion(unittest.TestCase):
         # The template/JS reference these unconditionally; guarantee they exist.
         ctx = self._ctx({})
         for key in ("fusion_providers", "fusion_available", "fusion_default_panel",
-                    "codex_cli_available", "codex_seat_models", "codex_seat_efforts"):
+                    "codex_cli_available", "codex_seat_models", "codex_seat_efforts",
+                    "kimi_cli_available", "kimi_seat_models"):
             self.assertIn(key, ctx)
 
     def test_view_ctx_exposes_codex_availability_and_models(self):
@@ -119,6 +129,18 @@ class TestViewCtxFusion(unittest.TestCase):
         self.assertNotIn("max", off["codex_seat_efforts"])
         on = self._ctx({"deepseek": {}, "gemini": {}}, codex_available=True)
         self.assertTrue(on["codex_cli_available"])
+
+    def test_view_ctx_exposes_kimi_availability_and_models(self):
+        # K4: the seat picker reads kimi_cli_available to grey the "add kimi seat" button,
+        # and kimi_seat_models to populate the kimi model select (default alias first).
+        # kimi-code has NO effort, so there is deliberately no kimi_seat_efforts key.
+        off = self._ctx({"deepseek": {}, "gemini": {}}, kimi_available=False)
+        self.assertFalse(off["kimi_cli_available"])
+        self.assertEqual(off["kimi_seat_models"][0], "kimi-code/k3")   # DEFAULT alias first
+        self.assertIn("kimi-code/kimi-for-coding", off["kimi_seat_models"])
+        self.assertNotIn("kimi_seat_efforts", off)                      # kimi has no effort
+        on = self._ctx({"deepseek": {}, "gemini": {}}, kimi_available=True)
+        self.assertTrue(on["kimi_cli_available"])
 
 
 if __name__ == "__main__":
