@@ -89,6 +89,28 @@ def _codex_seat_efforts() -> set[str]:
             if isinstance(e, str) and e.strip()}
 
 
+def _kimi_seat_models() -> set[str]:
+    """Valid kimi-code model aliases for the dispatch picker + /send validation (K4),
+    SOURCED from the kimi ENGINE config — KIMI_ENGINE_SEED merged with config.json's
+    `fusion.kimi` (K3: IMPORT the alias, never redefine it; no kimi-id literal in app.py).
+    Returns the engine's default alias plus every alias in its `models` list + default
+    seat panel, so a `fusion.kimi` override is honored. Deliberately SEPARATE from
+    CLAUDE_SEAT_MODELS / _codex_seat_models: a kimi alias (kimi-code/k3) is NEVER a Claude
+    or codex id. kimi-code has NO reasoning effort, so there is no _kimi_seat_efforts."""
+    eng = config.kimi_engine()
+    models = {str(eng.get("model", "")).strip()}
+    for m in eng.get("models", []) or []:
+        if isinstance(m, str) and m.strip():
+            models.add(m.strip())
+    for seat in eng.get("seats", []) or []:
+        if isinstance(seat, dict):
+            m = str(seat.get("model", "")).strip()
+            if m:
+                models.add(m)
+    models.discard("")
+    return models
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -197,6 +219,15 @@ def _view_ctx() -> dict:
     # explicit non-default rungs. Codex's ladder ≠ claude's, hence a separate list.
     codex_efforts_ordered = [str(e).strip() for e in config.codex_engine().get("efforts", [])
                              if isinstance(e, str) and e.strip()]
+    # K4: kimi-code availability + model aliases for the dispatch-form seat picker
+    # (mirror of the codex block above; kimi has NO reasoning effort, so no effort list).
+    # kimi_cli_available runs the OAuth auth-probe (non-billing `kimi provider list`); the
+    # template greys the "add kimi seat" button when False.
+    kimi_available = config.kimi_cli_available()
+    kimi_models = _kimi_seat_models()
+    kimi_default = str(config.kimi_engine().get("model", "")).strip()
+    kimi_models_ordered = (([kimi_default] if kimi_default in kimi_models else [])
+                           + sorted(kimi_models - {kimi_default}))
     return {
         "tabs": tabs,
         "saved_projects": saved,
