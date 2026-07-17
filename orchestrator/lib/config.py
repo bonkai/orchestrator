@@ -55,14 +55,6 @@ FUSION_PROVIDERS_SEED = {
                  "model": "glm-4.6",          "price_in": 1.40, "price_out": 4.40},
     "qwen":     {"script": "providers/qwen.py",     "key_env": "DASHSCOPE_API_KEY",
                  "model": "qwen-max",         "price_in": 1.25, "price_out": 3.75},
-    # Moonshot AI / Kimi K3 — the OpenAI-compatible international endpoint
-    # (api.moonshot.ai). model id + $3.00/$15.00 prices verified from Moonshot's
-    # official docs (platform.kimi.ai, 2026-07-17). key_env is the LAB-level var
-    # (MOONSHOT_API_KEY) though the slug is the MODEL line (kimi) — same split as
-    # glm's ZAI_API_KEY. providers/kimi.py hardcodes the base URL (config can't
-    # override it); a .cn key needs the api.moonshot.cn sibling — edit the script.
-    "kimi":     {"script": "providers/kimi.py",     "key_env": "MOONSHOT_API_KEY",
-                 "model": "kimi-k3",          "price_in": 3.00, "price_out": 15.00},
 }
 FUSION_PRESETS_SEED = {
     "budget":   ["deepseek", "minimax", "gemini"],
