@@ -656,6 +656,164 @@ def run_codex_json(
         ok=False, error="codex call ended unexpectedly")
 
 
+# ── Kimi Code CLI engine (K1) — the kimi-code twin of the codex invoker above ──
+# Subscription-backed ($0, OAuth), headless via `kimi -p <prompt> --output-format
+# stream-json`. Pinned to kimi-code 0.27.0 (KIMI_PLAN.md §4; schema verified live
+# 2026-07-17); re-verify on `kimi upgrade`. Fail-soft (ok=False, never a raise).
+
+def _kimi_bin() -> str:
+    """The kimi-code binary — PATH, else the seeded ~/.kimi-code/bin fallback (the
+    installer exports that dir only in the interactive .zshrc, which the server
+    subprocess may not source). Returns 'kimi' if neither resolves (the spawn then
+    fails cleanly with a not-found error)."""
+    return config._resolve_kimi_bin() or "kimi"
+
+
+def _kimi_envelope_from_lines(lines) -> Optional[dict]:
+    """Aggregate a `kimi -p --output-format stream-json` JSONL transcript into ONE
+    envelope _build_kimi_run consumes. kimi-code 0.27.0 schema (§4, verified live):
+        {"role":"assistant","content":"..."}                      (may repeat)
+        {"role":"tool","tool_call_id":...,"content":...}
+        {"role":"meta","type":"session.resume_hint","session_id":"session_...",...}
+    The final text is the LAST line with role=="assistant" → .content (so a trailing
+    tool/meta line never leaks in); the resume session_id is on the meta
+    `session.resume_hint` line (the codex thread_id analogue, for the K5 continuable
+    tab). Returns None if NO assistant line was seen (kimi died / tab cut mid-stream)
+    — the kimi analogue of codex's 'no turn.completed'. Never raises (bad lines skipped)."""
+    text = ""
+    session_id = ""
+    saw_assistant = False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        role = obj.get("role")
+        if role == "assistant":
+            content = obj.get("content")
+            if isinstance(content, str) and content:
+                text = content            # keep the LAST non-empty assistant message
+                saw_assistant = True
+            elif content is not None:
+                saw_assistant = True      # an (empty) assistant turn still counts as "kimi answered"
+        elif role == "meta" and obj.get("type") == "session.resume_hint":
+            session_id = obj.get("session_id") or session_id
+    if not saw_assistant:
+        return None
+    return {"result": text, "session_id": session_id}
+
+
+def _envelope_from_kimi_stream(path) -> Optional[dict]:
+    """File wrapper around _kimi_envelope_from_lines for the K5 tab sidecar JSONL
+    (the kimi twin of _envelope_from_codex_stream). Returns None if unreadable or no
+    assistant line. Never raises."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return _kimi_envelope_from_lines(f)
+    except OSError:
+        return None
+
+
+def _build_kimi_run(envelope: dict, requested_model: str) -> ClaudeRun:
+    """Turn a kimi envelope into a ClaudeRun, so every caller treats a kimi result
+    identically to a claude/codex one. kimi specifics (mirror codex): no model field
+    → model falls back to the `-m` we passed (requested_model); cost_usd=0.0 by
+    POLICY (subscription — no usage field in the stream anyway); duration_s=0.0. The
+    session_id stays in `raw` for the K5 resume hand-off. Never raises."""
+    text = (envelope or {}).get("result", "") or ""
+
+    parsed = None
+    stripped = _strip_fences(text)
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+
+    return ClaudeRun(
+        ok=True,
+        text=text,
+        parsed_json=parsed,
+        cost_usd=0.0,                 # subscription — never billed (no usage in the stream)
+        duration_s=0.0,               # kimi's stream carries no duration
+        model=requested_model,        # kimi stream-json has no model field
+        raw=envelope,                 # carries session_id for the K5 resume hand-off
+    )
+
+
+def run_kimi_headless(
+    prompt: str,
+    cwd: str,
+    model: str = DEFAULT_KIMI_MODEL,
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+) -> ClaudeRun:
+    """Captured headless `kimi -p <prompt> --output-format stream-json` — the kimi
+    twin of run_codex_headless. Never raises (ok=False + `error` on any failure).
+    Scrubs MOONSHOT_API_KEY/OPENAI_API_KEY (so kimi runs on the $0 SUBSCRIPTION, not
+    a billed key) and ORCHESTRATOR_RUN_ID (no Stop hook), and closes stdin. The
+    non-interactive `-p` flag handles approvals itself and CANNOT combine with -y
+    (§4); kimi-code has no sandbox/effort flags, so neither is passed."""
+    kbin = _kimi_bin()
+    eng = config.KIMI_ENGINE_SEED
+    cmd = [kbin, eng["prompt_flag"], prompt,
+           eng["output_format_flag"], eng["output_format"], "-m", model]
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("MOONSHOT_API_KEY", "OPENAI_API_KEY", "ORCHESTRATOR_RUN_ID")}
+    # Put ~/.kimi-code/bin on the child PATH when we resolved kimi by absolute path,
+    # so kimi's own sub-helpers resolve too.
+    if os.path.sep in kbin:
+        env["PATH"] = os.path.dirname(kbin) + os.pathsep + env.get("PATH", "")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout_s,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        return ClaudeRun(ok=False, error=f"kimi timed out after {timeout_s}s")
+    except FileNotFoundError:
+        return ClaudeRun(ok=False, error="`kimi` binary not found on PATH")
+    except Exception as e:
+        return ClaudeRun(ok=False, error=f"kimi spawn failed: {e}")
+
+    if proc.returncode != 0:
+        stderr_tail = (proc.stderr or "").strip()[-500:]
+        return ClaudeRun(ok=False, error=f"kimi exit {proc.returncode}: {stderr_tail}")
+
+    envelope = _kimi_envelope_from_lines((proc.stdout or "").splitlines())
+    if envelope is None:
+        return ClaudeRun(ok=False,
+                         error="kimi produced no assistant message",
+                         text=(proc.stdout or "")[:1000])
+    return _build_kimi_run(envelope, model)
+
+
+def run_kimi_json(
+    prompt: str,
+    cwd: str,
+    model: str = DEFAULT_KIMI_MODEL,
+    timeout_s: Optional[int] = None,
+    label: str = "kimi",
+) -> ClaudeRun:
+    """PRIMARY kimi-call entrypoint — the kimi twin of run_codex_json. K2 (now):
+    delegates to the captured headless path. K5 adds the watchable iTerm2 tab
+    (spawn_kimi_tab) + `.done`/`.pid` polling, exactly as run_codex_json does, without
+    changing this signature. Never raises."""
+    # K5 TODO: watchable tab via spawn.spawn_kimi_tab with a headless fallback, mirroring
+    # run_codex_json. Until then the seat answers headlessly (still $0 subscription).
+    return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+
+
 # ─────────────────────────── Fusion (optional, opt-in) ─────────────────────
 # A panel of per-provider scripts (run in parallel) answers the SAME prompt;
 # the local `claude` CLI then JUDGES them into one synthesis. The judge is free
@@ -976,6 +1134,30 @@ def _codex_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
             "effort": effort, "subscription": True, "lens": lens_name, "ok": True}
 
 
+def _kimi_seat_answer(seat: dict, prompt: str, cwd: str) -> dict:
+    """One kimi panel seat: a LOCAL `kimi -p` call on the subscription — the kimi twin
+    of _codex_seat_answer. Free ($0 — subscription) and makes NO billed API call
+    (run_kimi_headless scrubs MOONSHOT_API_KEY/OPENAI_API_KEY), so a kimi seat keeps the
+    'No billed API calls' rule intact like a Claude/codex seat. Returns the SAME
+    normalized shape, so run_fusion_json treats all seat kinds identically. Never raises
+    (run_kimi_json returns ok=False on any failure). kimi-code has NO reasoning effort
+    (§4), so — unlike the codex seat — there is no effort field at all (the output keeps
+    an empty "effort" only for shape-parity with the other seat kinds)."""
+    model = (seat.get("model") or DEFAULT_KIMI_MODEL).strip()
+    lens_name = (seat.get("lens") or "").strip()
+    lens_text = (seat.get("lens_text") or "").strip()
+    name = seat.get("name") or model
+    label = f"fusion-seat:{name}" + (f"+{lens_name}" if lens_name else "")
+    run = run_kimi_json(prompt=_apply_lens(prompt, lens_text), cwd=cwd or os.getcwd(),
+                        model=model, label=label)
+    if not run.ok:
+        return {"name": name, "ok": False, "error": run.error or "kimi seat failed",
+                "lens": lens_name}
+    return {"name": name, "model": run.model or model, "text": run.text,
+            "cost": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
+            "effort": "", "subscription": True, "lens": lens_name, "ok": True}
+
+
 def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                     panel: Optional[list] = None, timeout_s: Optional[int] = None,
                     judge_model: str = "opus", judge_effort: str = "high",
@@ -1042,6 +1224,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     active = config.active_providers()
     claude_ok = config.claude_cli_available()
     codex_ok = config.codex_cli_available()   # C2.3: mirror claude_ok (PATH + auth probe)
+    kimi_ok = config.kimi_cli_available()      # K2: mirror codex_ok (PATH + OAuth probe)
     lenses_cfg = cfg.get("lenses") or config.FUSION_LENSES_SEED  # F8.4 name→text map
     prov_names: list = []          # UNIQUE seat keys (fan out via scripts)
     prov_providers: dict = {}      # seat key → its provider config (script/model/prices)
@@ -1050,6 +1233,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     prov_seat_counts: dict = {}    # base provider name → seats so far (for #2,#3 keys)
     claude_seats: list = []        # local claude CLI seats
     codex_seats: list = []         # local codex CLI seats (C2.3)
+    kimi_seats: list = []          # local kimi-code CLI seats (K2)
     seats_desc: list = []          # readable seat labels (raw / diagnostics)
     lenses_used: list = []         # [{"seat","lens"}] for lensed seats — raw surface
 
