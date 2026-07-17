@@ -1292,13 +1292,31 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                               + (f" [lens:{lens_name}]" if lens_name else ""))
             if lens_name:
                 lenses_used.append({"seat": name, "lens": lens_name})
+        elif isinstance(s, dict) and s.get("kind") == "kimi_cli":
+            # K2: a FOURTH seat kind, ADDITIVE — the branches above are untouched. A
+            # local kimi-code seat ($0 subscription, NO billed API), run like the codex
+            # seat but via run_kimi_json. Gated on kimi_ok (PATH + OAuth probe), so a
+            # logged-out/absent kimi is silently skipped (the <2-seat fallback then
+            # handles it). kimi-code has NO reasoning effort (§4), so — unlike codex —
+            # there is no effort field at all.
+            if not kimi_ok:
+                continue
+            ks_model = (s.get("model") or DEFAULT_KIMI_MODEL).strip()
+            lens_name = (s.get("lens") or "").strip()
+            name = ks_model
+            kimi_seats.append({"model": ks_model, "name": name, "lens": lens_name,
+                               "lens_text": config.resolve_lens(lens_name, lenses_cfg)})
+            seats_desc.append(f"{name} (kimi)"
+                              + (f" [lens:{lens_name}]" if lens_name else ""))
+            if lens_name:
+                lenses_used.append({"seat": name, "lens": lens_name})
         elif isinstance(s, str) and s in active:
             _add_provider_seat(s, "")
         elif (isinstance(s, dict) and isinstance(s.get("name"), str)
               and s["name"].strip() in active):
             # External seat carrying a lens: {"name": <provider>, "lens": ...}.
             _add_provider_seat(s["name"].strip(), (s.get("lens") or "").strip())
-    total = len(prov_names) + len(claude_seats) + len(codex_seats)
+    total = len(prov_names) + len(claude_seats) + len(codex_seats) + len(kimi_seats)
     if total < 2:
         return ClaudeRun(ok=False,
                          error=f"fusion: need >=2 usable panel seats, have {total}")
@@ -1315,7 +1333,7 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
     # in max_workers too, else a pure-codex pair would run serially.
     answers: list = []
     with concurrent.futures.ThreadPoolExecutor(
-            max_workers=(len(claude_seats) + len(codex_seats)
+            max_workers=(len(claude_seats) + len(codex_seats) + len(kimi_seats)
                          + (1 if prov_names else 0)) or 1) as ex:
         prov_future = (ex.submit(_panel_answers, prompt, prov_names, prov_providers,
                                  timeout_s, cwd_eff, prov_lenses) if prov_names else None)
@@ -1323,6 +1341,8 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                           for cs in claude_seats]
         codex_futures = [ex.submit(_codex_seat_answer, cs, prompt, cwd_eff)
                          for cs in codex_seats]
+        kimi_futures = [ex.submit(_kimi_seat_answer, ks, prompt, cwd_eff)
+                        for ks in kimi_seats]
         if prov_future is not None:
             try:
                 answers.extend(prov_future.result() or [])
@@ -1338,6 +1358,11 @@ def run_fusion_json(prompt: str, cwd: str = "", preset: Optional[str] = None,
                 answers.append(fut.result())
             except Exception as e:
                 print(f"[claude_runner] fusion codex seat failed: {e}")
+        for fut in kimi_futures:
+            try:
+                answers.append(fut.result())
+            except Exception as e:
+                print(f"[claude_runner] fusion kimi seat failed: {e}")
 
     # F8.4: tag each external answer with its lens NAME for the surface/breakdown
     # (Claude seats already carry their own "lens" from _anthropic_seat_answer).
