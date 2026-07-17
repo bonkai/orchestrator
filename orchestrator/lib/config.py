@@ -244,6 +244,39 @@ CODEX_ENGINE_SEED = {
 }
 
 
+# ── Kimi ENGINE SEED (K3): the kimi-code CLI's model alias + flag set, merged from
+# config.json's `fusion.kimi` exactly like the codex/provider/preset seeds. claude_runner
+# and spawn IMPORT these so the `-m` alias + flags have ONE source of truth. Pinned to
+# kimi-code 0.27.0 (KIMI_PLAN.md §4; flags + stream-json schema verified live 2026-07-17);
+# the CLI churns them, so re-verify on `kimi upgrade`.
+#
+# ⚠ This is kimi-code, NOT the legacy `kimi-cli` in the online docs: the headless flag is
+# `-p` (NOT `--print`), there are NO `-s` sandbox modes and NO per-call effort flag, and the
+# binary lives at ~/.kimi-code/bin (interactive-PATH only — resolve via bin_fallback).
+KIMI_ENGINE_SEED = {
+    # `-m` model ALIAS (resolved from ~/.kimi-code/config.toml). kimi-code/k3 = K3 (the config
+    # default). NOT a Claude/codex id. Override per-machine via config.json fusion.kimi.model.
+    "model": "kimi-code/k3",
+    # Selectable aliases — the picker's model options AND the validation whitelist.
+    "models": ["kimi-code/k3", "kimi-code/kimi-for-coding", "kimi-code/kimi-for-coding-highspeed"],
+    "prompt_flag": "-p",                        # non-interactive one-shot (the `codex exec` analog; NOT --print)
+    "output_format_flag": "--output-format",
+    "output_format": "stream-json",             # JSONL the parser reads
+    "resume_flag": "-r",                         # resume-by-id (== -S/--session); id from the session.resume_hint line
+    "continue_flag": "-c",                       # continue the cwd's last session (alt resume)
+    "auto_flag": "--auto",                       # auto-permission for the interactive executor hand-off (-p forbids -y)
+    "auth_probe": ["kimi", "provider", "list"],  # cheap NON-BILLING login probe (exit 0 + source=oauth)
+    "bin_fallback": "~/.kimi-code/bin/kimi",     # PATH has ~/.kimi-code/bin only in interactive .zshrc; resolve here if which() misses
+    "creds_path": "~/.kimi-code/credentials/kimi-code.json",  # OAuth credential; absent ⇒ never logged in
+    "max_concurrent_dispatches": 2,             # Plus-cap guard (mirror codex): max kimi EXECUTOR dispatches at once
+    # A default kimi panel for the K4 dispatch picker (>=2 lens-decorrelated seats). Unused until K4.
+    "seats": [
+        {"kind": "kimi_cli", "model": "kimi-code/k3", "lens": "risks"},
+        {"kind": "kimi_cli", "model": "kimi-code/k3", "lens": "simplest"},
+    ],
+}
+
+
 def load_config() -> dict:
     """Read ~/.orchestrator/config.json and return it as a dict. Returns {} if
     the file is absent, unreadable, malformed, or not a JSON object. NEVER
@@ -339,6 +372,17 @@ def fusion_config() -> dict:
     if isinstance(file_codex, dict):
         codex.update(file_codex)
 
+    # K3: kimi ENGINE config — KIMI_ENGINE_SEED with config.json's fusion.kimi merged over it
+    # (per-key override, mirror of the codex merge above). Mutable seed values are re-copied so
+    # a caller mutating the returned config can't corrupt the module seed.
+    kimi = {**KIMI_ENGINE_SEED,
+            "models": list(KIMI_ENGINE_SEED["models"]),
+            "auth_probe": list(KIMI_ENGINE_SEED["auth_probe"]),
+            "seats": [dict(s) for s in KIMI_ENGINE_SEED["seats"]]}
+    file_kimi = fcfg.get("kimi")
+    if isinstance(file_kimi, dict):
+        kimi.update(file_kimi)
+
     # profiles: named, full panel configs (Claude + provider seats with lenses)
     # the dispatch picker saves and re-applies. Pure user data — NO seeds, so no
     # merge; each is normalized so a hand-edited file can't break the picker.
@@ -358,6 +402,7 @@ def fusion_config() -> dict:
         "lenses": lenses,
         "profiles": profiles,
         "codex": codex,
+        "kimi": kimi,
     }
 
 
@@ -376,6 +421,14 @@ def codex_engine() -> dict:
     panel. claude_runner imports the model/flags from here rather than redefining
     them; a config.json `fusion.codex.<key>` override wins (proven in tests)."""
     return fusion_config()["codex"]
+
+
+def kimi_engine() -> dict:
+    """The effective kimi ENGINE config: KIMI_ENGINE_SEED with config.json's `fusion.kimi`
+    merged over it (per-key override, mirror of codex_engine()). The kimi-code CLI's single
+    source of truth — the `-m` alias, the flag set, the auth probe, and a default seat panel.
+    claude_runner/spawn import from here rather than redefining the literals."""
+    return fusion_config()["kimi"]
 
 
 def fusion_profiles() -> dict:
@@ -504,6 +557,56 @@ def codex_cli_available() -> bool:
     return proc.returncode == 0
 
 
+_KIMI_PROBE_TIMEOUT_S = 10
+
+
+def _resolve_kimi_bin() -> Optional[str]:
+    """Path to the kimi-code binary: PATH (shutil.which) → the seeded ~/.kimi-code/bin
+    fallback → None. which() can MISS it because the installer exports ~/.kimi-code/bin only
+    in the interactive .zshrc, which a server subprocess may not source."""
+    found = shutil.which("kimi")
+    if found:
+        return found
+    fallback = os.path.expanduser(KIMI_ENGINE_SEED["bin_fallback"])
+    return fallback if os.path.exists(fallback) else None
+
+
+def kimi_cli_available() -> bool:
+    """True only if the kimi-code CLI is resolvable AND an OAuth login is present — the codex
+    twin (kimi is subscription-backed, so seats need no key, only a current login). kimi-code
+    has NO `login status` subcommand, so this checks: (a) the binary resolves, (b) the OAuth
+    credential file exists (absent ⇒ never logged in), and (c) a cheap NON-BILLING
+    `kimi provider list` exits 0. Like codex it can't perfectly detect an EXPIRED token — that
+    surfaces fail-soft at run time — but it never falsely reports available when logged out.
+
+    Hard guarantees (it gates the Fusion toggle + every kimi seat, and runs on UI-render paths):
+      - NEVER raises (fail-safe False on anything unexpected).
+      - NEVER escalates to a billed model call — only the local `provider list`, with
+        MOONSHOT_API_KEY/OPENAI_API_KEY scrubbed so it reflects the $0 SUBSCRIPTION login.
+      - CANNOT hang — finite timeout + closed stdin.
+    Pinned to kimi-code 0.27.0; re-verify on `kimi upgrade`."""
+    kbin = _resolve_kimi_bin()
+    if kbin is None:
+        return False
+    if not os.path.exists(os.path.expanduser(KIMI_ENGINE_SEED["creds_path"])):
+        return False
+    # Scrub billed-key envs (mirror codex) so the probe reflects the SUBSCRIPTION login only.
+    env = {k: v for k, v in os.environ.items() if k not in ("MOONSHOT_API_KEY", "OPENAI_API_KEY")}
+    env["PATH"] = os.path.dirname(kbin) + os.pathsep + env.get("PATH", "")
+    try:
+        proc = subprocess.run(
+            [kbin] + list(KIMI_ENGINE_SEED["auth_probe"])[1:],   # resolved bin + `provider list`
+            capture_output=True,
+            text=True,
+            timeout=_KIMI_PROBE_TIMEOUT_S,
+            stdin=subprocess.DEVNULL,
+            env=env,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
+
+
 def is_fusion_available() -> bool:
     """True when a >=2-seat panel is buildable: the local `claude` CLI is present
     (you can always add >=2 free Claude Code seats — no key needed), OR the `codex`
@@ -516,7 +619,8 @@ def is_fusion_available() -> bool:
     present."""
     return (claude_cli_available()
             or len(active_providers()) >= 2
-            or codex_cli_available())
+            or codex_cli_available()
+            or kimi_cli_available())
 
 
 # ── F8: registry/preset writes (the browser Settings UI) ────────────────────
