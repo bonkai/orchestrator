@@ -293,7 +293,8 @@ def load_config() -> dict:
 def _normalize_profile(prof: dict) -> dict:
     """Coerce a saved Fusion PROFILE to the canonical shape
     {"claude_seats": [{model, effort, lens}], "codex_seats": [{model, effort, lens}],
-    "provider_seats": [{name, lens}]}, dropping malformed seats and unknown keys.
+    "kimi_seats": [{model, lens}], "provider_seats": [{name, lens}]}, dropping malformed
+    seats and unknown keys.
     Pure / no IO — used on BOTH the read path (fusion_config, so a hand-edited
     config.json can't break the picker) and the write path (save_profile, so what
     lands on disk is always clean). A profile saved before codex seats existed simply
@@ -316,11 +317,18 @@ def _normalize_profile(prof: dict) -> dict:
             codex.append({"model": s(seat.get("model")),
                           "effort": s(seat.get("effort")),
                           "lens": s(seat.get("lens"))})
+    kimi = []
+    for seat in prof.get("kimi_seats") or []:
+        # K4: kimi seats persist alongside codex seats. kimi-code has NO reasoning
+        # effort, so a kimi seat is just {model, lens} (no effort field).
+        if isinstance(seat, dict) and s(seat.get("model")):
+            kimi.append({"model": s(seat.get("model")), "lens": s(seat.get("lens"))})
     providers = []
     for seat in prof.get("provider_seats") or []:
         if isinstance(seat, dict) and s(seat.get("name")):
             providers.append({"name": s(seat.get("name")), "lens": s(seat.get("lens"))})
-    return {"claude_seats": claude, "codex_seats": codex, "provider_seats": providers}
+    return {"claude_seats": claude, "codex_seats": codex, "kimi_seats": kimi,
+            "provider_seats": providers}
 
 
 def fusion_config() -> dict:

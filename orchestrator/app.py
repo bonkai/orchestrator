@@ -239,6 +239,8 @@ def _view_ctx() -> dict:
         "codex_cli_available": codex_available,
         "codex_seat_models": codex_models_ordered,
         "codex_seat_efforts": codex_efforts_ordered,
+        "kimi_cli_available": kimi_available,
+        "kimi_seat_models": kimi_models_ordered,
         "claude_seat_models": CLAUDE_SEAT_MODELS,
         "claude_seat_efforts": CLAUDE_SEAT_EFFORTS,
         "fusion_default_panel": fusion_default_panel,
@@ -1282,7 +1284,8 @@ def _fusion_panel_breakdown(result) -> list[dict]:
 
 
 def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
-                        codex_models: set, codex_efforts: set | None = None) -> list:
+                        codex_models: set, codex_efforts: set | None = None,
+                        kimi_models: set | None = None) -> list:
     """Normalize the dispatch form's panel selection into the seat list
     run_fusion_json consumes. `fusion_seats` is the F9 JSON shape — a list of
     {type:"claude"|"codex"|"provider", ...}; `fusion_panel` is the legacy comma
@@ -1309,6 +1312,7 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
     lens}; codex seats also persist in saved profiles. The claude/provider branches are
     byte-for-byte the pre-C5 /send loop."""
     codex_efforts = _codex_seat_efforts() if codex_efforts is None else codex_efforts
+    kimi_models = _kimi_seat_models() if kimi_models is None else kimi_models
     panel: list = []
     raw_seats = (fusion_seats or "").strip()
     if raw_seats:
@@ -1347,6 +1351,16 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
                     seat_effort = str(s.get("effort", "")).strip()
                     if seat_effort and seat_effort in codex_efforts:
                         seat["effort"] = seat_effort
+                    if seat_lens:
+                        seat["lens"] = seat_lens
+                    panel.append(seat)
+            elif s.get("type") == "kimi":
+                # K4: a FOURTH picker type → the kimi_cli seat kind. Mirror of the codex
+                # branch, but kimi-code has NO reasoning effort, so there is no effort
+                # field. A blank/unknown alias DROPS the seat (no silent downgrade).
+                seat_model = str(s.get("model", "")).strip()
+                if seat_model in kimi_models:
+                    seat = {"kind": "kimi_cli", "model": seat_model}
                     if seat_lens:
                         seat["lens"] = seat_lens
                     panel.append(seat)
@@ -1688,7 +1702,7 @@ async def send(
     active = config.active_providers()
     codex_models = _codex_seat_models()
     panel = _parse_fusion_panel(fusion_seats, fusion_panel, active, codex_models,
-                                _codex_seat_efforts())
+                                _codex_seat_efforts(), _kimi_seat_models())
 
     # The EXECUTOR model picker (`model`) determines the executor engine — the
     # OPTIONAL brain picker (`brain_model`) NEVER does, so engine routing stays bound
