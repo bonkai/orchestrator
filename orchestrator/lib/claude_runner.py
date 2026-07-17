@@ -508,6 +508,38 @@ def _codex_tool_event(obj: dict) -> Optional[dict]:
             "input_hash": input_hash, "detail": detail}
 
 
+def _kimi_tool_events(obj: dict) -> list:
+    """Map ONE kimi stream-json line to normalized tool events for the K5 executor poller
+    (the kimi twin of _codex_tool_event, but a LIST — an assistant line may carry MULTIPLE
+    tool_calls). Each event: {"id","phase":'start'|'end',"tool_name","input_hash","detail"}.
+      - an assistant line's tool_calls[] → phase 'start' (the PreToolUse analogue),
+        fingerprint over the function name + arguments.
+      - a tool line (role=='tool') → phase 'end' (PostToolUse), keyed by tool_call_id.
+    kimi tool_calls are nested on an assistant line (not codex's separate item.started/
+    completed events), so this returns a list. Never raises — [] on any malformed shape."""
+    if not isinstance(obj, dict):
+        return []
+    role = obj.get("role")
+    out: list = []
+    if role == "assistant":
+        for tc in (obj.get("tool_calls") or []):
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = str(fn.get("name") or "tool")
+            args = str(fn.get("arguments") or "")
+            ihash = hashlib.sha1(f"{name}:{args}".encode("utf-8", "replace")).hexdigest()[:16]
+            out.append({"id": str(tc.get("id") or ihash), "phase": "start",
+                        "tool_name": name, "input_hash": ihash,
+                        "detail": {"tool_name": name, "args_preview": args[:400]}})
+    elif role == "tool":
+        tcid = str(obj.get("tool_call_id") or "")
+        if tcid:
+            out.append({"id": tcid, "phase": "end", "tool_name": "tool", "input_hash": "",
+                        "detail": {"output_preview": str(obj.get("content") or "")[:400]}})
+    return out
+
+
 def run_codex_headless(
     prompt: str,
     cwd: str,
