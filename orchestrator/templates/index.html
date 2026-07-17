@@ -195,6 +195,21 @@
               {% endif %}
             </div>
             {% endif %}
+            {% if kimi_seat_models %}
+            <div class="fusion-section">
+              <div class="fusion-section-title">
+                Kimi seats <span class="muted">— local <code>kimi</code> CLI · Kimi subscription · no API · $0 · add as many as you like</span>
+              </div>
+              <div id="kimi-seats" class="kimi-seats"></div>
+              <button type="button" id="add-kimi-seat" class="secondary small add-seat-btn"
+                      {% if not kimi_cli_available %}disabled title="Kimi CLI absent or logged out — run `kimi login` to add kimi seats"{% endif %}>+ add kimi seat</button>
+              {% if not kimi_cli_available %}
+              <span class="muted" style="display:block; font-size:12px; margin-top:0.25rem;">
+                Kimi CLI absent or logged out — run <code>kimi login</code> to add kimi seats.
+              </span>
+              {% endif %}
+            </div>
+            {% endif %}
             <div class="fusion-section">
               <div class="fusion-section-title">
                 Cross-lab providers <span class="muted">— external API · costs tokens · key-gated · add as many as you like (even the same one)</span>
@@ -356,6 +371,11 @@
         var CODEX_MODELS = {{ codex_seat_models | tojson }};
         var CODEX_EFFORTS = {{ codex_seat_efforts | tojson }};
         var CODEX_AVAILABLE = {{ codex_cli_available | tojson }};
+        // Kimi seats: kimi-code's model aliases (kimi-code/k3, …). SIMPLER than codex —
+        // kimi-code has NO reasoning effort, so there is no KIMI_EFFORTS. KIMI_AVAILABLE
+        // gates the add button (greyed when the kimi CLI is absent / logged out).
+        var KIMI_MODELS = {{ kimi_seat_models | tojson }};
+        var KIMI_AVAILABLE = {{ kimi_cli_available | tojson }};
         // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
         var FUSION_LENSES = {{ fusion_lenses | tojson }};
         var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
@@ -379,10 +399,13 @@
         var PROVIDER_SEATS_KEY = 'orch_fusion_provider_seats';
         var CLAUDE_SEATS_KEY = 'orch_fusion_claude_seats';
         var CODEX_SEATS_KEY = 'orch_fusion_codex_seats';
+        var KIMI_SEATS_KEY = 'orch_fusion_kimi_seats';
         var claudeSeatsEl = document.getElementById('claude-seats');
         var addClaudeSeatBtn = document.getElementById('add-claude-seat');
         var codexSeatsEl = document.getElementById('codex-seats');
         var addCodexSeatBtn = document.getElementById('add-codex-seat');
+        var kimiSeatsEl = document.getElementById('kimi-seats');
+        var addKimiSeatBtn = document.getElementById('add-kimi-seat');
         var providerSeatsEl = document.getElementById('provider-seats');
         var addProviderSeatBtn = document.getElementById('add-provider-seat');
         var fusionCountEl = document.getElementById('fusion-count');
