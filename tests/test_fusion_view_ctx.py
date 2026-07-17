@@ -66,6 +66,7 @@ class TestViewCtxFusion(unittest.TestCase):
                 mock.patch.object(app_module.config, "fusion_config", return_value=FCFG), \
                 mock.patch.object(app_module.config, "claude_cli_available", return_value=False), \
                 mock.patch.object(app_module.config, "codex_cli_available", return_value=codex_available), \
+                mock.patch.object(app_module.config, "kimi_cli_available", return_value=False), \
                 mock.patch.object(app_module.config, "codex_engine", return_value=CODEX_ENGINE), \
                 mock.patch.object(app_module.config, "active_providers", return_value=active):
             return app_module._view_ctx()

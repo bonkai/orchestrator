@@ -121,11 +121,13 @@ class TestCodexCliAvailable(unittest.TestCase):
 
 class TestIsFusionAvailableCodex(unittest.TestCase):
     @contextlib.contextmanager
-    def _env(self, *, claude_ok, codex_ok, active):
+    def _env(self, *, claude_ok, codex_ok, active, kimi_ok=False):
         with contextlib.ExitStack() as es:
             es.enter_context(mock.patch.object(config, "claude_cli_available", return_value=claude_ok))
             es.enter_context(mock.patch.object(config, "codex_cli_available", return_value=codex_ok))
             es.enter_context(mock.patch.object(config, "active_providers", return_value=active))
+            # is_fusion_available() also ORs kimi_cli_available() (real, host-dependent probe) — pin it.
+            es.enter_context(mock.patch.object(config, "kimi_cli_available", return_value=kimi_ok))
             yield
 
     def test_codex_alone_makes_fusion_available(self):
