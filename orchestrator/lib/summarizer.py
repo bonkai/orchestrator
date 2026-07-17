@@ -167,6 +167,29 @@ def distill_transcript(transcript_path: str, max_chars: int = DISTILLED_MAX_CHAR
                                       for c in changes if isinstance(c, dict))
                     blocks.append(f"### TOOL_USE: file_change\n{_trunc(paths, PER_TOOL_INPUT_MAX)}")
 
+            # K5: a kimi EXECUTOR transcript is kimi-code's `-p --output-format stream-json`
+            # sidecar — ROLE-based (assistant/tool/user), NOT claude's `type` or codex's item
+            # events. This ADDITIVE branch distills it to the SAME markdown. Keyed on `role`
+            # (kimi lines carry no top-level `type`), so the claude/codex paths are unchanged.
+            elif obj.get("role") in ("assistant", "tool", "user"):
+                role, content = obj.get("role"), obj.get("content")
+                if role == "assistant":
+                    if isinstance(content, str) and content.strip():
+                        blocks.append(f"### ASSISTANT\n{_trunc(content, PER_BLOCK_MAX)}")
+                    for tc in (obj.get("tool_calls") or []):
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                        name = fn.get("name", "?")
+                        args = str(fn.get("arguments", ""))
+                        blocks.append(f"### TOOL_USE: {name}\n{_trunc(args, PER_TOOL_INPUT_MAX)}")
+                elif role == "tool":
+                    if isinstance(content, str) and content.strip():
+                        blocks.append(f"### TOOL_RESULT\n{_trunc(content, PER_BLOCK_MAX)}")
+                elif role == "user":
+                    if isinstance(content, str) and content.strip():
+                        blocks.append(f"### USER\n{_trunc(content, PER_BLOCK_MAX)}")
+
             # Skip permission-mode, file-history-snapshot, attachment, ai-title.
 
             total = sum(len(b) for b in blocks)

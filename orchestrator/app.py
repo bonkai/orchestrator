@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI):
     # C6: inject the codex poller factory BEFORE resume so boot re-attach can recreate
     # the in-band finalizer for codex dispatches that were running at restart.
     watchdog.set_codex_poller_factory(_codex_dispatch_poller)
+    watchdog.set_kimi_poller_factory(_kimi_dispatch_poller)
     watchdog.resume_watchers_on_boot()
     idle_task = asyncio.create_task(idle_notifier.run_idle_checker())
     _background_tasks.add(idle_task)
@@ -1243,6 +1244,109 @@ async def _codex_dispatch_poller(dispatch_id: int, tail_only: bool = False):
         raise
     except Exception as e:
         print(f"[orchestrator] codex poller for #{dispatch_id} crashed: {e}")
+
+
+# ─── kimi EXECUTOR in-band poller (K5) — the kimi twin of _codex_dispatch_poller ──
+# kimi has NO Stop/PreToolUse/PostToolUse hooks either, so a dispatched kimi executor needs
+# the SAME in-band finalizer + activity feed. Tails the sidecar JSONL the kimi executor
+# run.sh tees, records tool_use/tool_result from kimi's tool_calls / tool lines + feeds
+# loop_watchdog, and on .done finalizes IN-PROCESS via _finalize_dispatch. Reuses the codex
+# poller's timing constants (engine-neutral). watchdog tracks/cancels it; boot re-attaches.
+
+def _kimi_timeline_step(dispatch_id: int, line: str, seen_ids: set, completed_ids: set):
+    """Translate ONE kimi sidecar JSONL line into the SAME signals the claude hooks produce:
+    a `tool_use` timeline event + a loop_watchdog fingerprint on first sight of a tool call
+    (PreToolUse analogue), and a `tool_result` on its completion (PostToolUse analogue).
+    Dedups by kimi tool_call_id. Mirror of _codex_timeline_step over _kimi_tool_events."""
+    line = line.strip()
+    if not line:
+        return
+    try:
+        obj = json.loads(line)
+    except (ValueError, TypeError):
+        return
+    for ev in claude_runner._kimi_tool_events(obj):
+        item_id, tool, ihash, phase = ev["id"], ev["tool_name"], ev["input_hash"], ev["phase"]
+        if phase == "start" and item_id not in seen_ids:
+            seen_ids.add(item_id)
+            db.record_event(dispatch_id, "tool_use",
+                            {"tool_name": tool, "input_hash": ihash, **ev["detail"]})
+            idle_notifier.reset_idle(dispatch_id)
+            if loop_watchdog.record(dispatch_id, tool, ihash):
+                db.record_event(dispatch_id, "stage", {"stage": "loop_detected", "tool": tool})
+                t = asyncio.create_task(loop_watchdog.trigger_kill(dispatch_id, (tool, ihash)))
+                _background_tasks.add(t)
+                t.add_done_callback(_background_tasks.discard)
+        elif phase == "end" and item_id not in completed_ids:
+            completed_ids.add(item_id)
+            db.record_event(dispatch_id, "tool_result", {"tool_name": tool, **ev["detail"]})
+
+
+async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
+    """Lifetime poller for one kimi EXECUTOR dispatch — the K5 in-band finalizer (the kimi
+    twin of _codex_dispatch_poller). Tails the sidecar JSONL live (→ timeline + loop
+    watchdog), and on .done (or a closed/killed tab) finalizes via _finalize_dispatch. Never
+    raises; on cancellation just exits (the killer wrote the row)."""
+    jsonl = spawn.KIMI_DIR / f"{dispatch_id}.jsonl"
+    done = spawn.KIMI_DIR / f"{dispatch_id}.done"
+    offset = 0
+    buf = ""
+    seen_ids: set = set()
+    completed_ids: set = set()
+    pid = None
+    started_at = time.time()
+    if tail_only and jsonl.is_file():
+        try:
+            offset = jsonl.stat().st_size
+        except OSError:
+            offset = 0
+    try:
+        while True:
+            if jsonl.is_file():
+                try:
+                    with jsonl.open(encoding="utf-8", errors="replace") as f:
+                        f.seek(offset)
+                        chunk = f.read()
+                        offset = f.tell()
+                except OSError:
+                    chunk = ""
+                if chunk:
+                    buf += chunk
+                    while "\n" in buf:
+                        ln, buf = buf.split("\n", 1)
+                        _kimi_timeline_step(dispatch_id, ln, seen_ids, completed_ids)
+            if done.is_file():
+                try:
+                    exit_code = int((done.read_text().strip() or "1"))
+                except (ValueError, OSError):
+                    exit_code = 1
+                outcome = "completed" if exit_code == 0 else "failed"
+                exit_reason = "kimi" if exit_code == 0 else f"kimi exit {exit_code}"
+                await _finalize_dispatch(
+                    dispatch_id, session_id=None,
+                    transcript_src=str(jsonl) if jsonl.is_file() else None,
+                    exit_reason=exit_reason, outcome=outcome)
+                return
+            if pid is None:
+                pid = spawn.read_pid_now(dispatch_id)
+                if pid is None and (time.time() - started_at) > _CODEX_POLLER_STARTUP_GRACE_S:
+                    await _finalize_dispatch(
+                        dispatch_id, session_id=None, transcript_src=None,
+                        exit_reason="kimi tab failed to start (no PID)", outcome="failed")
+                    return
+            elif not spawn.pid_alive(pid):
+                if done.is_file():
+                    continue
+                await _finalize_dispatch(
+                    dispatch_id, session_id=None,
+                    transcript_src=str(jsonl) if jsonl.is_file() else None,
+                    exit_reason="kimi tab closed before completion", outcome="failed")
+                return
+            await asyncio.sleep(_CODEX_POLL_INTERVAL_S)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        print(f"[orchestrator] kimi poller for #{dispatch_id} crashed: {e}")
 
 
 # ─── transcript view ──────────────────────────────────────────────────────
