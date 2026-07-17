@@ -792,7 +792,8 @@ def save_profile(name: str, profile: dict) -> dict:
     if not isinstance(profile, dict):
         raise ConfigWriteError("profile must be an object")
     clean = _normalize_profile(profile)
-    if not (clean["claude_seats"] or clean["codex_seats"] or clean["provider_seats"]):
+    if not (clean["claude_seats"] or clean["codex_seats"] or clean["kimi_seats"]
+            or clean["provider_seats"]):
         raise ConfigWriteError("profile has no seats")
     cfg = _read_config_for_write()
     cfg.setdefault("fusion", {}).setdefault("profiles", {})[name] = clean
