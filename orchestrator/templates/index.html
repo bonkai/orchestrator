@@ -604,6 +604,67 @@
           updateFusionCount();
         }
 
+        // -- Kimi seats: model + optional lens; duplicates allowed. The $0 kimi-code twin
+        // of the codex-seat rows (local `kimi -p` on the Kimi subscription, NO billed API).
+        // SIMPLER than a codex seat: kimi-code has NO reasoning effort, so a kimi row is
+        // just model (+ optional lens). DEFAULT ZERO seats — kimi stays opt-in.
+        function makeKimiLensSelect(val) {
+          var sel = document.createElement('select');
+          sel.className = 'kimi-seat-lens';
+          sel.style.fontSize = '10px';
+          var none = document.createElement('option');
+          none.value = ''; none.textContent = 'no lens';
+          none.title = 'no lens — this seat answers the prompt verbatim';
+          sel.appendChild(none);
+          LENS_NAMES.forEach(function(name) {
+            var op = document.createElement('option');
+            op.value = name; op.textContent = name;
+            op.title = LENS_TEXT[name] || '';
+            if (name === val) op.selected = true;
+            sel.appendChild(op);
+          });
+          setLensTitle(sel);
+          sel.addEventListener('change', function() { setLensTitle(sel); });
+          return sel;
+        }
+        function addKimiSeatRow(model, lens) {
+          if (!kimiSeatsEl) return;
+          var row = document.createElement('div');
+          row.className = 'kimi-seat-row';
+          row.style.cssText = 'display:flex; align-items:center; gap:0.35rem; padding:2px 0; font-size:12px;';
+          var mSel = makeSeatSelect(KIMI_MODELS, model || (KIMI_MODELS[0] || ''), 'kimi-seat-model');
+          var rm = document.createElement('button');
+          rm.type = 'button'; rm.className = 'link kimi-seat-rm';
+          rm.textContent = '×'; rm.title = 'remove this seat';
+          rm.style.cssText = 'margin-left:0.25rem; padding:0 6px;';
+          rm.addEventListener('click', function() { row.remove(); saveKimiSeats(); });
+          mSel.addEventListener('change', saveKimiSeats);
+          row.appendChild(document.createTextNode('kimi '));
+          row.appendChild(mSel);
+          if (LENS_NAMES.length) {
+            var lSel = makeKimiLensSelect(lens || '');
+            lSel.addEventListener('change', saveKimiSeats);
+            row.appendChild(document.createTextNode(' · lens '));
+            row.appendChild(lSel);
+          }
+          row.appendChild(rm);
+          kimiSeatsEl.appendChild(row);
+        }
+        function kimiSeats() {
+          if (!kimiSeatsEl) return [];
+          return Array.prototype.slice.call(
+            kimiSeatsEl.querySelectorAll('.kimi-seat-row')
+          ).map(function(r) {
+            var lensEl = r.querySelector('.kimi-seat-lens');
+            return { model: r.querySelector('.kimi-seat-model').value,
+                     lens: lensEl ? lensEl.value : '' };
+          });
+        }
+        function saveKimiSeats() {
+          try { localStorage.setItem(KIMI_SEATS_KEY, JSON.stringify(kimiSeats())); } catch (e) {}
+          updateFusionCount();
+        }
+
         // -- Cross-lab provider seats: provider + optional lens; duplicates allowed
         // (F12). Same add/remove/persist shape as Claude seats, so the panel can
         // hold e.g. 3× glm, each through a different lens.
@@ -669,9 +730,9 @@
         function updateFusionCount() {
           if (!fusionCountEl) return;
           var c = claudeSeats().length, x = codexSeats().length,
-              p = providerSeats().length, total = c + x + p;
+              k = kimiSeats().length, p = providerSeats().length, total = c + x + k + p;
           fusionCountEl.textContent = 'panel: ' + total + ' seat' + (total === 1 ? '' : 's') +
-            ' (' + c + ' Claude · ' + x + ' Codex · ' + p + ' cross-lab)' +
+            ' (' + c + ' Claude · ' + x + ' Codex · ' + k + ' Kimi · ' + p + ' cross-lab)' +
             (total < 2 ? ' — need ≥2' : '');
           var anyOn = (fusionCheckbox && fusionCheckbox.checked) ||
                       (enrichCheckbox && enrichCheckbox.checked);
@@ -724,6 +785,13 @@
           if (Array.isArray(savedCodexSeats)) {
             savedCodexSeats.forEach(function(s) { if (s) addCodexSeatRow(s.model, s.effort, s.lens); });
           }
+          // Restore kimi seats (saved set ONLY — DEFAULT ZERO, like codex: kimi is opt-in).
+          // Each row = kimi model alias + optional lens (no effort — kimi-code has none).
+          var savedKimiSeats = null;
+          try { savedKimiSeats = JSON.parse(localStorage.getItem(KIMI_SEATS_KEY)); } catch (e) {}
+          if (Array.isArray(savedKimiSeats)) {
+            savedKimiSeats.forEach(function(s) { if (s) addKimiSeatRow(s.model, s.lens); });
+          }
           try { fusionCheckbox.checked = localStorage.getItem(FUSION_ON_KEY) === '1'; } catch (e) {}
           if (enrichCheckbox) {
             try { enrichCheckbox.checked = localStorage.getItem(FUSION_ENRICH_KEY) === '1'; } catch (e) {}
@@ -766,6 +834,13 @@
               addCodexSeatRow(CODEX_MODELS[0] || '', '', ''); saveCodexSeats();
             });
           }
+          // Same as codex: disabled when kimi absent/logged-out; handler attached anyway.
+          // New seat = the default kimi alias, no lens.
+          if (addKimiSeatBtn) {
+            addKimiSeatBtn.addEventListener('click', function() {
+              addKimiSeatRow(KIMI_MODELS[0] || '', ''); saveKimiSeats();
+            });
+          }
           if (addProviderSeatBtn) {
             addProviderSeatBtn.addEventListener('click', function() {
               addProviderSeatRow(ACTIVE_PROVIDERS.length ? ACTIVE_PROVIDERS[0].name : '', '');
@@ -802,13 +877,15 @@
             if (!p) return;
             claudeSeatsEl.innerHTML = '';
             if (codexSeatsEl) codexSeatsEl.innerHTML = '';
+            if (kimiSeatsEl) kimiSeatsEl.innerHTML = '';
             providerSeatsEl.innerHTML = '';
             (p.claude_seats || []).forEach(function(s) { addClaudeSeatRow(s.model, s.effort, s.lens); });
             (p.codex_seats || []).forEach(function(s) { addCodexSeatRow(s.model, s.effort, s.lens); });
+            (p.kimi_seats || []).forEach(function(s) { addKimiSeatRow(s.model, s.lens); });
             (p.provider_seats || []).forEach(function(s) {
               if (isActiveProvider(s.name)) addProviderSeatRow(s.name, s.lens);
             });
-            saveClaudeSeats(); saveCodexSeats(); saveProviderSeats();
+            saveClaudeSeats(); saveCodexSeats(); saveKimiSeats(); saveProviderSeats();
             flashStatus('applied profile “' + name + '”');
           }
 
