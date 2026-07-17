@@ -805,13 +805,81 @@ def run_kimi_json(
     timeout_s: Optional[int] = None,
     label: str = "kimi",
 ) -> ClaudeRun:
-    """PRIMARY kimi-call entrypoint — the kimi twin of run_codex_json. K2 (now):
-    delegates to the captured headless path. K5 adds the watchable iTerm2 tab
-    (spawn_kimi_tab) + `.done`/`.pid` polling, exactly as run_codex_json does, without
-    changing this signature. Never raises."""
-    # K5 TODO: watchable tab via spawn.spawn_kimi_tab with a headless fallback, mirroring
-    # run_codex_json. Until then the seat answers headlessly (still $0 subscription).
-    return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+    """PRIMARY kimi-call entrypoint — the kimi twin of run_codex_json. Runs in a watchable
+    iTerm2 tab (`kimi -p --output-format stream-json` tee'd to a sidecar we parse back),
+    falling back to headless if iTerm2 isn't installed. `timeout_s=None` → no wall-clock
+    limit (the tab is visible; a closed tab is detected via PID). Never raises — returns
+    ok=False on any failure (auth-expired, closed tab, timeout). `model` is passed
+    EXPLICITLY to spawn_kimi_tab so the parser's model fallback is what we asked for."""
+    if not spawn.iterm2_installed():
+        print("[claude_runner] iTerm2 not installed — running kimi call "
+              f"headless ({label}). Install iTerm2 to watch kimi calls live.")
+        return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "kimi"
+    kimi_id = f"{slug}-{uuid.uuid4().hex[:8]}"
+    try:
+        spawn.spawn_kimi_tab(kimi_id, prompt, cwd, model=model, label=label)
+    except Exception as e:
+        print(f"[claude_runner] kimi tab spawn failed ({e}); headless fallback")
+        spawn.cleanup_kimi_files(kimi_id)
+        return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+
+    out_file = spawn.KIMI_DIR / f"{kimi_id}.jsonl"
+    done_file = spawn.KIMI_DIR / f"{kimi_id}.done"
+    pid_file = spawn.KIMI_DIR / f"{kimi_id}.pid"
+    deadline = (time.time() + timeout_s) if timeout_s else None
+
+    result: Optional[ClaudeRun] = None
+    success = False
+    pid: Optional[int] = None
+    started_at = time.time()
+    try:
+        while result is None:
+            if done_file.is_file():
+                try:
+                    exit_code = int((done_file.read_text().strip() or "1"))
+                except (ValueError, OSError):
+                    exit_code = 1
+                if exit_code != 0:
+                    result = ClaudeRun(ok=False, error=f"kimi exit {exit_code}",
+                                       text=_tail(out_file, 800))
+                else:
+                    envelope = _envelope_from_kimi_stream(out_file)
+                    if envelope is None:
+                        result = ClaudeRun(ok=False,
+                                           error="kimi call produced no assistant message")
+                    else:
+                        result = _build_kimi_run(envelope, model)
+                        success = True
+                break
+
+            # Detect a tab the user closed / a kimi that died before writing .done.
+            if pid is None:
+                pid = _read_pid(pid_file)
+                if pid is None and (time.time() - started_at) > _STARTUP_GRACE_S:
+                    result = ClaudeRun(ok=False,
+                                       error="kimi call tab failed to start "
+                                             f"(no PID after {_STARTUP_GRACE_S}s)")
+                    break
+            elif not spawn.pid_alive(pid):
+                if done_file.is_file():
+                    continue  # race: .done landed; handle on next loop top
+                result = ClaudeRun(ok=False,
+                                   error="kimi call tab closed before completion")
+                break
+
+            if deadline and time.time() > deadline:
+                result = ClaudeRun(ok=False,
+                                   error=f"kimi call timed out after {timeout_s}s")
+                break
+
+            time.sleep(_POLL_INTERVAL_S)
+    finally:
+        spawn.finish_kimi_tab(kimi_id, label=label, success=success)
+
+    return result if result is not None else ClaudeRun(
+        ok=False, error="kimi call ended unexpectedly")
 
 
 # ─────────────────────────── Fusion (optional, opt-in) ─────────────────────
