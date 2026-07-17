@@ -63,6 +63,12 @@ class _IsolatedConfig(unittest.TestCase):
         codex_patch = mock.patch.object(config, "codex_cli_available", return_value=False)
         codex_patch.start()
         self.addCleanup(codex_patch.stop)
+        # K3: is_fusion_available() now ALSO consults kimi_cli_available(), which shells out to
+        # a real `kimi provider list` probe — True on this laptop (logged into kimi-code), so the
+        # assertFalse cases below would flip. Disable kimi too for a host-independent baseline.
+        kimi_patch = mock.patch.object(config, "kimi_cli_available", return_value=False)
+        kimi_patch.start()
+        self.addCleanup(kimi_patch.stop)
 
     def tearDown(self):
         config.CONFIG_PATH = self._orig_config_path
