@@ -365,6 +365,11 @@ def run_claude_json(
 # the same seed, so neither does a config-file read on the fallback path.
 DEFAULT_CODEX_MODEL = config.CODEX_ENGINE_SEED["model"]
 
+# The kimi-code model ALIAS, IMPORTED from the config SEED (K3) — single source of
+# truth (mirror of DEFAULT_CODEX_MODEL). Default-param / safety-net value; callers pass
+# `-m` EXPLICITLY. kimi-code/k3 = K3; NOT a Claude/codex id.
+DEFAULT_KIMI_MODEL = config.KIMI_ENGINE_SEED["model"]
+
 
 def _codex_envelope_from_lines(lines) -> Optional[dict]:
     """Aggregate a `codex exec --json` JSONL transcript (an iterable of lines)
