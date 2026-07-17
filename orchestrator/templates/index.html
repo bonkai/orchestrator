@@ -90,7 +90,7 @@
                 {% endif %}
               </select>
             </label>
-            <label title="EXECUTOR model — the spawned session that does the work. This ALSO picks the engine: a Codex id routes to the Codex executor, everything else to Claude. Can be a higher-power model than the brain below.">executor model:
+            <label title="EXECUTOR model — the spawned session that does the work. This ALSO picks the engine: a Codex id routes to the Codex executor, a Kimi id to the Kimi executor, everything else to Claude. Can be a higher-power model than the brain below.">executor model:
               <select name="model">
                 <optgroup label="Anthropic">
                   <option value="" selected>default</option>
@@ -102,6 +102,11 @@
                 {% if codex_seat_models %}
                 <optgroup label="Codex" title="Codex uses the ChatGPT subscription executor in a watchable, workspace-confined tab. Models are unavailable when the Codex CLI is absent or logged out.">
                   {% for m in codex_seat_models %}<option value="{{ m }}" {% if not codex_cli_available %}disabled{% endif %}>{{ m }}{% if not codex_cli_available %} (unavailable){% endif %}</option>{% endfor %}
+                </optgroup>
+                {% endif %}
+                {% if kimi_seat_models %}
+                <optgroup label="Kimi" title="Kimi uses the Kimi subscription executor in a watchable tab (full access, like a Claude dispatch). Models are unavailable when the Kimi CLI is absent or logged out.">
+                  {% for m in kimi_seat_models %}<option value="{{ m }}" {% if not kimi_cli_available %}disabled{% endif %}>{{ m }}{% if not kimi_cli_available %} (unavailable){% endif %}</option>{% endfor %}
                 </optgroup>
                 {% endif %}
               </select>
