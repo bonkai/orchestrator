@@ -1,8 +1,14 @@
 # KIMI_PLAN.md — Kimi Code CLI as a native Fusion engine (seat + executor)
 
-Status: **K0 PASSED (2026-07-17)** — CLI installed, OAuth-logged-in, schema pinned live
-(§4). Paid `kimi` provider RETIRED. K1–K6 pending. Mirrors `CODEX_PLAN.md`. Judge stays
-on the local `claude` CLI. Operator chose: native CLI engine, full = **seat + executor**.
+Status: **IMPLEMENTED (2026-07-17) — K0–K6 done, full suite 560 green.** Kimi is a native
+kimi-code CLI engine: a Fusion SEAT (watchable tab) + a dispatch EXECUTOR, mirroring
+`CODEX_PLAN.md`. Paid `kimi` provider RETIRED. Judge stays on the local `claude` CLI.
+
+⚠ **NOT YET LIVE-VERIFIED end-to-end.** Verified: the SEAT (a real `kimi -p` call returned
+'pong'; parser/routing/runner-bash-syntax/pinning all green). PENDING the operator: the
+EXECUTOR's live iTerm dispatch (the poller finalizing a real dispatch, the `kimi -r <id> -y`
+resume hand-off, the concurrency cap) needs a **server restart + one real kimi dispatch** to
+confirm — reload=False means the app.py/spawn/template changes aren't deployed until restart.
 
 ## 1. Goal
 
