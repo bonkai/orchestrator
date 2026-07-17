@@ -1678,3 +1678,221 @@ def spawn_codex_dispatch(project_path: str, dispatch_id: int, task: str, model: 
             except FileNotFoundError:
                 pass
         raise
+
+
+# ─── kimi EXECUTOR dispatch (K5) — the $0 kimi twin of spawn_codex_dispatch ───
+# A DISPATCHED kimi task in a watchable iTerm2 tab. Simpler than the codex executor:
+# kimi-code has NO -s sandbox modes (turn-1 `-p` auto-approves tool use — full access is
+# inherent) and NO reasoning effort. PID at the CLAUDE path (PIDS_DIR/<id>.pid) so kill /
+# kill-all / cap / reaper / boot re-attach all locate it unchanged. Sidecars int-keyed by
+# dispatch_id in KIMI_DIR (a bare-int key never collides with a seat's slug-uuid id).
+
+KIMI_DISPATCH_RUN_SH = BIN_DIR / "kimi_dispatch_run.sh"
+
+
+def _build_kimi_dispatch_run_sh(eng: dict) -> str:
+    """Render the kimi EXECUTOR run.sh, INTERPOLATING the flag set + model fallback + binary
+    from the kimi ENGINE SEED (the kimi twin of _build_codex_dispatch_run_sh). Single source
+    of truth; pinned by tests. Turn-1 `-p` auto-approves tool use (kimi-code has NO sandbox
+    modes — full access is inherent), then the runner HANDS THE TAB OFF to an interactive
+    `kimi -r <session_id> -y` (the #246 hybrid, continuable like the claude executor's REPL).
+    NO effort (kimi-code has none)."""
+    template = r'''#!/bin/bash
+# Orchestrator kimi EXECUTOR runner — the $0 Kimi-subscription analogue of run.sh (the
+# dispatched `claude` session), execed inside a WATCHABLE iTerm2 tab.
+#
+# NOT the kimi SEAT runner (kimi_run.sh): a dispatched executor's turn-1 `-p` AUTO-APPROVES
+# tool use (verified 2026-07-17 — kimi-code has NO -s sandbox modes, so full machine access
+# is inherent, the kimi twin of `claude --dangerously-skip-permissions`), so a kimi dispatch
+# is indistinguishable from a claude one.
+#
+# §5 hook-gap convergence: kimi has NO Stop/PreToolUse/PostToolUse hooks, so completion /
+# loop-watchdog / timeline are NOT signalled via ~/.claude/settings.json. This runner streams
+# kimi's stream-json to a sidecar the orchestrator's in-process poller (app._kimi_dispatch_poller)
+# tails — the SAME sidecar+PID-poll the seat uses. Hence ORCHESTRATOR_KIMI_RUN_ID (NOT
+# ORCHESTRATOR_RUN_ID — the env-gated Stop hook stays a no-op), AND the PID below is written to
+# the CLAUDE pid path ($HOME/.orchestrator/pids/<id>.pid) so kill / kill-all / cap / reaper /
+# boot re-attach all locate it unchanged.
+#
+# WHY a FIFO + backgrounded kimi (not a `kimi | tee | python` pipeline): the orchestrator must
+# TERMINATE kimi by the recorded PID. In a pipeline `$$` is the SHELL and kimi is a child —
+# SIGTERM to the shell would orphan kimi. So kimi is backgrounded to capture its REAL pid; its
+# output flows through a FIFO to tee (raw JSONL -> sidecar, parsed by _build_kimi_run) + a
+# python3 pretty-printer (readable lines, cosmetic). `wait`ing the consumer flushes the sidecar
+# BEFORE .done. MOONSHOT_API_KEY/OPENAI_API_KEY scrubbed -> $0 SUBSCRIPTION, never a billed API.
+#
+# The kimi flag set + model fallback + binary are INTERPOLATED from the kimi ENGINE SEED at
+# write time (single source of truth, pinned by tests).
+if [ -z "${ORCHESTRATOR_KIMI_RUN_ID:-}" ]; then
+    echo "Orchestrator kimi executor: ORCHESTRATOR_KIMI_RUN_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_KIMI_RUN_ID"
+KIMI_DIR="$HOME/.orchestrator/kimi"
+PID_FILE="$HOME/.orchestrator/pids/${ID}.pid"
+PROMPT_FILE="$KIMI_DIR/${ID}.prompt"
+OUT_FILE="$KIMI_DIR/${ID}.jsonl"
+DONE_FILE="$KIMI_DIR/${ID}.done"
+FIFO="$KIMI_DIR/${ID}.fifo"
+MODEL=$(cat "$KIMI_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
+if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Orchestrator kimi executor: missing prompt file $PROMPT_FILE" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+PROMPT=$(cat "$PROMPT_FILE")
+# $0 subscription path only — never a billed API key.
+unset MOONSHOT_API_KEY
+unset OPENAI_API_KEY
+echo "---- orchestrator kimi EXECUTOR: dispatch $ID ($MODEL, full access like a claude dispatch) ----"
+echo "(watchable; no Stop hook — orchestrator finalizes from the sidecar)"
+echo
+rm -f "$FIFO"
+mkfifo "$FIFO" || { echo "Orchestrator kimi executor: mkfifo failed" >&2; echo 2 > "$DONE_FILE"; exit 2; }
+# Consumer: raw JSONL -> sidecar (tee) + readable lines -> tab (python). Keyed off kimi's ROLE
+# schema (assistant/tool/meta). Cosmetic only — tee wrote raw JSONL to the sidecar.
+tee "$OUT_FILE" < "$FIFO" | python3 -u -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        print(line)
+        continue
+    role = obj.get('role', '')
+    if role == 'assistant':
+        txt = (obj.get('content') or '').strip()
+        if txt:
+            print('[assistant]', txt)
+        for tc in (obj.get('tool_calls') or []):
+            fn = (tc.get('function') or {}) if isinstance(tc, dict) else {}
+            print('[tool-call]', fn.get('name', '?'), (fn.get('arguments') or '')[:160])
+    elif role == 'tool':
+        print('[tool]', (obj.get('content') or '')[:200].replace(chr(10), ' '))
+    elif role == 'meta':
+        if obj.get('type') == 'session.resume_hint':
+            print('[session]', (obj.get('session_id') or '')[:16])
+    elif role:
+        print('[kimi:%s]' % role)
+" &
+CONSUMER_PID=$!
+# kimi -> FIFO, backgrounded so $! is kimi's REAL pid (the kill target). < /dev/null keeps
+# kimi's -p mode from blocking on a non-TTY stdin.
+"@@KIMI_BIN@@" @@PROMPT_FLAG@@ "$PROMPT" @@OUTPUT_FORMAT_FLAG@@ @@OUTPUT_FORMAT@@ -m "$MODEL" < /dev/null > "$FIFO" &
+KIMI_PID=$!
+echo "$KIMI_PID" > "$PID_FILE"
+wait "$KIMI_PID"
+code=$?
+wait "$CONSUMER_PID" 2>/dev/null
+rm -f "$FIFO"
+# Capture turn-1's session_id from the sidecar BEFORE writing .done (the poller deletes the
+# sidecar at finalize). kimi's resume handle is on the `session.resume_hint` meta line (NOT
+# codex's thread.started). All-double-quoted Python so the single-quote wrapper needs no escaping.
+SESSION_ID="$(python3 -c 'import json, sys
+sid = ""
+try:
+    for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get("role") == "meta" and o.get("type") == "session.resume_hint" and o.get("session_id"):
+            sid = o["session_id"]
+except Exception:
+    pass
+sys.stdout.write(sid)
+' "$OUT_FILE" 2>/dev/null)"
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- kimi executor turn 1 finished (exit $code) — orchestrator finalized from the sidecar ----"
+# HYBRID auto-resume — mirror the claude/codex executor's stay-open, continuable tab (#246).
+# Hand THIS SAME tab to an INTERACTIVE kimi on the SAME session so the user can read the answer,
+# keep going, and close the tab manually. The dispatch is already 'completed'; this phase is
+# UNTRACKED (no concurrency slot, not cap-killable, follow-ups NOT recorded) — a claude
+# dispatch's post-Stop-hook state. NO `< /dev/null` (interactive needs the real TTY). `exec`
+# replaces this shell so the tab IS the kimi session. `-y` = never-prompt (claude parity);
+# if `-r <id> -y` ever errors, the fallback below keeps the tab open (no data loss).
+if [ -n "$SESSION_ID" ]; then
+    echo
+    echo "---- resuming interactively on session $SESSION_ID — continue below; close the tab when done ----"
+    echo "(follow-up turns here are NOT recorded by the orchestrator)"
+    echo
+    exec "@@KIMI_BIN@@" @@RESUME_FLAG@@ "$SESSION_ID" @@RESUME_APPROVE@@
+fi
+# Fallback: no session id (kimi errored before the resume_hint, or a parse miss) — keep the tab
+# OPEN at an interactive shell so the user can read the output + resume manually.
+echo
+echo "---- no session id captured; leaving this tab open (resume manually with: kimi @@RESUME_FLAG@@ --last) ----"
+exec "${SHELL:-/bin/zsh}" -i
+'''
+    return (template
+            .replace("@@KIMI_BIN@@", _kimi_runner_bin())
+            .replace("@@MODEL_DEFAULT@@", eng["model"])
+            .replace("@@PROMPT_FLAG@@", eng["prompt_flag"])
+            .replace("@@OUTPUT_FORMAT_FLAG@@", eng["output_format_flag"])
+            .replace("@@OUTPUT_FORMAT@@", eng["output_format"])
+            .replace("@@RESUME_FLAG@@", eng["resume_flag"])
+            .replace("@@RESUME_APPROVE@@", eng["resume_approve_flag"]))
+
+
+# Built at import from the SEED (genuine seed->bash interpolation); a module constant like
+# the codex executor runner so the drift test can pin it.
+KIMI_DISPATCH_RUN_SH_CONTENT = _build_kimi_dispatch_run_sh(config.KIMI_ENGINE_SEED)
+
+
+def ensure_kimi_dispatch_runner():
+    """One-time (lazy): create the kimi sidecar dir + write kimi_dispatch_run.sh. Mirrors
+    ensure_codex_dispatch_runner; called before spawning a kimi dispatch tab."""
+    KIMI_DIR.mkdir(parents=True, exist_ok=True)
+    PIDS_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    KIMI_DISPATCH_RUN_SH.write_text(KIMI_DISPATCH_RUN_SH_CONTENT)
+    KIMI_DISPATCH_RUN_SH.chmod(0o755)
+
+
+def is_kimi_dispatch(dispatch_id: int) -> bool:
+    """True if `dispatch_id` is a kimi EXECUTOR — detected by its int-keyed kimi prompt
+    sidecar (mirror of is_codex_dispatch; NO dispatches-table schema change). The executor
+    writes a bare-int KIMI_DIR key; a seat's id is a slug-uuid, so there is no collision."""
+    return (KIMI_DIR / f"{dispatch_id}.prompt").exists()
+
+
+def spawn_kimi_dispatch(project_path: str, dispatch_id: int, task: str, model: str = "") -> None:
+    """Open a new iTerm2 tab and start the kimi EXECUTOR — the $0 kimi twin of spawn_iterm2 /
+    spawn_codex_dispatch. Writes task + model to int-keyed KIMI_DIR sidecars, tags the tab
+    `user.orch_id` + titles it `orch #<id>`, exports ORCHESTRATOR_KIMI_RUN_ID, and execs
+    kimi_dispatch_run.sh (which writes kimi's REAL pid to PIDS_DIR/<id>.pid). Raises on spawn
+    failure (caller marks a VISIBLE failed row — NEVER a silent claude fallback). kimi has no
+    effort, so — unlike spawn_codex_dispatch — there is no effort sidecar."""
+    if not iterm2_installed():
+        raise RuntimeError("iTerm2 not installed. Install with: brew install --cask iterm2")
+    ensure_kimi_dispatch_runner()
+    prompt_file = KIMI_DIR / f"{dispatch_id}.prompt"
+    model_file = KIMI_DIR / f"{dispatch_id}.model"
+    prompt_file.write_text(task.strip(), encoding="utf-8")
+    model_file.write_text((model or config.KIMI_ENGINE_SEED["model"]).strip())
+
+    safe_proj = project_path.replace('"', '\\"')
+    title = f"orch #{dispatch_id}"
+    safe_title = title.replace('"', '\\"')
+    cmd = (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_KIMI_RUN_ID={dispatch_id} && '
+        f'{_setuservar_printf("orch_id", str(dispatch_id))}'
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/kimi_dispatch_run.sh"'
+    )
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+    script = _spawn_tab_script(safe_title, apple_cmd)
+    try:
+        _spawn_osascript(script)
+    except Exception:
+        for f in (prompt_file, model_file):
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
+        raise
