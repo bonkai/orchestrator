@@ -789,6 +789,15 @@ def cleanup_dispatch_files(dispatch_id: int):
         CODEX_DIR / f"{dispatch_id}.jsonl",
         CODEX_DIR / f"{dispatch_id}.done",
         CODEX_DIR / f"{dispatch_id}.fifo",
+        # K5: kimi EXECUTOR sidecars (int-keyed by dispatch_id in KIMI_DIR; no .effort —
+        # kimi has none). Same PID path above; cleared here after the poller copied the
+        # .jsonl transcript to TRANSCRIPTS_DIR (a no-op for a claude/codex dispatch). Also
+        # clears the is_kimi_dispatch marker (the .prompt), so a finalized row stops matching.
+        KIMI_DIR / f"{dispatch_id}.prompt",
+        KIMI_DIR / f"{dispatch_id}.model",
+        KIMI_DIR / f"{dispatch_id}.jsonl",
+        KIMI_DIR / f"{dispatch_id}.done",
+        KIMI_DIR / f"{dispatch_id}.fifo",
     ]:
         try:
             p.unlink()

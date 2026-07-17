@@ -1479,7 +1479,8 @@ def _parse_fusion_panel(fusion_seats: str, fusion_panel: str, active: dict,
     return panel
 
 
-def _derive_executor(model: str, codex_models: set | None = None) -> tuple[str, str, str]:
+def _derive_executor(model: str, codex_models: set | None = None,
+                     kimi_models: set | None = None) -> tuple[str, str, str]:
     """Return (engine, claude_model, executor_model) derived from one picker value.
 
     TOTAL over the model-string space — every value lands in exactly ONE bucket, so no
@@ -1507,15 +1508,20 @@ def _derive_executor(model: str, codex_models: set | None = None) -> tuple[str, 
     """
     model = (model or "").strip()
     codex_models = _codex_seat_models() if codex_models is None else codex_models
+    kimi_models = _kimi_seat_models() if kimi_models is None else kimi_models
     if model in codex_models:
         return "codex", "", model
+    if model in kimi_models:                 # K5: a kimi alias routes to the kimi executor
+        return "kimi", "", model
     if model == "" or model in CLAUDE_EXECUTOR_MODELS:
         return "claude", model, ""
     return "invalid", "", model
 
 
 def _validate_executor_engine(engine: str, model: str, codex_models: set,
-                              codex_available: bool = True) -> tuple[str, str]:
+                              codex_available: bool = True,
+                              kimi_models: set | None = None,
+                              kimi_available: bool = True) -> tuple[str, str]:
     """Validate the dispatch EXECUTOR engine + (for codex) its model — the C5.1
     server gate behind the UI's engine picker. The disabled codex <option> (C5.2)
     is cosmetic; a crafted POST is rejected HERE. Returns (engine, model).
