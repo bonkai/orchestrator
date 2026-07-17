@@ -1184,6 +1184,199 @@ def finish_codex_tab(codex_id: str, label: str = "codex", success: bool = False)
     cleanup_codex_files(codex_id)
 
 
+# ─── kimi SEAT/judge tab (K5) — the $0 kimi-code twin of the codex seat runner ──
+# A WATCHABLE kimi call in an iTerm2 tab. Simpler than the codex seat runner: kimi-code
+# has NO -s sandbox modes and NO reasoning effort, and its stream-json is ROLE-based
+# (assistant/tool/meta) not codex's type events. Sets ORCHESTRATOR_KIMI_ID (never
+# ORCHESTRATOR_RUN_ID → Stop hook stays a no-op) + the `user.orch_kimi` tab tag. Flags +
+# schema version-pinned to kimi-code 0.27.0 (KIMI_PLAN.md §4); re-verify on `kimi upgrade`.
+
+KIMI_DIR = DATA_DIR / "kimi"
+KIMI_RUN_SH = BIN_DIR / "kimi_run.sh"
+
+
+def _kimi_runner_bin() -> str:
+    """The kimi binary the tab runner calls — the resolved abs path
+    (config._resolve_kimi_bin, so the runner works even if ~/.kimi-code/bin isn't on the
+    tab's PATH), else 'kimi'. Read at import to interpolate @@KIMI_BIN@@ (like the seed
+    model), so no PATH assumption is baked into the runner."""
+    try:
+        return config._resolve_kimi_bin() or "kimi"
+    except Exception:
+        return "kimi"
+
+
+_KIMI_RUN_SH_TEMPLATE = """#!/bin/bash
+# Orchestrator kimi-call runner — execed inside an iTerm2 tab so a kimi seat/judge call
+# is WATCHABLE live, the kimi twin of codex_run.sh. kimi runs with `-p --output-format
+# stream-json` so its events stream as JSONL; `tee` mirrors the raw stream to a sidecar
+# JSONL the orchestrator parses (claude_runner._build_kimi_run). A python3 pretty-printer
+# AFTER tee renders readable lines keyed off kimi's ROLE schema (assistant/tool/meta — NOT
+# codex's type events). PIPESTATUS[0] keeps kimi's exit code (kimi is first in the pipe).
+#
+# kimi-code specifics (v0.27.0 — re-verify on `kimi upgrade`):
+#   - `-p PROMPT` IS the non-interactive one-shot flag (NOT --print); it auto-approves
+#     tools and CANNOT combine with -y/--auto.
+#   - `--output-format stream-json` (JSONL, role-based).
+#   - `-m MODEL` passed EXPLICITLY: kimi's JSON omits the model, so the parser falls back
+#     to it (dispatch #3 lesson).
+#   - NO -s sandbox modes, NO effort flag (kimi-code has neither — simpler than codex).
+#   - MUST run `< /dev/null`: non-TTY hygiene (like codex exec / claude -p).
+#
+# ⚠ @@MODEL_DEFAULT@@ + @@KIMI_BIN@@ are INTERPOLATED from config at import; the FLAG set
+#   duplicates the seed in bash and stays PINNED by tests (TestSpawnKimiRunShPinnedToSeed),
+#   so a seed flag change that forgets this runner fails LOUDLY. Edit the SEED first.
+#
+# Completion signalling mirrors codex_run.sh: <id>.done = kimi's exit code (after tee
+# flushes); <id>.pid = this shell's PID (lets the poller detect a closed/killed tab).
+# MOONSHOT_API_KEY/OPENAI_API_KEY scrubbed → $0 SUBSCRIPTION, never a billed API.
+if [ -z "${ORCHESTRATOR_KIMI_ID:-}" ]; then
+    echo "Orchestrator kimi: ORCHESTRATOR_KIMI_ID not set" >&2
+    exit 2
+fi
+ID="$ORCHESTRATOR_KIMI_ID"
+KIMI_DIR="$HOME/.orchestrator/kimi"
+PROMPT_FILE="$KIMI_DIR/${ID}.prompt"
+OUT_FILE="$KIMI_DIR/${ID}.jsonl"
+DONE_FILE="$KIMI_DIR/${ID}.done"
+PID_FILE="$KIMI_DIR/${ID}.pid"
+MODEL=$(cat "$KIMI_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
+echo $$ > "$PID_FILE"
+if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Orchestrator kimi: missing prompt file $PROMPT_FILE" >&2
+    echo 2 > "$DONE_FILE"
+    exit 2
+fi
+PROMPT=$(cat "$PROMPT_FILE")
+# $0 subscription path only — never a billed API key.
+unset MOONSHOT_API_KEY
+unset OPENAI_API_KEY
+echo "---- orchestrator kimi call: $ID ($MODEL) ----"
+echo "(watching live; the structured result is captured for the orchestrator)"
+echo
+"@@KIMI_BIN@@" -p "$PROMPT" \
+    --output-format stream-json \
+    -m "$MODEL" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        print(line)
+        continue
+    role = obj.get('role', '')
+    if role == 'assistant':
+        txt = (obj.get('content') or '').strip()
+        if txt:
+            print('[assistant]', txt)
+    elif role == 'tool':
+        print('[tool]', (obj.get('content') or '')[:200])
+    elif role == 'meta':
+        if obj.get('type') == 'session.resume_hint':
+            print('[session]', (obj.get('session_id') or '')[:16])
+    elif role:
+        print('[kimi:%s]' % role)
+"
+code=${PIPESTATUS[0]}
+echo "$code" > "$DONE_FILE"
+echo
+echo "---- kimi call finished (exit $code) ----"
+"""
+
+# The SEAT runner with the seed's model + resolved binary interpolated at import (the
+# same pattern as CODEX_RUN_SH_CONTENT), so the bash fallbacks can never drift from the
+# config SEED (pinned by tests all the same).
+KIMI_RUN_SH_CONTENT = (_KIMI_RUN_SH_TEMPLATE
+                       .replace("@@MODEL_DEFAULT@@", config.KIMI_ENGINE_SEED["model"])
+                       .replace("@@KIMI_BIN@@", _kimi_runner_bin()))
+
+
+def ensure_kimi_runner():
+    """One-time (lazy): create the kimi sidecar dir and write kimi_run.sh. Mirrors
+    ensure_codex_runner; called on the first kimi call, so install.sh needs no change."""
+    KIMI_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    KIMI_RUN_SH.write_text(KIMI_RUN_SH_CONTENT)
+    KIMI_RUN_SH.chmod(0o755)
+
+
+def _kimi_tab_title(kimi_id: str, label: str) -> str:
+    """Unique, readable iTerm2 tab title for a kimi call; the random suffix lets us
+    close exactly this tab later."""
+    suffix = kimi_id.rsplit("-", 1)[-1]
+    return f"orch kimi: {label} {suffix}"
+
+
+def _kimi_tab_cmd(kimi_id: str, cwd: str, title: str) -> str:
+    """Shell command the kimi tab runs. Sets ORCHESTRATOR_KIMI_ID (NOT ORCHESTRATOR_RUN_ID
+    — so the Stop hook stays a no-op), titles the tab, then execs kimi_run.sh. Pure /
+    string-only so it's unit-testable."""
+    safe_proj = cwd.replace('"', '\\"')
+    safe_title = title.replace('"', '\\"')
+    return (
+        f'cd "{safe_proj}" && '
+        f'export ORCHESTRATOR_KIMI_ID={kimi_id} && '
+        f'{_setuservar_printf("orch_kimi", kimi_id)}'
+        f'printf "\\033]0;{safe_title}\\007" && '
+        f'exec "$HOME/.orchestrator/bin/kimi_run.sh"'
+    )
+
+
+def cleanup_kimi_files(kimi_id: str):
+    """Remove all sidecar files for a kimi call. The tab (and its on-screen output) is
+    unaffected — tee already wrote to the terminal. (No .effort file — kimi has none.)"""
+    for suf in ("prompt", "jsonl", "done", "pid", "model"):
+        try:
+            (KIMI_DIR / f"{kimi_id}.{suf}").unlink()
+        except FileNotFoundError:
+            pass
+
+
+def spawn_kimi_tab(kimi_id: str, prompt: str, cwd: str,
+                   model: str = config.KIMI_ENGINE_SEED["model"],
+                   label: str = "kimi") -> None:
+    """Open a new iTerm2 tab and run a kimi call in it via kimi_run.sh. Writes the prompt
+    + model to KIMI_DIR sidecars (avoids shell-quoting the prompt into AppleScript), then
+    tells iTerm2 to open a tab and exec the runner. The caller polls <kimi_id>.done. Raises
+    on spawn failure (so the caller can fall back to headless). `model` is the kimi alias,
+    defaulting to the seed (K3 single source of truth); callers pass it EXPLICITLY. kimi
+    has no effort, so — unlike spawn_codex_tab — there is no effort param/sidecar."""
+    if not iterm2_installed():
+        raise RuntimeError("iTerm2 not installed")
+    ensure_kimi_runner()
+    (KIMI_DIR / f"{kimi_id}.prompt").write_text(prompt, encoding="utf-8")
+    (KIMI_DIR / f"{kimi_id}.model").write_text(
+        (model or config.KIMI_ENGINE_SEED["model"]).strip())
+
+    title = _kimi_tab_title(kimi_id, label)
+    safe_title = title.replace('"', '\\"')
+    cmd = _kimi_tab_cmd(kimi_id, cwd, title)
+    apple_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+
+    script = _spawn_tab_script(safe_title, apple_cmd)
+    try:
+        _spawn_osascript(script)
+    except Exception:
+        cleanup_kimi_files(kimi_id)
+        raise
+
+
+def finish_kimi_tab(kimi_id: str, label: str = "kimi", success: bool = False):
+    """Post-call teardown for a kimi tab. Closes the tab when the call succeeded AND
+    auto-close is enabled (failed calls stay open for inspection); always removes the
+    sidecar files. Never raises. Mirror of finish_codex_tab."""
+    if success and brain_auto_close_enabled():
+        try:
+            if not close_iterm2_session_by_var("orch_kimi", kimi_id):
+                close_iterm2_tab_by_title(_kimi_tab_title(kimi_id, label))
+        except Exception:
+            pass
+    cleanup_kimi_files(kimi_id)
+
+
 # ─── codex EXECUTOR dispatch (C6) — the $0 codex twin of spawn_iterm2/run.sh ──
 # A DISPATCHED codex task in a watchable iTerm2 tab — the codex analogue of the
 # `claude` executor (spawn_iterm2 → run.sh). It is NOT the SEAT runner above:
