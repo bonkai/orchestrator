@@ -48,7 +48,8 @@ if [ ! -f "$CONFIG_DEST" ]; then
       "gemini":   { "script": "providers/gemini.py",    "key_env": "GEMINI_API_KEY",    "api_key": "", "model": "gemini-2.5-flash", "price_in": 0.30, "price_out": 1.50 },
       "minimax":  { "script": "providers/minimax.py",   "key_env": "MINIMAX_API_KEY",   "api_key": "", "model": "MiniMax-Text-01",  "price_in": 0.30, "price_out": 1.20 },
       "glm":      { "script": "providers/glm.py",       "key_env": "ZAI_API_KEY",       "api_key": "", "model": "glm-4.6",          "price_in": 1.40, "price_out": 4.40 },
-      "qwen":     { "script": "providers/qwen.py",      "key_env": "DASHSCOPE_API_KEY", "api_key": "", "model": "qwen-max",         "price_in": 1.25, "price_out": 3.75 }
+      "qwen":     { "script": "providers/qwen.py",      "key_env": "DASHSCOPE_API_KEY", "api_key": "", "model": "qwen-max",         "price_in": 1.25, "price_out": 3.75 },
+      "kimi":     { "script": "providers/kimi.py",      "key_env": "MOONSHOT_API_KEY",  "api_key": "", "model": "kimi-k3",          "price_in": 3.00, "price_out": 15.00 }
     },
     "presets": {
       "budget":   ["deepseek", "minimax", "gemini"],
@@ -72,6 +73,7 @@ echo "    gemini   → GEMINI_API_KEY      https://aistudio.google.com/apikey"
 echo "    minimax  → MINIMAX_API_KEY     https://www.minimax.io/platform"
 echo "    glm      → ZAI_API_KEY         https://z.ai"
 echo "    qwen     → DASHSCOPE_API_KEY   https://modelstudio.console.alibabacloud.com"
+echo "    kimi     → MOONSHOT_API_KEY    https://platform.moonshot.ai/console/api-keys"
 # <<< FUSION_CONFIG_BLOCK
 
 # 2. Hook payload --------------------------------------------------------
