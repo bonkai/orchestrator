@@ -379,8 +379,12 @@
         // Kimi seats: kimi-code's model aliases (kimi-code/k3, …). SIMPLER than codex —
         // kimi-code has NO reasoning effort, so there is no KIMI_EFFORTS. KIMI_AVAILABLE
         // gates the add button (greyed when the kimi CLI is absent / logged out).
-        var KIMI_MODELS = {{ kimi_seat_models | tojson }};
-        var KIMI_AVAILABLE = {{ kimi_cli_available | tojson }};
+        // `or []`/`or false`: the template is auto-pushed instantly but the server restart is
+        // manual (reload=False), so during that window a STALE server (old _view_ctx, no kimi
+        // keys) re-reads THIS new template — an unguarded `{{ kimi_seat_models | tojson }}`
+        // would 500 on Undefined. Degrading to []/false renders a kimi-less page until restart.
+        var KIMI_MODELS = {{ (kimi_seat_models or []) | tojson }};
+        var KIMI_AVAILABLE = {{ (kimi_cli_available or false) | tojson }};
         // F8.4: per-seat lenses (decorrelate the panel). Empty list ⇒ no lens UI.
         var FUSION_LENSES = {{ fusion_lenses | tojson }};
         var LENS_NAMES = (FUSION_LENSES || []).map(function (l) { return l.name; });
