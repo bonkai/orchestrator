@@ -114,6 +114,12 @@ def _kimi_seat_models() -> set[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    # U1: arm the usage collector for this server process (it is deliberately
+    # inert in library/test contexts) and seed one limit-state row per engine.
+    # The engine list comes from the config seeds (drift-guard convention —
+    # no engine literals here).
+    db.enable_usage_collection()
+    db.ensure_engine_limit_rows(config.usage_engines())
     spawn.ensure_runner()
     # C6: inject the codex poller factory BEFORE resume so boot re-attach can recreate
     # the in-band finalizer for codex dispatches that were running at restart.
@@ -1265,6 +1271,12 @@ async def _codex_dispatch_poller(dispatch_id: int, tail_only: bool = False):
                     exit_code = 1
                 outcome = "completed" if exit_code == 0 else "failed"
                 exit_reason = "codex" if exit_code == 0 else f"codex exit {exit_code}"
+                # U1: meter the executor call (tokens re-read from the sidecar's
+                # turn.completed on success; the degraded exit-code error as-is —
+                # enriching it from stderr is U2's detail fix).
+                claude_runner.record_codex_executor_usage(
+                    dispatch_id, ok=(exit_code == 0), raw_error=exit_reason,
+                    jsonl_path=jsonl if jsonl.is_file() else None)
                 await _finalize_dispatch(
                     dispatch_id, session_id=None,
                     transcript_src=str(jsonl) if jsonl.is_file() else None,
@@ -1274,6 +1286,9 @@ async def _codex_dispatch_poller(dispatch_id: int, tail_only: bool = False):
             if pid is None:
                 pid = spawn.read_pid_now(dispatch_id)
                 if pid is None and (time.time() - started_at) > _CODEX_POLLER_STARTUP_GRACE_S:
+                    claude_runner.record_codex_executor_usage(
+                        dispatch_id, ok=False,
+                        raw_error="codex tab failed to start (no PID)")
                     await _finalize_dispatch(
                         dispatch_id, session_id=None, transcript_src=None,
                         exit_reason="codex tab failed to start (no PID)", outcome="failed")
@@ -1281,6 +1296,9 @@ async def _codex_dispatch_poller(dispatch_id: int, tail_only: bool = False):
             elif not spawn.pid_alive(pid):
                 if done.is_file():
                     continue  # race: .done just landed — handle on the next loop top
+                claude_runner.record_codex_executor_usage(
+                    dispatch_id, ok=False,
+                    raw_error="codex tab closed before completion")
                 await _finalize_dispatch(
                     dispatch_id, session_id=None,
                     transcript_src=str(jsonl) if jsonl.is_file() else None,
