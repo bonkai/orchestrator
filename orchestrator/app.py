@@ -1389,6 +1389,10 @@ async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
                     exit_code = 1
                 outcome = "completed" if exit_code == 0 else "failed"
                 exit_reason = "kimi" if exit_code == 0 else f"kimi exit {exit_code}"
+                # U1: meter the executor call (calls-only — kimi reports no
+                # usage; the degraded exit-code error as-is until U2's fix).
+                claude_runner.record_kimi_executor_usage(
+                    dispatch_id, ok=(exit_code == 0), raw_error=exit_reason)
                 await _finalize_dispatch(
                     dispatch_id, session_id=None,
                     transcript_src=str(jsonl) if jsonl.is_file() else None,
@@ -1397,6 +1401,9 @@ async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
             if pid is None:
                 pid = spawn.read_pid_now(dispatch_id)
                 if pid is None and (time.time() - started_at) > _CODEX_POLLER_STARTUP_GRACE_S:
+                    claude_runner.record_kimi_executor_usage(
+                        dispatch_id, ok=False,
+                        raw_error="kimi tab failed to start (no PID)")
                     await _finalize_dispatch(
                         dispatch_id, session_id=None, transcript_src=None,
                         exit_reason="kimi tab failed to start (no PID)", outcome="failed")
@@ -1404,6 +1411,9 @@ async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
             elif not spawn.pid_alive(pid):
                 if done.is_file():
                     continue
+                claude_runner.record_kimi_executor_usage(
+                    dispatch_id, ok=False,
+                    raw_error="kimi tab closed before completion")
                 await _finalize_dispatch(
                     dispatch_id, session_id=None,
                     transcript_src=str(jsonl) if jsonl.is_file() else None,
