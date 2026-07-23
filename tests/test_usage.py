@@ -402,8 +402,8 @@ class TestKimiLogParse(unittest.TestCase):
         hits = usage.parse_kimi_log_403s(str(log), config.KIMI_LIMIT_SIGNAL)
         self.assertEqual(len(hits), 2)          # the orphan line was skipped
         # 2026-07-20T21:49:11Z / 2026-07-23T14:02:07Z as UTC epochs
-        self.assertEqual(hits[0][0], 1784324951)
-        self.assertEqual(hits[1][0], 1784556127)
+        self.assertEqual(hits[0][0], 1784584151)
+        self.assertEqual(hits[1][0], 1784815327)
         self.assertEqual(hits[0][1], "2026-07-20T21:49:11.832Z")
         self.assertIn("usage limit for this billing cycle", hits[0][2])
 
@@ -472,7 +472,7 @@ class TestBackfill(_TempDb):
         self.log = self.tmp / "kimi-code.log"
         self.log.write_text(_kimi_log_text(), encoding="utf-8")
         # 403 epochs from the fixture (fall between the panel events and 'now')
-        self.t403_a, self.t403_b = 1784324951, 1784556127
+        self.t403_a, self.t403_b = 1784584151, 1784815327
 
     def _run(self, now_ts=1800000000):
         return usage.backfill(kimi_log_path=str(self.log), now_ts=now_ts)
@@ -551,8 +551,8 @@ class TestBackfill(_TempDb):
                  "subscription": False, "lens": "", "preview": "…"}]}))
         s = self._run()
         self.assertEqual(s["cutoff"], 1100)
-        self.assertEqual(s["pb_seats_inserted"], 8)       # event A + B only
-        self.assertGreaterEqual(s["pb_after_cutoff"], 1)  # the 1150 event skipped
+        self.assertEqual(s["pb_seats_inserted"], 7)       # event A only (ts 1000)
+        self.assertEqual(s["pb_after_cutoff"], 2)         # B (1200) + the 1150 event
         self.assertEqual(s["kimi_403s_inserted"], 0)      # 403s are newer than cutoff
         engines = [r["engine"] for r in self.usage_rows()]
         self.assertEqual(engines.count("glm"), 3)         # 1 live + 2 backfilled
