@@ -183,6 +183,117 @@ def _envelope_from_stream_jsonl(path) -> Optional[dict]:
     return result_event
 
 
+# ─── U1 usage-collector taps (USAGE_PLAN.md) ─────────────────────────────────
+# Layer-A metering: every CLI call already funnels through the run_*_json
+# entrypoints (their headless fallbacks return THROUGH them), every external
+# provider seat through _run_panel / _price_tab_answers, and every codex/kimi
+# EXECUTOR through app.py's in-band pollers (which call the record_*_executor_
+# usage helpers below). The taps only OBSERVE — db.record_usage is fail-soft
+# and a no-op until the server/backfill arms it (db.enable_usage_collection),
+# so library callers and the mock-heavy test suites stay side-effect free.
+# NOT tapped (deliberately, U1 scope): the claude EXECUTOR — it is a spawned
+# tab finalized by the Stop hook, not one of the plan's named choke points;
+# its consumption stays visible via dispatches.cost_usd (§3).
+
+def _usage_role(label: str) -> str:
+    """Map a call's tab label — the existing role carrier — to its usage role.
+    Fusion seats are labeled 'fusion-seat:<name>', the judge family
+    'fusion-judge'/'fusion-verify'/'fusion-rejudge'; everything else
+    (rewriter, summarizer, onboarding, refine, plain brain calls) is 'brain'.
+    'executor' never originates here — executors don't run through these
+    funnels (the pollers record them)."""
+    if label.startswith("fusion-seat:"):
+        return "seat"
+    if label in ("fusion-judge", "fusion-verify", "fusion-rejudge"):
+        return "judge"
+    return "brain"
+
+
+def _record_usage_run(engine: str, model: str, label: str, run: ClaudeRun) -> ClaudeRun:
+    """Record ONE finished CLI call (ok or failed) and return `run` unchanged.
+    Tokens come from the envelope's usage when present — claude and codex both
+    key input_tokens/output_tokens; kimi's stream has no usage field (§3), so
+    its tokens stay NULL (calls-only metering). dispatch_id is NULL: these
+    funnels serve brain/judge/seat calls, which aren't tied to a dispatch row
+    at call time. Never raises (db.record_usage is fail-soft)."""
+    usage = (run.raw or {}).get("usage") if isinstance(run.raw, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    pt = usage.get("input_tokens")
+    ct = usage.get("output_tokens")
+    db.record_usage(
+        engine,
+        model=(run.model or model or None),
+        role=_usage_role(label),
+        ok=run.ok,
+        prompt_tokens=pt if isinstance(pt, int) else None,
+        completion_tokens=ct if isinstance(ct, int) else None,
+        raw_error=(run.error or None) if not run.ok else None,
+    )
+    return run
+
+
+def _record_seat_usage(answer: dict) -> dict:
+    """Record ONE external-provider panel seat answer (in-process or fusion-tab
+    path) and return it unchanged. The engine is the registry BASE name — F12
+    duplicate seats carry suffixed keys ('glm#2'), which must not become their
+    own engines. CLI seats never pass through here (their run_*_json funnel
+    already recorded them). Never raises."""
+    if not isinstance(answer, dict):
+        return answer
+    base = str(answer.get("name") or "").split("#")[0].strip()
+    if not base:
+        return answer
+    ok = bool(answer.get("ok"))
+    pt = answer.get("prompt_tokens")
+    ct = answer.get("completion_tokens")
+    db.record_usage(
+        base,
+        model=answer.get("model") or None,
+        role="seat",
+        ok=ok,
+        prompt_tokens=pt if (ok and isinstance(pt, int)) else None,
+        completion_tokens=ct if (ok and isinstance(ct, int)) else None,
+        raw_error=None if ok else (answer.get("error") or "seat failed"),
+    )
+    return answer
+
+
+def record_codex_executor_usage(dispatch_id: int, ok: bool,
+                                raw_error: str | None = None,
+                                jsonl_path=None):
+    """U1 tap for the codex EXECUTOR in-band poller (app.py) — called once at
+    finalize. Token counts are re-read from the sidecar's turn.completed usage
+    when the run succeeded. raw_error is recorded AS-IS — today that is the
+    degraded 'codex exit N' exit-reason string; enriching it from sidecar
+    stderr is U2's error-detail fix, not U1's. The executor MODEL is not
+    persisted anywhere the poller can reach, so model stays NULL. Never raises."""
+    pt = ct = None
+    if ok and jsonl_path is not None:
+        envelope = _envelope_from_codex_stream(jsonl_path)
+        usage = (envelope or {}).get("usage")
+        if isinstance(usage, dict):
+            pt = usage.get("input_tokens")
+            ct = usage.get("output_tokens")
+    db.record_usage(
+        "codex", role="executor", dispatch_id=dispatch_id, ok=ok,
+        prompt_tokens=pt if isinstance(pt, int) else None,
+        completion_tokens=ct if isinstance(ct, int) else None,
+        raw_error=None if ok else (raw_error or "codex executor failed"),
+    )
+
+
+def record_kimi_executor_usage(dispatch_id: int, ok: bool,
+                               raw_error: str | None = None):
+    """U1 tap for the kimi EXECUTOR in-band poller — the kimi twin of
+    record_codex_executor_usage. kimi's stream carries NO usage field (§3),
+    so this is calls-only metering (tokens NULL). raw_error stays the degraded
+    'kimi exit N' string until U2's detail fix. Never raises."""
+    db.record_usage(
+        "kimi", role="executor", dispatch_id=dispatch_id, ok=ok,
+        raw_error=None if ok else (raw_error or "kimi executor failed"),
+    )
+
+
 def run_claude_headless(
     prompt: str,
     cwd: str,
@@ -271,8 +382,10 @@ def run_claude_json(
     if not spawn.iterm2_installed():
         print("[claude_runner] iTerm2 not installed — running brain call "
               f"headless ({label}). Install iTerm2 to watch brain calls live.")
-        return run_claude_headless(prompt, cwd, model, effort, max_turns,
-                                   timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("claude", model, label,
+                                 run_claude_headless(prompt, cwd, model, effort,
+                                                     max_turns,
+                                                     timeout_s or DEFAULT_TIMEOUT_S))
 
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "brain"
     brain_id = f"{slug}-{uuid.uuid4().hex[:8]}"
@@ -282,8 +395,10 @@ def run_claude_json(
     except Exception as e:
         print(f"[claude_runner] brain tab spawn failed ({e}); headless fallback")
         spawn.cleanup_brain_files(brain_id)
-        return run_claude_headless(prompt, cwd, model, effort, max_turns,
-                                   timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("claude", model, label,
+                                 run_claude_headless(prompt, cwd, model, effort,
+                                                     max_turns,
+                                                     timeout_s or DEFAULT_TIMEOUT_S))
 
     out_file = spawn.BRAIN_DIR / f"{brain_id}.jsonl"
     done_file = spawn.BRAIN_DIR / f"{brain_id}.done"
