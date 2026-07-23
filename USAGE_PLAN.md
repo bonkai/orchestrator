@@ -1,6 +1,7 @@
 # USAGE_PLAN.md — unified usage-limits dashboard (`/usage`): one place to see "where am I at?"
 
-Status: **DESIGN (2026-07-23) — U0 partially pinned (§3), nothing built.**
+Status: **DESIGN (2026-07-23) — U0 DONE 2026-07-23: every §3/§6 ⧗ pinned from local
+artifacts or explicitly OPEN with its resolver ($0, forensic). U1+ not built.**
 
 Trigger: on 2026-07-23 the kimi cycle quota exhausted mid-day; panels showed bare
 `kimi exit 1` while the operator was reading a web meter (prepaid/API console) the CLI never
@@ -48,7 +49,7 @@ wrong product (prepaid `api.moonshot.ai` console vs the coding subscription at
 
 ## 4. Phases
 
-### U0 — pin the full signal matrix ($0, forensic)
+### U0 — pin the full signal matrix ($0, forensic) — **DONE 2026-07-23**
 Fill every ⧗ in §3 from EXISTING local artifacts only: codex rollout files (do OUR sidecar
 streams carry `rate_limits`, or only the rollout files?), claude transcripts under
 `~/.claude/projects/` (exact limit-warning text), kimi log, one recorded glm error. No new
@@ -98,7 +99,30 @@ page are inert until `python -m orchestrator` is restarted.
 - Not a billing/cost system — subscription cost stays $0; provider token counts are usage,
   not spend.
 
-## 6. Open (⧗ recap)
-claude limit strings + any scriptable `/usage`; codex sidecar-vs-rollout `rate_limits`;
-`kimi server` REST quota; z.ai usage endpoint; gemini seat — set `GEMINI_API_KEY` or drop it
-from the default panel (today it fails every panel with a visible error row).
+## 6. Open (⧗ recap) — U0 dispositions, 2026-07-23
+
+**RESOLVED by U0** (evidence in §3):
+- codex sidecar-vs-rollout: ONLY codex's own rollout files carry `rate_limits` (5 hits in the
+  newest rollout, all on `event_msg`/`token_count` lines; zero matches anywhere under
+  `~/.orchestrator/` — our exec sidecars carry the `codex exec --json` surface events only).
+  U2's `used_percent` refresh must read rollouts, not sidecars.
+- claude scriptable `/usage`: NONE — no usage subcommand in `claude --help` (2.1.218);
+  `/usage` is interactive-REPL-only.
+- `kimi server` REST quota: NO usage/quota route (v0.27.0 binary route census, §3).
+- glm 429: pinned verbatim in §3.
+
+**NOT OBSERVED** (honest gaps — pin verbatim from the FIRST real event, never guess; each
+would land in an artifact we already parse: claude transcript/brain sidecar, codex exec
+sidecar + rollout, glm `panel_breakdown` seat error):
+- claude limit-warning text (no usage-limit event exists in any local transcript/sidecar).
+- codex 429/limit text (zero error events in 391 rollouts; the surviving sidecar's 400 shows
+  verbatim errors do reach sidecars, so the first real one is capturable).
+- glm coding-plan QUOTA-exhausted text (the pinned 429 is transient overload, code 1305).
+
+**OPEN — operator / vendor-side:**
+- z.ai console usage API — vendor-docs question; no scraping (§5).
+- gemini seat — **DECISION FOR OPERATOR**: set `GEMINI_API_KEY` or drop the seat from the
+  default panel. State 2026-07-23: env unset AND no config.json override (seed-only, keyless)
+  → every panel logs a failed seat `GEMINI_API_KEY not set (env or config.json)` (latest:
+  dispatch #364, 2026-07-23 15:22; no gemini call has ever succeeded locally, so no real
+  gemini error string exists either).
