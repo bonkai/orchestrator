@@ -129,6 +129,47 @@ CREATE TABLE IF NOT EXISTS onboarding_runs (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_onboarding_runs_project ON onboarding_runs(project_id, id);
+
+-- U1 (USAGE_PLAN.md): local metering ledger. One row per engine CALL (live
+-- collector taps in claude_runner / the executor pollers, plus the historical
+-- backfill). No FK on dispatch_id: this is an accounting ledger and must
+-- survive its dispatch row; dispatch_id is NULL for calls not tied to one
+-- (kimi-log backfill rows, brain calls recorded outside a dispatch).
+-- error_class stays NULL until U2's classifier; raw_error is the verbatim
+-- (bounded) error string — including today's degraded 'kimi exit 1'.
+-- `source` is the backfill's idempotency key (e.g. 'pb:<event_id>:<seat_idx>',
+-- 'kimilog:<iso_ts>:<hash>'); live rows leave it NULL. The partial UNIQUE
+-- index makes every backfill INSERT OR IGNORE re-runnable.
+CREATE TABLE IF NOT EXISTS usage_events (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                INTEGER NOT NULL,
+    engine            TEXT NOT NULL,
+    model             TEXT,
+    role              TEXT NOT NULL,          -- seat | executor | judge | brain
+    dispatch_id       INTEGER,
+    calls             INTEGER NOT NULL DEFAULT 1,
+    prompt_tokens     INTEGER,                -- NULL = engine doesn't report (kimi, CLI seats)
+    completion_tokens INTEGER,
+    ok                INTEGER NOT NULL DEFAULT 1,
+    error_class       TEXT,                   -- U2's classifier fills this
+    raw_error         TEXT,
+    source            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_usage_engine_ts ON usage_events(engine, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_source
+    ON usage_events(source) WHERE source IS NOT NULL;
+
+-- U1: per-engine limit state (Layer B). U1 only maintains last_ok_at /
+-- last_error from the collector and lets the BACKFILL set limited_since from
+-- the one pinned kimi cycle-quota signal; the live limit-hit ⇒ LIMITED /
+-- next-ok ⇒ clear transitions (and reset_hint parsing) are U2.
+CREATE TABLE IF NOT EXISTS engine_limit_state (
+    engine        TEXT PRIMARY KEY,
+    limited_since INTEGER,
+    reset_hint    TEXT,
+    last_ok_at    INTEGER,
+    last_error    TEXT
+);
 """
 
 
