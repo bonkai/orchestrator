@@ -1,7 +1,9 @@
 # USAGE_PLAN.md — unified usage-limits dashboard (`/usage`): one place to see "where am I at?"
 
 Status: **DESIGN (2026-07-23) — U0 DONE 2026-07-23: every §3/§6 ⧗ pinned from local
-artifacts or explicitly OPEN with its resolver ($0, forensic). U1+ not built.**
+artifacts or explicitly OPEN with its resolver ($0, forensic). U1 DONE 2026-07-23
+(schema + collector + backfill; see §U1 landed-notes — collector is INERT until the
+server restarts, and the backfill is a manual one-liner). U2+ not built.**
 
 Trigger: on 2026-07-23 the kimi cycle quota exhausted mid-day; panels showed bare
 `kimi exit 1` while the operator was reading a web meter (prepaid/API console) the CLI never
@@ -56,7 +58,7 @@ streams carry `rate_limits`, or only the rollout files?), claude transcripts und
 deps, no billed calls. Update §3 in place as facts land (guard-centralized-values
 convention: the table IS the source; later code imports its constants from config seeds).
 
-### U1 — schema + collector + backfill
+### U1 — schema + collector + backfill — **DONE 2026-07-23**
 - `db.py`: `usage_events(id, ts, engine, model, role seat|executor|judge|brain,
   dispatch_id NULL, calls, prompt_tokens, completion_tokens, ok, error_class, raw_error)`
   + `engine_limit_state(engine PK, limited_since NULL, reset_hint NULL, last_ok_at,
@@ -66,6 +68,29 @@ convention: the table IS the source; later code imports its constants from confi
   in app.py (drift-guard convention).
 - **Backfill script**: historical `panel_breakdown` rows → usage_events; kimi-log 403s →
   limit events. The page is useful on day one, retroactively.
+
+Landed-notes (2026-07-23, tests: `tests/test_usage.py`, 32 units):
+- One spec ADDITION: `usage_events.source` (partial-UNIQUE) — the backfill's idempotency
+  key (`pb:<event_id>:<seat_idx>` / `kimilog:<iso>:<hash>`); live rows leave it NULL, and
+  the backfill only ingests events OLDER than the first live row (the history/live
+  boundary), so re-runs and the live collector can never double-count.
+- Writers sit ONE level up from `_build_*_run` — at the run_*_json single-return funnels
+  (incl. their headless fallbacks) — because `_build_*_run` sees only SUCCESSES and
+  `raw_error` requires recording failures too. Role comes from the existing tab label
+  (`fusion-seat:*` → seat, `fusion-judge/-verify/-rejudge` → judge, else brain); external
+  provider seats record in `_run_panel`/`_price_tab_answers` (base name of `glm#2`);
+  executors in the codex/kimi pollers via `record_*_executor_usage` (all 3 finalize paths).
+- Collector is ARMED at server startup (`db.enable_usage_collection()` in lifespan) and by
+  the backfill CLI — inert in library/test contexts, and inert LIVE until
+  `python -m orchestrator` restarts (reload=False).
+- Backfill is MANUAL (no startup hook): `python -m orchestrator.lib.usage`. It also
+  recomputes `engine_limit_state` deterministically from the full table; `limited_since`
+  is set ONLY by the pinned kimi cycle-quota rule (newest 403 iff no newer ok) —
+  reset-hint parsing, the error→class map, and live transitions stay U2.
+- Deliberate U1 gaps: the claude EXECUTOR is not metered (not a named choke point — its
+  spend stays on `dispatches.cost_usd`, §3); executor rows carry model=NULL (the poller
+  has no model source); kimi-log rows are role=seat/dispatch NULL (log lines carry
+  neither); `raw_error` stays the DEGRADED `kimi exit 1`-style string until U2's :877 fix.
 
 ### U2 — limit classifier + error-detail fix
 - Per-engine error→class map, fixture-tested against the REAL strings pinned in U0.
