@@ -454,8 +454,9 @@ def run_claude_json(
     finally:
         spawn.finish_brain_tab(brain_id, label=label, success=success)
 
-    return result if result is not None else ClaudeRun(
-        ok=False, error="brain call ended unexpectedly")
+    return _record_usage_run("claude", model, label,
+                             result if result is not None else ClaudeRun(
+                                 ok=False, error="brain call ended unexpectedly"))
 
 
 # ─────────────────────────── codex calls (the codex twin of run_claude_json) ──
@@ -731,8 +732,9 @@ def run_codex_json(
     if not spawn.iterm2_installed():
         print("[claude_runner] iTerm2 not installed — running codex call "
               f"headless ({label}). Install iTerm2 to watch codex calls live.")
-        return run_codex_headless(prompt, cwd, model, effort,
-                                  timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("codex", model, label,
+                                 run_codex_headless(prompt, cwd, model, effort,
+                                                    timeout_s or DEFAULT_TIMEOUT_S))
 
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "codex"
     codex_id = f"{slug}-{uuid.uuid4().hex[:8]}"
@@ -742,8 +744,9 @@ def run_codex_json(
     except Exception as e:
         print(f"[claude_runner] codex tab spawn failed ({e}); headless fallback")
         spawn.cleanup_codex_files(codex_id)
-        return run_codex_headless(prompt, cwd, model, effort,
-                                  timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("codex", model, label,
+                                 run_codex_headless(prompt, cwd, model, effort,
+                                                    timeout_s or DEFAULT_TIMEOUT_S))
 
     out_file = spawn.CODEX_DIR / f"{codex_id}.jsonl"
     done_file = spawn.CODEX_DIR / f"{codex_id}.done"
@@ -799,8 +802,9 @@ def run_codex_json(
     finally:
         spawn.finish_codex_tab(codex_id, label=label, success=success)
 
-    return result if result is not None else ClaudeRun(
-        ok=False, error="codex call ended unexpectedly")
+    return _record_usage_run("codex", model, label,
+                             result if result is not None else ClaudeRun(
+                                 ok=False, error="codex call ended unexpectedly"))
 
 
 # ── Kimi Code CLI engine (K1) — the kimi-code twin of the codex invoker above ──
