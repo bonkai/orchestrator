@@ -273,6 +273,7 @@ KIMI_ENGINE_SEED = {
     "auth_probe": ["kimi", "provider", "list"],  # cheap NON-BILLING login probe (exit 0 + source=oauth)
     "bin_fallback": "~/.kimi-code/bin/kimi",     # PATH has ~/.kimi-code/bin only in interactive .zshrc; resolve here if which() misses
     "creds_path": "~/.kimi-code/credentials/kimi-code.json",  # OAuth credential; absent ⇒ never logged in
+    "log_path": "~/.kimi-code/logs/kimi-code.log",  # U1: the CLI's own log — the usage backfill reads pinned 403s from here (UTC timestamps)
     "max_concurrent_dispatches": 2,             # Plus-cap guard (mirror codex): max kimi EXECUTOR dispatches at once
     # A default kimi panel for the K4 dispatch picker (>=2 lens-decorrelated seats). Unused until K4.
     "seats": [
@@ -280,6 +281,36 @@ KIMI_ENGINE_SEED = {
         {"kind": "kimi_cli", "model": "kimi-code/k3", "lens": "simplest"},
     ],
 }
+
+
+# ── U1: usage-dashboard engine enumeration (USAGE_PLAN.md) ───────────────────
+# The engines the usage layer (`usage_events` / `engine_limit_state`) tracks.
+# Derived from the config SEEDS — never a literal list in app.py (drift-guard
+# convention). The three CLI/subscription engines have no provider-registry
+# entry (claude is gated by claude_cli_available(), codex/kimi by their engine
+# seeds), so they are named here, in config — the seeds' home — and every
+# registry provider (seeds + config.json customs) is appended after them.
+USAGE_CLI_ENGINES = ("claude", "codex", "kimi")
+
+# U1/§3: the PINNED kimi cycle-quota limit signal (verified in
+# ~/.kimi-code/logs/kimi-code.log on 2026-07-20 + 2026-07-23). The ONLY limit
+# string U1 recognizes — the backfill matches it verbatim; U2's per-engine
+# error→class map builds on top of this constant, never a re-typed copy.
+KIMI_LIMIT_SIGNAL = "usage limit for this billing cycle"
+
+
+def usage_engines() -> list[str]:
+    """Every engine the usage layer tracks, in stable order: the three CLI
+    engines, then the MERGED provider registry (seeds + config.json) in
+    registry order. Includes keyless/inactive providers deliberately — the
+    usage page reports on engines whether or not they are usable right now.
+    db.py cannot import this module (config imports db), so callers pass the
+    result to db.ensure_engine_limit_rows()."""
+    out = list(USAGE_CLI_ENGINES)
+    for name in fusion_config()["providers"]:
+        if name not in out:
+            out.append(name)
+    return out
 
 
 def load_config() -> dict:
