@@ -965,7 +965,9 @@ def run_kimi_json(
     if not spawn.iterm2_installed():
         print("[claude_runner] iTerm2 not installed — running kimi call "
               f"headless ({label}). Install iTerm2 to watch kimi calls live.")
-        return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("kimi", model, label,
+                                 run_kimi_headless(prompt, cwd, model,
+                                                   timeout_s or DEFAULT_TIMEOUT_S))
 
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "kimi"
     kimi_id = f"{slug}-{uuid.uuid4().hex[:8]}"
@@ -974,7 +976,9 @@ def run_kimi_json(
     except Exception as e:
         print(f"[claude_runner] kimi tab spawn failed ({e}); headless fallback")
         spawn.cleanup_kimi_files(kimi_id)
-        return run_kimi_headless(prompt, cwd, model, timeout_s or DEFAULT_TIMEOUT_S)
+        return _record_usage_run("kimi", model, label,
+                                 run_kimi_headless(prompt, cwd, model,
+                                                   timeout_s or DEFAULT_TIMEOUT_S))
 
     out_file = spawn.KIMI_DIR / f"{kimi_id}.jsonl"
     done_file = spawn.KIMI_DIR / f"{kimi_id}.done"
@@ -1029,8 +1033,9 @@ def run_kimi_json(
     finally:
         spawn.finish_kimi_tab(kimi_id, label=label, success=success)
 
-    return result if result is not None else ClaudeRun(
-        ok=False, error="kimi call ended unexpectedly")
+    return _record_usage_run("kimi", model, label,
+                             result if result is not None else ClaudeRun(
+                                 ok=False, error="kimi call ended unexpectedly"))
 
 
 # ─────────────────────────── Fusion (optional, opt-in) ─────────────────────
@@ -1099,8 +1104,9 @@ def _run_panel(prompt: str, panel: list, providers: dict, timeout_s: int,
     lenses = lenses or {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(panel))) as ex:
         return list(ex.map(
-            lambda n: _panel_answer(n, providers[n],
-                                    _apply_lens(prompt, lenses.get(n, "")), timeout_s),
+            lambda n: _record_seat_usage(
+                _panel_answer(n, providers[n],
+                              _apply_lens(prompt, lenses.get(n, "")), timeout_s)),
             panel))
 
 
@@ -1195,6 +1201,10 @@ def _price_tab_answers(raw: list, providers: dict) -> list:
                         "prompt_tokens": in_tok, "completion_tokens": out_tok, "ok": True})
         else:
             out.append({"name": name, "ok": False, "error": a.get("error", "unknown")})
+    # U1: the tab path is the OTHER place external seat answers materialize
+    # (exactly one of _run_panel / this runs per panel, so no double count).
+    for a in out:
+        _record_seat_usage(a)
     return out
 
 
