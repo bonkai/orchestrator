@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from orchestrator.lib import config, spawn
+from orchestrator.lib import config, db, spawn
 from orchestrator.lib.db import DATA_DIR
 
 

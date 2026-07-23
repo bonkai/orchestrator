@@ -547,6 +547,129 @@ def record_event(dispatch_id: int, kind: str, payload: dict | None = None):
         logging.getLogger("orchestrator.db").warning("record_event failed: %s", e)
 
 
+# ─── usage metering (U1, USAGE_PLAN.md) ───────────────────────────────────
+
+# The collector is ARMED explicitly — by the server process (app lifespan) and
+# by the backfill CLI — never as an import side effect. Two reasons: the test
+# suite exercises the claude_runner funnels with heavy mocking and must not
+# write usage rows into the real ~/.orchestrator DB; and it matches reality —
+# with reload=False the collector is inert until `python -m orchestrator` is
+# restarted anyway.
+_usage_collection_enabled = False
+
+# Bound raw_error so a runaway stderr dump can't bloat the ledger. The string
+# is stored VERBATIM (truncated) — classification is U2's job, not U1's.
+_RAW_ERROR_MAX = 2000
+
+
+def enable_usage_collection(enabled: bool = True):
+    """Arm (or disarm) the usage collector for this process."""
+    global _usage_collection_enabled
+    _usage_collection_enabled = enabled
+
+
+def touch_engine_state(engine: str, last_ok_at: int | None = None,
+                       last_error: str | None = None):
+    """Upsert engine_limit_state bookkeeping fields. last_ok_at is monotonic
+    (only ever moves forward); last_error overwrites when provided (callers
+    apply events in ts order, so the newest error wins). limited_since /
+    reset_hint are NOT touched here — transitions are U2 (the backfill sets
+    them via set_engine_limited). Never raises."""
+    try:
+        with conn() as c:
+            c.execute(
+                "INSERT INTO engine_limit_state(engine, last_ok_at, last_error) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(engine) DO UPDATE SET "
+                "last_ok_at = CASE WHEN excluded.last_ok_at IS NOT NULL "
+                "  AND COALESCE(engine_limit_state.last_ok_at, 0) < excluded.last_ok_at "
+                "  THEN excluded.last_ok_at ELSE engine_limit_state.last_ok_at END, "
+                "last_error = COALESCE(excluded.last_error, engine_limit_state.last_error)",
+                (engine, last_ok_at, last_error),
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.db").warning("touch_engine_state failed: %s", e)
+
+
+def record_usage(engine: str, *, model: str | None = None, role: str = "brain",
+                 dispatch_id: int | None = None, ok: bool = True,
+                 prompt_tokens: int | None = None,
+                 completion_tokens: int | None = None,
+                 raw_error: str | None = None, calls: int = 1,
+                 ts: int | None = None, source: str | None = None) -> bool:
+    """Append ONE usage event and touch the engine's limit-state bookkeeping
+    (last_ok_at on success, last_error on failure). Returns True only when a
+    row was actually inserted — a `source`-keyed re-insert (backfill re-run)
+    is ignored by the partial UNIQUE index and returns False without touching
+    state. error_class is deliberately never written here (U2's classifier).
+    No-op (False) until enable_usage_collection() arms the process.
+    Never raises — metering must not break a call, like record_event."""
+    if not _usage_collection_enabled:
+        return False
+    try:
+        ts = int(ts if ts is not None else now())
+        if raw_error is not None:
+            raw_error = str(raw_error)[:_RAW_ERROR_MAX]
+        with conn() as c:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO usage_events("
+                "ts, engine, model, role, dispatch_id, calls, "
+                "prompt_tokens, completion_tokens, ok, error_class, raw_error, source"
+                ") VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?)",
+                (ts, engine, model or None, role, dispatch_id, int(calls),
+                 prompt_tokens, completion_tokens, 1 if ok else 0,
+                 raw_error, source),
+            )
+            if cur.rowcount == 0:
+                return False
+        touch_engine_state(engine,
+                           last_ok_at=ts if ok else None,
+                           last_error=raw_error if not ok else None)
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.db").warning("record_usage failed: %s", e)
+        return False
+
+
+def ensure_engine_limit_rows(engines: list[str]):
+    """Seed one engine_limit_state row per engine (all-NULL state), so the
+    usage page always has a row to render per engine. Idempotent — existing
+    rows (and their state) are untouched. The engine list comes from
+    config.usage_engines(); it is passed in because db.py cannot import
+    config (config imports db). Never raises."""
+    try:
+        with conn() as c:
+            c.executemany(
+                "INSERT OR IGNORE INTO engine_limit_state(engine) VALUES (?)",
+                [(e,) for e in engines],
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.db").warning("ensure_engine_limit_rows failed: %s", e)
+
+
+def set_engine_limited(engine: str, limited_since: int | None,
+                       reset_hint: str | None = None):
+    """Set (or, with limited_since=None, clear) an engine's LIMITED state.
+    U1's only caller is the backfill's pinned kimi-403 rule; U2's live
+    classifier becomes the real owner of these transitions. Never raises."""
+    try:
+        with conn() as c:
+            c.execute(
+                "INSERT INTO engine_limit_state(engine, limited_since, reset_hint) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(engine) DO UPDATE SET "
+                "limited_since = excluded.limited_since, "
+                "reset_hint = excluded.reset_hint",
+                (engine, limited_since, reset_hint),
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.db").warning("set_engine_limited failed: %s", e)
+
+
 def get_events(dispatch_id: int, since_id: int = 0, limit: int = 200) -> list[dict]:
     """Return events for a dispatch with id > since_id, oldest first.
     Used by the UI's polling timeline."""
