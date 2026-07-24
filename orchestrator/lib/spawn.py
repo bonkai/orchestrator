@@ -139,6 +139,9 @@ PROMPT_FILE="$BRAIN_DIR/${ID}.prompt"
 OUT_FILE="$BRAIN_DIR/${ID}.jsonl"
 DONE_FILE="$BRAIN_DIR/${ID}.done"
 PID_FILE="$BRAIN_DIR/${ID}.pid"
+# U2: stderr is ALSO tee'd to a sidecar (still visible in the tab) so a failed
+# call's real error text — not just the exit code — reaches the orchestrator.
+ERR_FILE="$BRAIN_DIR/${ID}.err"
 MODEL=$(cat "$BRAIN_DIR/${ID}.model" 2>/dev/null || echo sonnet)
 EFFORT=$(cat "$BRAIN_DIR/${ID}.effort" 2>/dev/null || echo medium)
 MAXTURNS=$(cat "$BRAIN_DIR/${ID}.maxturns" 2>/dev/null || echo 30)

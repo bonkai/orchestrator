@@ -699,6 +699,62 @@ def set_engine_limited(engine: str, limited_since: int | None,
         logging.getLogger("orchestrator.db").warning("set_engine_limited failed: %s", e)
 
 
+def usage_rollup(since_ts: int) -> dict:
+    """Per-engine aggregates since `since_ts`: calls, ok/err counts, token
+    sums (NULL-token rows contribute 0 — kimi/CLI seats meter calls only).
+    Read-only; used by the /usage page's today/7d numbers."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT engine, SUM(calls) AS calls, "
+            "SUM(CASE WHEN ok = 1 THEN calls ELSE 0 END) AS ok_calls, "
+            "SUM(CASE WHEN ok = 0 THEN calls ELSE 0 END) AS err_calls, "
+            "SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens, "
+            "SUM(COALESCE(completion_tokens, 0)) AS completion_tokens "
+            "FROM usage_events WHERE ts >= ? GROUP BY engine",
+            (since_ts,),
+        ).fetchall()
+        return {r["engine"]: dict(r) for r in rows}
+
+
+def usage_daily(days: int = 14) -> dict:
+    """Per-engine daily activity for the last `days` LOCAL days:
+    {engine: {\"YYYY-MM-DD\": {\"calls\": n, \"errs\": n}}}. Feeds the /usage
+    sparkbars; local dates so \"today\" matches the operator's clock."""
+    since = now() - days * 86400
+    with conn() as c:
+        rows = c.execute(
+            "SELECT engine, date(ts, 'unixepoch', 'localtime') AS day, "
+            "SUM(calls) AS calls, "
+            "SUM(CASE WHEN ok = 0 THEN calls ELSE 0 END) AS errs "
+            "FROM usage_events WHERE ts >= ? GROUP BY engine, day",
+            (since,),
+        ).fetchall()
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["engine"], {})[r["day"]] = {
+            "calls": r["calls"] or 0, "errs": r["errs"] or 0}
+    return out
+
+
+def recent_error_events(limit: int = 25) -> list[dict]:
+    """Newest failed usage events (any engine), for the /usage page's recent
+    limit/error table. raw_error is already bounded at write time."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT ts, engine, model, role, dispatch_id, error_class, raw_error "
+            "FROM usage_events WHERE ok = 0 ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def engine_limit_states() -> dict:
+    """All engine_limit_state rows keyed by engine."""
+    with conn() as c:
+        rows = c.execute("SELECT * FROM engine_limit_state").fetchall()
+        return {r["engine"]: dict(r) for r in rows}
+
+
 def get_events(dispatch_id: int, since_id: int = 0, limit: int = 200) -> list[dict]:
     """Return events for a dispatch with id > since_id, oldest first.
     Used by the UI's polling timeline."""
