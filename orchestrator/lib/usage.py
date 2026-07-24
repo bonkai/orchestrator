@@ -453,7 +453,10 @@ def usage_page_data(now_ts: Optional[int] = None) -> dict:
                 card["codex_rl"] = rl
         return card
 
-    primary = [_card(e) for e in engines if e in config.ENGINE_METERS]
+    # §1 dashboard order = ENGINE_METERS insertion order (both config-owned);
+    # intersect with usage_engines() so a meter for an unregistered engine
+    # can never invent a card.
+    primary = [_card(e) for e in config.ENGINE_METERS if e in engines]
     others = []
     for e in engines:
         if e in config.ENGINE_METERS:

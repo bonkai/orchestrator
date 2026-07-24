@@ -513,7 +513,11 @@ class TestBackfill(_TempDb):
         k403 = [r for r in kimi if r["ok"] == 0]
         self.assertEqual({r["ts"] for r in k403}, {self.t403_a, self.t403_b})
         self.assertTrue(all(r["dispatch_id"] is None for r in k403))
-        self.assertTrue(all(r["error_class"] is None for r in rows))  # U2's column
+        # U2: the backfill classifies as it inserts — ok rows stay NULL
+        self.assertTrue(all(r["error_class"] == "limit" for r in k403))
+        self.assertEqual(by_engine["gemini"][0]["error_class"], "config")
+        self.assertEqual(by_engine["xai"][0]["error_class"], "rate")
+        self.assertTrue(all(r["error_class"] is None for r in rows if r["ok"] == 1))
 
         # state: kimi LIMITED since the newest 403 (no newer ok call); the
         # classifier (U2) parses the pinned message's reset hint
