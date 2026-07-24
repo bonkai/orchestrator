@@ -597,12 +597,23 @@ def record_usage(engine: str, *, model: str | None = None, role: str = "brain",
                  prompt_tokens: int | None = None,
                  completion_tokens: int | None = None,
                  raw_error: str | None = None, calls: int = 1,
-                 ts: int | None = None, source: str | None = None) -> bool:
-    """Append ONE usage event and touch the engine's limit-state bookkeeping
-    (last_ok_at on success, last_error on failure). Returns True only when a
-    row was actually inserted — a `source`-keyed re-insert (backfill re-run)
-    is ignored by the partial UNIQUE index and returns False without touching
-    state. error_class is deliberately never written here (U2's classifier).
+                 ts: int | None = None, source: str | None = None,
+                 error_class: str | None = None, limit_hit: bool = False,
+                 reset_hint: str | None = None) -> bool:
+    """Append ONE usage event and apply the engine's limit-state bookkeeping.
+    Returns True only when a row was actually inserted — a `source`-keyed
+    re-insert (backfill re-run) is ignored by the partial UNIQUE index and
+    returns False without touching state.
+
+    U2 transitions (the callers classify — db stays config-free): the caller
+    passes `error_class` (stored on the row) and `limit_hit` (whether that
+    class means "limited right now", per config.USAGE_LIMIT_CLASSES):
+      - ok call        ⇒ last_ok_at forward + LIMITED CLEARED (limited_since /
+                         reset_hint → NULL) — the plan's "next ok call clears".
+      - limit-hit call ⇒ limited_since = first hit's ts (kept on repeat hits,
+                         so "LIMITED since T" stays the ONSET), reset_hint
+                         filled when the classifier parsed one.
+      - other failure  ⇒ last_error only; LIMITED state untouched.
     No-op (False) until enable_usage_collection() arms the process.
     Never raises — metering must not break a call, like record_event."""
     if not _usage_collection_enabled:
@@ -616,16 +627,34 @@ def record_usage(engine: str, *, model: str | None = None, role: str = "brain",
                 "INSERT OR IGNORE INTO usage_events("
                 "ts, engine, model, role, dispatch_id, calls, "
                 "prompt_tokens, completion_tokens, ok, error_class, raw_error, source"
-                ") VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?)",
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (ts, engine, model or None, role, dispatch_id, int(calls),
                  prompt_tokens, completion_tokens, 1 if ok else 0,
-                 raw_error, source),
+                 error_class, raw_error, source),
             )
             if cur.rowcount == 0:
                 return False
-        touch_engine_state(engine,
-                           last_ok_at=ts if ok else None,
-                           last_error=raw_error if not ok else None)
+            c.execute(
+                "INSERT INTO engine_limit_state(engine, last_ok_at, last_error, "
+                "limited_since, reset_hint) VALUES (:e, :ok_ts, :err, :lim_ts, :hint) "
+                "ON CONFLICT(engine) DO UPDATE SET "
+                "last_ok_at = CASE WHEN :ok_ts IS NOT NULL "
+                "  AND COALESCE(engine_limit_state.last_ok_at, 0) < :ok_ts "
+                "  THEN :ok_ts ELSE engine_limit_state.last_ok_at END, "
+                "last_error = COALESCE(:err, engine_limit_state.last_error), "
+                "limited_since = CASE WHEN :is_ok = 1 THEN NULL "
+                "  WHEN :is_hit = 1 THEN COALESCE(engine_limit_state.limited_since, :lim_ts) "
+                "  ELSE engine_limit_state.limited_since END, "
+                "reset_hint = CASE WHEN :is_ok = 1 THEN NULL "
+                "  WHEN :is_hit = 1 THEN COALESCE(:hint, engine_limit_state.reset_hint) "
+                "  ELSE engine_limit_state.reset_hint END",
+                {"e": engine, "ok_ts": ts if ok else None,
+                 "err": raw_error if not ok else None,
+                 "lim_ts": ts if (not ok and limit_hit) else None,
+                 "hint": reset_hint if (not ok and limit_hit) else None,
+                 "is_ok": 1 if ok else 0,
+                 "is_hit": 1 if (not ok and limit_hit) else 0},
+            )
         return True
     except Exception as e:
         import logging
