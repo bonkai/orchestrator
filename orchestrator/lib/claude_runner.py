@@ -209,17 +209,29 @@ def _usage_role(label: str) -> str:
     return "brain"
 
 
+def _classified(engine: str, raw_error) -> dict:
+    """U2: classify one raw error via the pinned config map and return the
+    kwargs record_usage needs for the LIMITED transition. Empty error → all
+    inert (an ok call clears LIMITED inside record_usage itself)."""
+    cls, hint = config.classify_error(engine, raw_error)
+    return {"error_class": cls,
+            "limit_hit": cls in config.USAGE_LIMIT_CLASSES,
+            "reset_hint": hint}
+
+
 def _record_usage_run(engine: str, model: str, label: str, run: ClaudeRun) -> ClaudeRun:
     """Record ONE finished CLI call (ok or failed) and return `run` unchanged.
     Tokens come from the envelope's usage when present — claude and codex both
     key input_tokens/output_tokens; kimi's stream has no usage field (§3), so
     its tokens stay NULL (calls-only metering). dispatch_id is NULL: these
     funnels serve brain/judge/seat calls, which aren't tied to a dispatch row
-    at call time. Never raises (db.record_usage is fail-soft)."""
+    at call time. Failures are classified (U2) so a limit-hit flips the
+    engine's LIMITED state live. Never raises (db.record_usage is fail-soft)."""
     usage = (run.raw or {}).get("usage") if isinstance(run.raw, dict) else None
     usage = usage if isinstance(usage, dict) else {}
     pt = usage.get("input_tokens")
     ct = usage.get("output_tokens")
+    raw_error = (run.error or None) if not run.ok else None
     db.record_usage(
         engine,
         model=(run.model or model or None),
@@ -227,7 +239,8 @@ def _record_usage_run(engine: str, model: str, label: str, run: ClaudeRun) -> Cl
         ok=run.ok,
         prompt_tokens=pt if isinstance(pt, int) else None,
         completion_tokens=ct if isinstance(ct, int) else None,
-        raw_error=(run.error or None) if not run.ok else None,
+        raw_error=raw_error,
+        **_classified(engine, raw_error),
     )
     return run
 
@@ -246,6 +259,7 @@ def _record_seat_usage(answer: dict) -> dict:
     ok = bool(answer.get("ok"))
     pt = answer.get("prompt_tokens")
     ct = answer.get("completion_tokens")
+    raw_error = None if ok else (answer.get("error") or "seat failed")
     db.record_usage(
         base,
         model=answer.get("model") or None,
@@ -253,9 +267,22 @@ def _record_seat_usage(answer: dict) -> dict:
         ok=ok,
         prompt_tokens=pt if (ok and isinstance(pt, int)) else None,
         completion_tokens=ct if (ok and isinstance(ct, int)) else None,
-        raw_error=None if ok else (answer.get("error") or "seat failed"),
+        raw_error=raw_error,
+        **_classified(base, raw_error),
     )
     return answer
+
+
+def _exit_error(engine: str, exit_code: int, err_file) -> str:
+    """U2 error-detail fix (USAGE_PLAN's :877 loss): a nonzero TAB exit now
+    carries the runner's stderr-sidecar tail — '<engine> exit N: <stderr>',
+    the same shape the headless paths already produce — so the classifier and
+    the fusion panel row see the real error (kimi's 403 cycle-quota text)
+    instead of a bare exit code. Falls back to the bare string when stderr is
+    empty/absent (clean failures; sidecars from a pre-U2 runner script)."""
+    tail = _tail(err_file, 500).strip()
+    base = f"{engine} exit {exit_code}"
+    return f"{base}: {tail}" if tail else base
 
 
 def record_codex_executor_usage(dispatch_id: int, ok: bool,
