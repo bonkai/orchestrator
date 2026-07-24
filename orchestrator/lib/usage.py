@@ -150,16 +150,39 @@ def _seat_tokens(seat: dict, ok: bool) -> tuple[Optional[int], Optional[int]]:
     return pt, ct
 
 
+def reclassify() -> int:
+    """U2: (re)fill usage_events.error_class on every failed row from the
+    pinned config map. Idempotent — classification is a pure function of
+    (engine, raw_error), so re-running converges; rows written before the
+    classifier existed (U1 backfill) get their class here. Returns the number
+    of rows whose class changed."""
+    changed = 0
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT id, engine, raw_error, error_class FROM usage_events WHERE ok = 0"
+        ).fetchall()
+        for r in rows:
+            cls, _hint = config.classify_error(r["engine"], r["raw_error"])
+            if cls != r["error_class"]:
+                c.execute("UPDATE usage_events SET error_class = ? WHERE id = ?",
+                          (cls, r["id"]))
+                changed += 1
+    return changed
+
+
 def recompute_engine_state(engines: Optional[list[str]] = None) -> dict:
-    """Deterministically rebuild engine_limit_state bookkeeping from the FULL
-    usage_events table (order-independent, hence idempotent): last_ok_at =
-    newest ok event, last_error = newest failed event's raw_error. The one
-    pinned rule — kimi's cycle-quota 403 (config.KIMI_LIMIT_SIGNAL) — sets or
-    clears kimi's limited_since (newest signal event iff no newer ok call);
-    reset_hint stays NULL (parsing hints is U2). Covers the configured engine
+    """Deterministically rebuild engine_limit_state from the FULL usage_events
+    table (order-independent, hence idempotent): last_ok_at = newest ok event,
+    last_error = newest failed event's raw_error, and — U2, classifier-driven
+    for EVERY engine — limited_since = the newest limit-hit event's ts
+    (error_class in config.USAGE_LIMIT_CLASSES) iff no ok call is newer, with
+    reset_hint re-derived from that event's raw error. Live traffic maintains
+    the same state incrementally in db.record_usage; this recompute is the
+    backfill's authoritative pass over history. Covers the configured engine
     list PLUS any engine present in the ledger (e.g. a provider since removed
-    from config.json)."""
+    from config.json). Call reclassify() first so error_class is filled."""
     engines = list(engines if engines is not None else config.usage_engines())
+    limit_marks = ",".join("?" for _ in config.USAGE_LIMIT_CLASSES)
     with db.conn() as c:
         for (e,) in c.execute("SELECT DISTINCT engine FROM usage_events").fetchall():
             if e not in engines:
@@ -175,27 +198,33 @@ def recompute_engine_state(engines: Optional[list[str]] = None) -> dict:
                 "WHERE engine = ? AND ok = 0 ORDER BY ts DESC, id DESC LIMIT 1",
                 (engine,),
             ).fetchone()
+            hit_row = c.execute(
+                "SELECT ts, raw_error FROM usage_events "
+                f"WHERE engine = ? AND ok = 0 AND error_class IN ({limit_marks}) "
+                "ORDER BY ts DESC, id DESC LIMIT 1",
+                (engine, *config.USAGE_LIMIT_CLASSES),
+            ).fetchone()
             stats[engine] = {
                 "last_ok_at": ok_row[0] if ok_row else None,
                 "last_error": err_row["raw_error"] if err_row else None,
+                "hit_ts": hit_row["ts"] if hit_row else None,
+                "hit_raw": hit_row["raw_error"] if hit_row else None,
             }
-        kimi_row = c.execute(
-            "SELECT MAX(ts) FROM usage_events "
-            "WHERE engine = 'kimi' AND ok = 0 AND raw_error LIKE ?",
-            (f"%{config.KIMI_LIMIT_SIGNAL}%",),
-        ).fetchone()
-    kimi_limit_ts = kimi_row[0] if kimi_row else None
 
+    limited: dict = {}
     for engine, s in stats.items():
         if s["last_ok_at"] is not None or s["last_error"] is not None:
             db.touch_engine_state(engine, last_ok_at=s["last_ok_at"],
                                   last_error=s["last_error"])
-    kimi_ok = (stats.get("kimi") or {}).get("last_ok_at")
-    limited_since = (kimi_limit_ts
-                     if kimi_limit_ts is not None and kimi_limit_ts > (kimi_ok or 0)
-                     else None)
-    db.set_engine_limited("kimi", limited_since)
-    return {"engines": sorted(stats.keys()), "kimi_limited_since": limited_since}
+        since = (s["hit_ts"]
+                 if s["hit_ts"] is not None and s["hit_ts"] > (s["last_ok_at"] or 0)
+                 else None)
+        hint = config.classify_error(engine, s["hit_raw"])[1] if since else None
+        db.set_engine_limited(engine, since, hint)
+        if since:
+            limited[engine] = since
+    return {"engines": sorted(stats.keys()), "limited": limited,
+            "kimi_limited_since": limited.get("kimi")}
 
 
 def backfill(kimi_log_path: Optional[str] = None,
