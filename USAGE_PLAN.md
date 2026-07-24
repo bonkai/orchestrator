@@ -1,9 +1,9 @@
 # USAGE_PLAN.md — unified usage-limits dashboard (`/usage`): one place to see "where am I at?"
 
-Status: **DESIGN (2026-07-23) — U0 DONE 2026-07-23: every §3/§6 ⧗ pinned from local
-artifacts or explicitly OPEN with its resolver ($0, forensic). U1 DONE 2026-07-23
-(schema + collector + backfill; see §U1 landed-notes — collector is INERT until the
-server restarts, and the backfill is a manual one-liner). U2+ not built.**
+Status: **U0 DONE 2026-07-23 · U1 DONE 2026-07-23 · U2 DONE 2026-07-24 · U3 DONE
+2026-07-24 (the `/usage` page is live, linked from the header nav). Remaining: U4
+(dispatch-form health strip) + the balance of U5 (most of its test list landed with
+U1–U3 in `tests/test_usage.py`, 49 units). See each phase's landed-notes.**
 
 Trigger: on 2026-07-23 the kimi cycle quota exhausted mid-day; panels showed bare
 `kimi exit 1` while the operator was reading a web meter (prepaid/API console) the CLI never
