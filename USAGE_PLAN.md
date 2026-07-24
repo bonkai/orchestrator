@@ -92,7 +92,7 @@ Landed-notes (2026-07-23, tests: `tests/test_usage.py`, 32 units):
   has no model source); kimi-log rows are role=seat/dispatch NULL (log lines carry
   neither); `raw_error` stays the DEGRADED `kimi exit 1`-style string until U2's :877 fix.
 
-### U2 — limit classifier + error-detail fix
+### U2 — limit classifier + error-detail fix — **DONE 2026-07-24**
 - Per-engine error→class map, fixture-tested against the REAL strings pinned in U0.
 - Fix the detail loss found on 07-23: the tab paths build `error` from the exit code alone
   (`claude_runner.py:877` and its codex twin) — tail sidecar stderr into the error so the
@@ -100,6 +100,37 @@ Landed-notes (2026-07-23, tests: `tests/test_usage.py`, 32 units):
 - Transitions: limit-hit ⇒ LIMITED (+ parsed reset hint when the message has one); next ok
   call clears. Codex additionally refreshes `used_percent`/`resets_at` from the newest
   rollout file on each poll of `/usage`.
+
+Landed-notes (2026-07-24):
+- Classifier = `config.classify_error(engine, raw)` over pinned constants (config.py, the
+  §U0 "table is the source" home). Classes: limit/rate/auth/config/infra/None; ONLY
+  limit+rate (`config.USAGE_LIMIT_CLASSES`) flip LIMITED. glm is keyed off the error-body
+  CODE (1305→rate pinned; 1113→limit lesson-known); claude/codex quota texts remain
+  NOT-OBSERVED → unclassified until pinned (no guessing).
+- Transitions live in `db.record_usage` (callers pass class/limit_hit/hint — db stays
+  config-free): limited_since = FIRST hit's ts (onset kept on repeats), next ok clears
+  both fields. The backfill's `recompute_engine_state` is the deterministic, whole-table
+  version of the same rule, now classifier-driven for every engine (not just kimi), and
+  `reclassify()` upgrades pre-U2 rows on each backfill run.
+- Detail fix: the three brain-side runners (brain/codex/kimi `_run.sh`) now tee stderr to
+  an `<id>.err` sidecar (still visible in the tab); the tab exit≠0 branches build
+  `"<engine> exit N: <stderr tail>"` via `_exit_error` — same shape as headless. The
+  EXECUTOR runners were deliberately NOT touched (pinned templates; kimi executor has
+  still never run) — executor raw_error stays exit-code-only until that matters.
+- Codex vendor meter: `usage.codex_rate_limits()` reads the newest rollout's LAST
+  `payload.rate_limits` (shape re-verified live 2026-07-24: primary.used_percent /
+  window_minutes 10080 / resets_at; 71% at time of build); /usage re-reads it per render.
+
+### U3 landed-notes (2026-07-24)
+- `GET /usage` (app.py) + `templates/usage.html` + a header-nav link in base.html; data
+  assembled by `usage.usage_page_data()` (all formatting server-side, template logic-light).
+- Five §1 cards in `config.ENGINE_METERS` order (= §3's web-meter column as data): status
+  badge (LIMITED since T + reset hint / OK + last-ok / NEEDS KEY / NO ACTIVITY), today+7d
+  calls (+failed), 7d in→out tokens where reported, a 14-day SVG spark-bar strip with
+  per-day tooltips, codex used_percent meter bar (+% left + resets), last error with class
+  chip, vendor deep link + exact local check command. Below: other-providers 7d table +
+  recent-failures table (dispatch-linked). htmx refreshes the page every 60s — that poll
+  IS the codex rollout re-read. No new JS deps; styles in static/style.css tokens.
 
 ### U3 — `/usage` page (HTMX, server-rendered, stdlib sqlite)
 Per-engine card: state badge (OK / LIMITED since T, resets ~T), today/7d calls + tokens,
