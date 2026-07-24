@@ -290,6 +290,202 @@ def backfill(kimi_log_path: Optional[str] = None,
     return summary
 
 
+# ─── U3: /usage page data (server-rendered; stdlib only) ────────────────────
+
+def codex_rate_limits() -> Optional[dict]:
+    """The vendor-side codex meter: the newest rollout file's LAST rate_limits
+    payload (§3/U0: rollouts are the ONLY carrier — our exec sidecars never
+    have it). Shape (verified live 2026-07-24): event lines carry
+    payload.rate_limits.primary = {used_percent, window_minutes, resets_at}.
+    Scans the few newest files (a fresh session may not have emitted one yet).
+    Returns {used_percent, window_minutes, resets_at, plan_type, captured_at}
+    or None. Never raises."""
+    try:
+        root = os.path.expanduser(
+            config.codex_engine().get("sessions_dir",
+                                      config.CODEX_ENGINE_SEED["sessions_dir"]))
+        files = glob.glob(os.path.join(root, "*", "*", "*", "rollout-*.jsonl"))
+        files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for path in files[:5]:
+            last, last_ts = None, None
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"rate_limits"' not in line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except (ValueError, TypeError):
+                        continue
+                    payload = obj.get("payload") if isinstance(obj, dict) else None
+                    rl = (payload or {}).get("rate_limits") if isinstance(payload, dict) \
+                        else None
+                    if rl is None and isinstance(obj, dict):
+                        rl = obj.get("rate_limits")
+                    if isinstance(rl, dict) and isinstance(rl.get("primary"), dict):
+                        last, last_ts = rl, obj.get("timestamp")
+            if last is not None:
+                prim = last["primary"]
+                return {"used_percent": prim.get("used_percent"),
+                        "window_minutes": prim.get("window_minutes"),
+                        "resets_at": prim.get("resets_at"),
+                        "plan_type": last.get("plan_type"),
+                        "captured_at": last_ts}
+    except Exception:
+        return None
+    return None
+
+
+def _fmt_ts(epoch: Optional[int]) -> str:
+    if not epoch:
+        return "—"
+    return datetime.fromtimestamp(int(epoch)).strftime("%b %-d %H:%M")
+
+
+def _fmt_ago(epoch: Optional[int], now_ts: int) -> str:
+    if not epoch:
+        return "never"
+    d = max(0, now_ts - int(epoch))
+    if d < 90:
+        return "just now"
+    if d < 3600:
+        return f"{d // 60}m ago"
+    if d < 172800:
+        return f"{d // 3600}h ago"
+    return f"{d // 86400}d ago"
+
+
+def _fmt_tokens(n) -> str:
+    n = int(n or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n / 1000:.0f}k"
+    if n >= 1_000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
+
+
+def _last_error_view(engine: str, st: dict) -> Optional[dict]:
+    raw = (st or {}).get("last_error")
+    if not raw:
+        return None
+    cls, _ = config.classify_error(engine, raw)
+    return {"cls": cls or "unclassified", "short": raw[:110], "full": raw}
+
+
+def usage_page_data(now_ts: Optional[int] = None) -> dict:
+    """Everything the /usage template renders, preformatted (the template
+    stays logic-light). Primary cards = the §1/§3 dashboard engines — derived
+    as `usage_engines() ∩ ENGINE_METERS` so the card list follows the config
+    seeds, never a route literal. Everything else (custom/keyless providers)
+    lands in the compact secondary table."""
+    now_ts = int(now_ts if now_ts is not None else db.now())
+    midnight = int(datetime.now().replace(hour=0, minute=0, second=0,
+                                          microsecond=0).timestamp())
+    engines = config.usage_engines()
+    states = db.engine_limit_states()
+    today = db.usage_rollup(midnight)
+    week = db.usage_rollup(now_ts - 7 * 86400)
+    daily = db.usage_daily(14)
+    days = [(datetime.fromtimestamp(now_ts - i * 86400)).strftime("%Y-%m-%d")
+            for i in range(13, -1, -1)]
+
+    def _card(name: str) -> dict:
+        st = states.get(name) or {}
+        t = today.get(name) or {}
+        w = week.get(name) or {}
+        series = []
+        peak = 1
+        for day in days:
+            d = (daily.get(name) or {}).get(day) or {}
+            calls, errs = d.get("calls", 0), d.get("errs", 0)
+            peak = max(peak, calls)
+            series.append({"day": day, "calls": calls, "errs": errs})
+        for s in series:
+            s["h"] = (2 if s["calls"] == 0
+                      else max(4, round(34 * s["calls"] / peak)))
+            s["tip"] = (f"{s['day']} — {s['calls']} call"
+                        f"{'' if s['calls'] == 1 else 's'}"
+                        + (f", {s['errs']} failed" if s["errs"] else ""))
+        err_view = _last_error_view(name, st)
+        limited_since = st.get("limited_since")
+        if limited_since:
+            badge = {"state": "limited",
+                     "label": f"LIMITED · since {_fmt_ts(limited_since)}",
+                     "detail": st.get("reset_hint") or ""}
+        elif err_view and err_view["cls"] == "config" and not st.get("last_ok_at"):
+            badge = {"state": "config", "label": "NEEDS KEY / CONFIG", "detail": ""}
+        elif st.get("last_ok_at"):
+            badge = {"state": "ok",
+                     "label": f"OK · last ok {_fmt_ago(st.get('last_ok_at'), now_ts)}",
+                     "detail": ""}
+        else:
+            badge = {"state": "idle", "label": "NO ACTIVITY", "detail": ""}
+        card = {
+            "name": name,
+            "badge": badge,
+            "today_calls": (t.get("calls") or 0),
+            "today_errs": (t.get("err_calls") or 0),
+            "week_calls": (w.get("calls") or 0),
+            "week_errs": (w.get("err_calls") or 0),
+            "week_tokens_in": _fmt_tokens(w.get("prompt_tokens")),
+            "week_tokens_out": _fmt_tokens(w.get("completion_tokens")),
+            "has_tokens": bool((w.get("prompt_tokens") or 0)
+                               + (w.get("completion_tokens") or 0)),
+            "last_ok": _fmt_ago(st.get("last_ok_at"), now_ts),
+            "spark": series,
+            "spark_peak": peak,
+            "last_error": err_view,
+            "meter": config.ENGINE_METERS.get(name),
+            "codex_rl": None,
+        }
+        if name == "codex":
+            rl = codex_rate_limits()
+            if rl and isinstance(rl.get("used_percent"), (int, float)):
+                pct = max(0.0, min(100.0, float(rl["used_percent"])))
+                rl["pct"] = round(pct, 1)
+                rl["left"] = round(100 - pct, 1)
+                rl["state"] = ("bad" if pct >= 90 else
+                               "warn" if pct >= 75 else "ok")
+                rl["resets_h"] = _fmt_ts(rl.get("resets_at"))
+                rl["window_days"] = round((rl.get("window_minutes") or 0) / 1440) or "?"
+                card["codex_rl"] = rl
+        return card
+
+    primary = [_card(e) for e in engines if e in config.ENGINE_METERS]
+    others = []
+    for e in engines:
+        if e in config.ENGINE_METERS:
+            continue
+        st = states.get(e) or {}
+        w = week.get(e) or {}
+        others.append({
+            "name": e,
+            "week_calls": w.get("calls") or 0,
+            "week_errs": w.get("err_calls") or 0,
+            "week_tokens": _fmt_tokens((w.get("prompt_tokens") or 0)
+                                       + (w.get("completion_tokens") or 0)),
+            "limited": bool(st.get("limited_since")),
+            "last_error": _last_error_view(e, st),
+        })
+
+    recent = []
+    for r in db.recent_error_events(20):
+        recent.append({
+            "when": _fmt_ts(r["ts"]),
+            "ago": _fmt_ago(r["ts"], now_ts),
+            "engine": r["engine"],
+            "role": r["role"],
+            "cls": r["error_class"] or "—",
+            "dispatch_id": r["dispatch_id"],
+            "error": (r["raw_error"] or "")[:160],
+            "error_full": r["raw_error"] or "",
+        })
+
+    return {"primary": primary, "others": others, "recent_errors": recent,
+            "generated_at": _fmt_ts(now_ts)}
+
+
 def main():
     s = backfill()
     print("[usage backfill] " + json.dumps(s, indent=2, default=str))
