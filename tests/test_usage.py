@@ -148,6 +148,11 @@ class TestUsageEngines(unittest.TestCase):
         # the executor pollers meter all three finalize paths per engine
         self.assertEqual(src.count("claude_runner.record_codex_executor_usage("), 3)
         self.assertEqual(src.count("claude_runner.record_kimi_executor_usage("), 3)
+        # U3: the /usage route renders usage_page_data — no engine literals
+        self.assertIn('@app.get("/usage"', src)
+        self.assertIn("usage_mod.usage_page_data()", src)
+        base = (REPO / "orchestrator" / "templates" / "base.html").read_text(encoding="utf-8")
+        self.assertIn('href="/usage"', base)   # the nav link
 
 
 # ───────────────────────────── record_usage ─────────────────────────────────
@@ -510,10 +515,11 @@ class TestBackfill(_TempDb):
         self.assertTrue(all(r["dispatch_id"] is None for r in k403))
         self.assertTrue(all(r["error_class"] is None for r in rows))  # U2's column
 
-        # state: kimi LIMITED since the newest 403 (no newer ok call)
+        # state: kimi LIMITED since the newest 403 (no newer ok call); the
+        # classifier (U2) parses the pinned message's reset hint
         st = self.state("kimi")
         self.assertEqual(st["limited_since"], self.t403_b)
-        self.assertIsNone(st["reset_hint"])               # hint parsing is U2
+        self.assertEqual(st["reset_hint"], "next billing cycle")
         self.assertEqual(st["last_ok_at"], 1000)
         self.assertIn("usage limit for this billing cycle", st["last_error"])
         # glm: ok history, never limited
