@@ -221,6 +221,9 @@ CODEX_ENGINE_SEED = {
                                      # both follow it; reversible, no code change.
     "json_flag": "--json",           # structured-JSONL flag the parser reads (§3)
     "auth_probe": ["codex", "login", "status"],   # cheap, NON-BILLING auth-state probe (§3; not just `which`)
+    "sessions_dir": "~/.codex/sessions",  # U2: codex's OWN rollout files (YYYY/MM/DD/rollout-*.jsonl) —
+                                     # the ONLY carrier of `rate_limits` used_percent/resets_at (§3/U0:
+                                     # our exec sidecars never carry them); /usage reads the newest one
     "auto_bypass_flag": "--dangerously-bypass-approvals-and-sandbox",  # full-access no-sandbox flag; C6.0 found it
                                      # OVERRIDES -s entirely (NOT additive). UNUSED by the executor — full access now
                                      # comes from `-s danger-full-access` above (the clean sandbox MODE), not this flag;
@@ -297,6 +300,96 @@ USAGE_CLI_ENGINES = ("claude", "codex", "kimi")
 # string U1 recognizes — the backfill matches it verbatim; U2's per-engine
 # error→class map builds on top of this constant, never a re-typed copy.
 KIMI_LIMIT_SIGNAL = "usage limit for this billing cycle"
+
+# ── U2: the per-engine error→class map (USAGE_PLAN §U2) ──────────────────────
+# Classes:
+#   limit    — quota/billing-cycle exhausted        → flips LIMITED
+#   rate     — transient throttle/overload (429s)   → flips LIMITED (next ok clears)
+#   auth     — login/OAuth expired
+#   config   — locally unusable (missing key/binary)
+#   infra    — local plumbing (timeout, closed tab, spawn/parse failures)
+#   None     — unclassified (surface the raw string; pin it when it recurs)
+# Patterns are PINNED strings only (§3/U0 discipline — never guessed): the kimi
+# 403 signal, the glm 429 body codes (1305 overload observed 7×; 1113 prepaid
+# no-balance is lesson-known and matched by CODE, not a guessed sentence), the
+# claude auth strings from the U0 transcript census, our own runner-generated
+# local-failure strings, and a generic 429/"too many requests" catch. claude/
+# codex usage-limit texts are NOT-OBSERVED (U0) — they stay unclassified until
+# the first real one is pinned here.
+USAGE_LIMIT_CLASSES = ("limit", "rate")   # classes that mean "limited RIGHT NOW"
+
+# (substring-lowercase, class, reset_hint) — engine-specific rules run first.
+_USAGE_ERROR_RULES_BY_ENGINE = {
+    "kimi": [
+        (KIMI_LIMIT_SIGNAL.lower(), "limit", "next billing cycle"),
+    ],
+    "glm": [
+        ('"code":"1113"', "limit", None),      # prepaid no-balance (coding-plan lesson)
+        ('"code": "1113"', "limit", None),
+        ('"code":"1305"', "rate", None),       # pinned transient overload (§3)
+        ('"code": "1305"', "rate", None),
+    ],
+}
+_USAGE_ERROR_RULES_GENERIC = [
+    ("429", "rate", None),
+    ("too many requests", "rate", None),
+    ("login expired", "auth", None),           # claude, pinned U0
+    ("oauth session expired", "auth", None),   # claude, pinned U0
+    ("failed to authenticate", "auth", None),
+    ("401", "auth", None),
+    ("not set (env or config.json)", "config", None),   # provider key gate
+    ("binary not found on path", "config", None),
+    ("timed out after", "infra", None),
+    ("tab closed before completion", "infra", None),
+    ("tab failed to start", "infra", None),
+    ("produced no result event", "infra", None),
+    ("produced no assistant message", "infra", None),
+    ("no assistant message", "infra", None),
+    ("spawn failed", "infra", None),
+    ("ended unexpectedly", "infra", None),
+]
+
+
+def classify_error(engine: str, raw_error) -> tuple[Optional[str], Optional[str]]:
+    """Map one raw error string to (error_class, reset_hint) — (None, None)
+    when empty or unmatched. First match wins; engine-specific pinned rules
+    run before the generic ones (so kimi's 403 classifies as `limit` even
+    though a generic rule would also fire). Pure string logic over the pinned
+    constants above — living in config keeps the §U0 'the table is the source'
+    convention and lets both the live taps (claude_runner) and the backfill
+    (usage.py) share one map without an import cycle through db."""
+    if not raw_error:
+        return None, None
+    text = str(raw_error).lower()
+    for needle, cls, hint in _USAGE_ERROR_RULES_BY_ENGINE.get(engine, []):
+        if needle in text:
+            return cls, hint
+    for needle, cls, hint in _USAGE_ERROR_RULES_GENERIC:
+        if needle in text:
+            return cls, hint
+    return None, None
+
+
+# ── U3: per-engine vendor meters (§3's web-meter column, as data) ────────────
+# The /usage page renders these as deep links + the exact local check command.
+# Engines absent here (custom providers) get no meter row — local counts only.
+ENGINE_METERS = {
+    "claude": {"web": "https://claude.ai/settings/usage",
+               "web_label": "claude.ai → Settings → Usage",
+               "check": "claude  →  /usage   (interactive REPL only — no CLI subcommand, pinned U0)"},
+    "codex":  {"web": "https://chatgpt.com/#settings",
+               "web_label": "chatgpt.com → Settings → Codex usage",
+               "check": "ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1   (rate_limits lines carry used_percent)"},
+    "kimi":   {"web": "https://www.kimi.com/code/",
+               "web_label": "kimi.com — log in as the CLI's OAuth account",
+               "check": "grep '403' ~/.kimi-code/logs/kimi-code.log | tail -3"},
+    "glm":    {"web": "https://z.ai/model-api",
+               "web_label": "z.ai console → coding-plan usage",
+               "check": "—  (no scriptable readout; coding-plan meters server-side)"},
+    "gemini": {"web": "https://aistudio.google.com/",
+               "web_label": "aistudio.google.com → quota",
+               "check": "—  (GEMINI_API_KEY currently unset — §6 operator decision)"},
+}
 
 
 def usage_engines() -> list[str]:
