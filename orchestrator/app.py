@@ -1437,7 +1437,7 @@ async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
 @app.get("/usage", response_class=HTMLResponse)
 async def usage_page(request: Request):
     data = usage_mod.usage_page_data()
-    return templates.TemplateResponse("usage.html", {"request": request, **data})
+    return templates.TemplateResponse(request, "usage.html", data)
 
 
 # ─── transcript view ──────────────────────────────────────────────────────
