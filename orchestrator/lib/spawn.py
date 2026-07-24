@@ -161,7 +161,7 @@ claude -p "$PROMPT" \
     --output-format stream-json \
     --verbose \
     --dangerously-skip-permissions \
-    --effort "$EFFORT" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+    --effort "$EFFORT" < /dev/null 2> >(tee "$ERR_FILE" >&2) | tee "$OUT_FILE" | python3 -u -c "
 import sys, json
 for line in sys.stdin:
     line = line.strip()
@@ -1040,6 +1040,9 @@ PROMPT_FILE="$CODEX_DIR/${ID}.prompt"
 OUT_FILE="$CODEX_DIR/${ID}.jsonl"
 DONE_FILE="$CODEX_DIR/${ID}.done"
 PID_FILE="$CODEX_DIR/${ID}.pid"
+# U2: stderr tee'd to a sidecar (still visible in the tab) so failures carry
+# codex's real error text back, not just an exit code.
+ERR_FILE="$CODEX_DIR/${ID}.err"
 MODEL=$(cat "$CODEX_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
 EFFORT=$(cat "$CODEX_DIR/${ID}.effort" 2>/dev/null || echo "")
 echo $$ > "$PID_FILE"
@@ -1062,7 +1065,7 @@ codex exec "$PROMPT" \
     -m "$MODEL" \
     -s read-only \
     --json \
-    "${EFFORT_ARG[@]}" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+    "${EFFORT_ARG[@]}" < /dev/null 2> >(tee "$ERR_FILE" >&2) | tee "$OUT_FILE" | python3 -u -c "
 import sys, json
 for line in sys.stdin:
     line = line.strip()
