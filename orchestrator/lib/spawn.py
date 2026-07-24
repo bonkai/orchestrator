@@ -852,7 +852,7 @@ def _brain_tab_cmd(brain_id: str, cwd: str, title: str) -> str:
 def cleanup_brain_files(brain_id: str):
     """Remove all sidecar files for a brain call. The tab (and its on-screen
     output) is unaffected — tee already wrote to the terminal."""
-    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort", "maxturns"):
+    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort", "maxturns", "err"):
         try:
             (BRAIN_DIR / f"{brain_id}.{suf}").unlink()
         except FileNotFoundError:
@@ -1145,7 +1145,7 @@ def _codex_tab_cmd(codex_id: str, cwd: str, title: str) -> str:
 def cleanup_codex_files(codex_id: str):
     """Remove all sidecar files for a codex call. The tab (and its on-screen
     output) is unaffected — tee already wrote to the terminal."""
-    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort"):
+    for suf in ("prompt", "jsonl", "done", "pid", "model", "effort", "err"):
         try:
             (CODEX_DIR / f"{codex_id}.{suf}").unlink()
         except FileNotFoundError:
@@ -1255,6 +1255,9 @@ PROMPT_FILE="$KIMI_DIR/${ID}.prompt"
 OUT_FILE="$KIMI_DIR/${ID}.jsonl"
 DONE_FILE="$KIMI_DIR/${ID}.done"
 PID_FILE="$KIMI_DIR/${ID}.pid"
+# U2: stderr tee'd to a sidecar (still visible in the tab) — kimi's cycle-quota
+# 403 prints here, so the panel row can carry it instead of bare `kimi exit 1`.
+ERR_FILE="$KIMI_DIR/${ID}.err"
 MODEL=$(cat "$KIMI_DIR/${ID}.model" 2>/dev/null || echo @@MODEL_DEFAULT@@)
 echo $$ > "$PID_FILE"
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -1271,7 +1274,7 @@ echo "(watching live; the structured result is captured for the orchestrator)"
 echo
 "@@KIMI_BIN@@" -p "$PROMPT" \
     --output-format stream-json \
-    -m "$MODEL" < /dev/null | tee "$OUT_FILE" | python3 -u -c "
+    -m "$MODEL" < /dev/null 2> >(tee "$ERR_FILE" >&2) | tee "$OUT_FILE" | python3 -u -c "
 import sys, json
 for line in sys.stdin:
     line = line.strip()
@@ -1343,7 +1346,7 @@ def _kimi_tab_cmd(kimi_id: str, cwd: str, title: str) -> str:
 def cleanup_kimi_files(kimi_id: str):
     """Remove all sidecar files for a kimi call. The tab (and its on-screen output) is
     unaffected — tee already wrote to the terminal. (No .effort file — kimi has none.)"""
-    for suf in ("prompt", "jsonl", "done", "pid", "model"):
+    for suf in ("prompt", "jsonl", "done", "pid", "model", "err"):
         try:
             (KIMI_DIR / f"{kimi_id}.{suf}").unlink()
         except FileNotFoundError:
