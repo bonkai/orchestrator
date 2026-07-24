@@ -573,5 +573,227 @@ class TestBackfill(_TempDb):
         self.assertEqual(st["last_ok_at"], self.t403_b + 500)
 
 
+# ─────────────────────── U2: classifier + transitions ───────────────────────
+
+class TestClassifier(unittest.TestCase):
+    """config.classify_error against the REAL pinned strings (§3/U0)."""
+
+    def test_kimi_cycle_quota_is_limit_with_hint(self):
+        cls, hint = config.classify_error("kimi", _KIMI_403)
+        self.assertEqual((cls, hint), ("limit", "next billing cycle"))
+
+    def test_glm_1305_overload_is_rate_and_1113_is_limit(self):
+        pinned_429 = ('HTTP Error 429: Too Many Requests {"error":{"code":"1305",'
+                      '"message":"The service may be temporarily overloaded, '
+                      'please try again later"}}')
+        self.assertEqual(config.classify_error("glm", pinned_429)[0], "rate")
+        # 1113 (prepaid no-balance) carries a 429 too — the engine-specific
+        # CODE rule must win over the generic 429→rate rule
+        no_balance = 'HTTP Error 429: Too Many Requests {"error":{"code":"1113"}}'
+        self.assertEqual(config.classify_error("glm", no_balance)[0], "limit")
+
+    def test_claude_auth_strings_pinned_by_u0(self):
+        self.assertEqual(config.classify_error(
+            "claude", "Login expired · Please run /login")[0], "auth")
+        self.assertEqual(config.classify_error(
+            "claude", "Failed to authenticate: OAuth session expired and could "
+                      "not be refreshed")[0], "auth")
+
+    def test_config_infra_generic_and_unmatched(self):
+        self.assertEqual(config.classify_error(
+            "gemini", "GEMINI_API_KEY not set (env or config.json)")[0], "config")
+        self.assertEqual(config.classify_error(
+            "kimi", "kimi timed out after 900s")[0], "infra")
+        self.assertEqual(config.classify_error(
+            "codex", "HTTP Error 429: Too Many Requests")[0], "rate")
+        self.assertEqual(config.classify_error("kimi", "kimi exit 1"), (None, None))
+        self.assertEqual(config.classify_error("glm", None), (None, None))
+        self.assertEqual(config.classify_error("glm", ""), (None, None))
+
+    def test_limit_classes_constant(self):
+        self.assertEqual(set(config.USAGE_LIMIT_CLASSES), {"limit", "rate"})
+
+
+class TestLimitTransitions(_TempDb):
+    """db.record_usage LIMITED transitions: hit ⇒ LIMITED since FIRST hit,
+    next ok clears, non-limit failures leave the state alone."""
+
+    def test_hit_sets_onset_and_repeat_keeps_it(self):
+        db.record_usage("kimi", ok=False, raw_error=_KIMI_403, error_class="limit",
+                        limit_hit=True, reset_hint="next billing cycle", ts=100)
+        st = self.state("kimi")
+        self.assertEqual((st["limited_since"], st["reset_hint"]),
+                         (100, "next billing cycle"))
+        db.record_usage("kimi", ok=False, raw_error=_KIMI_403, error_class="limit",
+                        limit_hit=True, reset_hint="next billing cycle", ts=200)
+        self.assertEqual(self.state("kimi")["limited_since"], 100)   # onset kept
+
+    def test_ok_clears_limited(self):
+        db.record_usage("kimi", ok=False, raw_error=_KIMI_403, error_class="limit",
+                        limit_hit=True, reset_hint="next billing cycle", ts=100)
+        db.record_usage("kimi", ok=True, ts=300)
+        st = self.state("kimi")
+        self.assertIsNone(st["limited_since"])
+        self.assertIsNone(st["reset_hint"])
+        self.assertEqual(st["last_ok_at"], 300)
+
+    def test_non_limit_failure_leaves_limited_untouched(self):
+        db.record_usage("glm", ok=False, raw_error="boom", error_class=None,
+                        limit_hit=False, ts=50)
+        self.assertIsNone(self.state("glm")["limited_since"])
+        db.record_usage("glm", ok=False, raw_error="429 x", error_class="rate",
+                        limit_hit=True, ts=60)
+        db.record_usage("glm", ok=False, raw_error="boom", error_class=None,
+                        limit_hit=False, ts=70)
+        self.assertEqual(self.state("glm")["limited_since"], 60)   # untouched by 'boom'
+
+    def test_error_class_stored_on_row(self):
+        db.record_usage("glm", ok=False, raw_error="429", error_class="rate",
+                        limit_hit=True, ts=10)
+        (row,) = self.usage_rows()
+        self.assertEqual(row["error_class"], "rate")
+
+
+class TestExitErrorDetailFix(_TempDb):
+    """The :877 detail loss: a failed TAB call now carries the stderr sidecar
+    tail, so the panel row / classifier see kimi's real 403, not `kimi exit 1`."""
+
+    def test_exit_error_helper_formats_like_headless(self):
+        err = self.tmp / "x.err"
+        err.write_text("  Error: provider.api_error: 403 quota gone\n", encoding="utf-8")
+        self.assertEqual(claude_runner._exit_error("kimi", 1, err),
+                         "kimi exit 1: Error: provider.api_error: 403 quota gone")
+        self.assertEqual(claude_runner._exit_error("kimi", 1, self.tmp / "absent.err"),
+                         "kimi exit 1")
+
+    def test_kimi_tab_failure_carries_stderr_and_flips_limited(self):
+        kd = self.tmp / "kimi"
+        kd.mkdir()
+        with mock.patch.object(spawn, "iterm2_installed", return_value=True), \
+             mock.patch.object(spawn, "KIMI_DIR", kd), \
+             mock.patch.object(spawn, "finish_kimi_tab"), \
+             mock.patch.object(spawn, "spawn_kimi_tab") as sp:
+            def fake_spawn(kimi_id, prompt, cwd, model="", label=""):
+                (kd / f"{kimi_id}.err").write_text(_KIMI_403, encoding="utf-8")
+                (kd / f"{kimi_id}.done").write_text("1", encoding="utf-8")
+            sp.side_effect = fake_spawn
+            run = claude_runner.run_kimi_json("p", str(self.tmp),
+                                              model="kimi-code/k3",
+                                              label="fusion-seat:kimi-code/k3")
+        self.assertFalse(run.ok)
+        self.assertIn("usage limit for this billing cycle", run.error)
+        self.assertTrue(run.error.startswith("kimi exit 1: "))
+        (row,) = self.usage_rows()
+        self.assertEqual(row["error_class"], "limit")
+        st = self.state("kimi")
+        self.assertEqual(st["limited_since"], row["ts"])            # flipped live
+        self.assertEqual(st["reset_hint"], "next billing cycle")
+
+    def test_runner_scripts_capture_stderr_sidecar(self):
+        for content in (spawn.BRAIN_RUN_SH_CONTENT, spawn.CODEX_RUN_SH_CONTENT,
+                        spawn.KIMI_RUN_SH_CONTENT):
+            self.assertIn('ERR_FILE=', content)
+            self.assertIn('2> >(tee "$ERR_FILE" >&2)', content)
+
+
+# ─────────────────── U2: codex vendor meter (rollout files) ──────────────────
+
+class TestCodexRateLimits(_TempDb):
+    def _write_rollout(self, rel, lines):
+        p = self.tmp / "sessions" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(lines), encoding="utf-8")
+        return p
+
+    def _point_config_at_tmp_sessions(self):
+        config.CONFIG_PATH.write_text(json.dumps(
+            {"fusion": {"codex": {"sessions_dir": str(self.tmp / "sessions")}}}),
+            encoding="utf-8")
+
+    def test_reads_last_rate_limits_from_newest_rollout(self):
+        self._point_config_at_tmp_sessions()
+        rl = {"limit_id": "codex", "limit_name": None,
+              "primary": {"used_percent": 71.0, "window_minutes": 10080,
+                          "resets_at": 1785262626},
+              "secondary": None, "plan_type": "plus"}
+        stale = dict(rl, primary=dict(rl["primary"], used_percent=40.0))
+        self._write_rollout("2026/07/24/rollout-a.jsonl", [
+            "not json at all",
+            json.dumps({"timestamp": "t1", "type": "event_msg",
+                        "payload": {"type": "token_count", "rate_limits": stale}}),
+            json.dumps({"timestamp": "t2", "type": "event_msg",
+                        "payload": {"type": "token_count", "rate_limits": rl}}),
+        ])
+        out = usage.codex_rate_limits()
+        self.assertEqual(out["used_percent"], 71.0)      # LAST line wins
+        self.assertEqual(out["resets_at"], 1785262626)
+        self.assertEqual(out["plan_type"], "plus")
+
+    def test_absent_dir_or_no_rate_limits_is_none(self):
+        self._point_config_at_tmp_sessions()
+        self.assertIsNone(usage.codex_rate_limits())
+        self._write_rollout("2026/07/24/rollout-b.jsonl",
+                            [json.dumps({"type": "event_msg", "payload": {}})])
+        self.assertIsNone(usage.codex_rate_limits())
+
+
+# ───────────────────────── U3: page data + template ─────────────────────────
+
+class TestUsagePage(_TempDb):
+    def _seed(self):
+        db.record_usage("glm", model="glm-4.6", role="seat", ok=True,
+                        prompt_tokens=1200, completion_tokens=300)
+        db.record_usage("kimi", role="seat", ok=False, raw_error=_KIMI_403,
+                        error_class="limit", limit_hit=True,
+                        reset_hint="next billing cycle")
+        db.record_usage("deepseek", role="seat", ok=True)
+
+    def test_page_data_shape(self):
+        self._seed()
+        with mock.patch.object(usage, "codex_rate_limits", return_value={
+                "used_percent": 71.0, "window_minutes": 10080,
+                "resets_at": 1785262626, "plan_type": "plus", "captured_at": "t"}):
+            data = usage.usage_page_data()
+        names = [c["name"] for c in data["primary"]]
+        self.assertEqual(names, ["claude", "codex", "kimi", "glm", "gemini"])
+        by = {c["name"]: c for c in data["primary"]}
+        self.assertEqual(by["kimi"]["badge"]["state"], "limited")
+        self.assertIn("next billing cycle", by["kimi"]["badge"]["detail"])
+        self.assertEqual(by["glm"]["badge"]["state"], "ok")
+        self.assertTrue(by["glm"]["has_tokens"])
+        self.assertEqual(by["codex"]["codex_rl"]["pct"], 71.0)
+        self.assertEqual(by["codex"]["codex_rl"]["left"], 29.0)
+        self.assertEqual(by["codex"]["codex_rl"]["state"], "ok")
+        self.assertEqual(len(by["claude"]["spark"]), 14)
+        self.assertIn("deepseek", [o["name"] for o in data["others"]])
+        self.assertEqual(data["recent_errors"][0]["engine"], "kimi")
+        self.assertEqual(data["recent_errors"][0]["cls"], "limit")
+
+    def test_meter_state_thresholds(self):
+        for pct, state in ((10, "ok"), (75, "warn"), (95, "bad")):
+            with mock.patch.object(usage, "codex_rate_limits", return_value={
+                    "used_percent": pct, "window_minutes": 10080,
+                    "resets_at": 1, "plan_type": "plus", "captured_at": "t"}):
+                data = usage.usage_page_data()
+            codex = next(c for c in data["primary"] if c["name"] == "codex")
+            self.assertEqual(codex["codex_rl"]["state"], state)
+
+    def test_template_renders_with_real_data(self):
+        # No httpx in this venv (TestClient unavailable) — render the Jinja
+        # template directly with real page data; the route itself is pinned by
+        # TestUsageEngines.test_app_wiring_uses_config_not_literals.
+        import jinja2
+        self._seed()
+        with mock.patch.object(usage, "codex_rate_limits", return_value=None):
+            data = usage.usage_page_data()
+        env = jinja2.Environment(loader=jinja2.FileSystemLoader(
+            str(REPO / "orchestrator" / "templates")))
+        html = env.get_template("usage.html").render(request=None, **data)
+        for needle in ("engine usage", "LIMITED", "claude", "codex", "kimi",
+                       "glm", "gemini", "recent failures", 'hx-get="/usage"'):
+            self.assertIn(needle, html)
+        self.assertIn("usage limit for this billing cycle", html)   # last error
+
+
 if __name__ == "__main__":
     unittest.main()
