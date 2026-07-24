@@ -301,11 +301,13 @@ def record_codex_executor_usage(dispatch_id: int, ok: bool,
         if isinstance(usage, dict):
             pt = usage.get("input_tokens")
             ct = usage.get("output_tokens")
+    raw_error = None if ok else (raw_error or "codex executor failed")
     db.record_usage(
         "codex", role="executor", dispatch_id=dispatch_id, ok=ok,
         prompt_tokens=pt if isinstance(pt, int) else None,
         completion_tokens=ct if isinstance(ct, int) else None,
-        raw_error=None if ok else (raw_error or "codex executor failed"),
+        raw_error=raw_error,
+        **_classified("codex", raw_error),
     )
 
 
@@ -315,9 +317,11 @@ def record_kimi_executor_usage(dispatch_id: int, ok: bool,
     record_codex_executor_usage. kimi's stream carries NO usage field (§3),
     so this is calls-only metering (tokens NULL). raw_error stays the degraded
     'kimi exit N' string until U2's detail fix. Never raises."""
+    raw_error = None if ok else (raw_error or "kimi executor failed")
     db.record_usage(
         "kimi", role="executor", dispatch_id=dispatch_id, ok=ok,
-        raw_error=None if ok else (raw_error or "kimi executor failed"),
+        raw_error=raw_error,
+        **_classified("kimi", raw_error),
     )
 
 
@@ -430,6 +434,7 @@ def run_claude_json(
     out_file = spawn.BRAIN_DIR / f"{brain_id}.jsonl"
     done_file = spawn.BRAIN_DIR / f"{brain_id}.done"
     pid_file = spawn.BRAIN_DIR / f"{brain_id}.pid"
+    err_file = spawn.BRAIN_DIR / f"{brain_id}.err"
     deadline = (time.time() + timeout_s) if timeout_s else None
 
     result: Optional[ClaudeRun] = None
@@ -444,7 +449,8 @@ def run_claude_json(
                 except (ValueError, OSError):
                     exit_code = 1
                 if exit_code != 0:
-                    result = ClaudeRun(ok=False, error=f"claude exit {exit_code}",
+                    result = ClaudeRun(ok=False,
+                                       error=_exit_error("claude", exit_code, err_file),
                                        text=_tail(out_file, 800))
                 else:
                     envelope = _envelope_from_stream_jsonl(out_file)
@@ -778,6 +784,7 @@ def run_codex_json(
     out_file = spawn.CODEX_DIR / f"{codex_id}.jsonl"
     done_file = spawn.CODEX_DIR / f"{codex_id}.done"
     pid_file = spawn.CODEX_DIR / f"{codex_id}.pid"
+    err_file = spawn.CODEX_DIR / f"{codex_id}.err"
     deadline = (time.time() + timeout_s) if timeout_s else None
 
     result: Optional[ClaudeRun] = None
@@ -792,7 +799,8 @@ def run_codex_json(
                 except (ValueError, OSError):
                     exit_code = 1
                 if exit_code != 0:
-                    result = ClaudeRun(ok=False, error=f"codex exit {exit_code}",
+                    result = ClaudeRun(ok=False,
+                                       error=_exit_error("codex", exit_code, err_file),
                                        text=_tail(out_file, 800))
                 else:
                     envelope = _envelope_from_codex_stream(out_file)
@@ -1010,6 +1018,7 @@ def run_kimi_json(
     out_file = spawn.KIMI_DIR / f"{kimi_id}.jsonl"
     done_file = spawn.KIMI_DIR / f"{kimi_id}.done"
     pid_file = spawn.KIMI_DIR / f"{kimi_id}.pid"
+    err_file = spawn.KIMI_DIR / f"{kimi_id}.err"
     deadline = (time.time() + timeout_s) if timeout_s else None
 
     result: Optional[ClaudeRun] = None
@@ -1024,7 +1033,8 @@ def run_kimi_json(
                 except (ValueError, OSError):
                     exit_code = 1
                 if exit_code != 0:
-                    result = ClaudeRun(ok=False, error=f"kimi exit {exit_code}",
+                    result = ClaudeRun(ok=False,
+                                       error=_exit_error("kimi", exit_code, err_file),
                                        text=_tail(out_file, 800))
                 else:
                     envelope = _envelope_from_kimi_stream(out_file)
