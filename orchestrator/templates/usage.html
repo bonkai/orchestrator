@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block body %}
+{# /usage — USAGE_PLAN U3. Everything is preformatted by usage_page_data();
+   htmx re-fetches the whole page every 60s (that poll IS the codex
+   used_percent refresh — it re-reads the newest rollout file each render). #}
+<main class="usage-wrap" id="usage-root" hx-get="/usage" hx-trigger="every 60s"
+      hx-select="#usage-root" hx-target="#usage-root" hx-swap="outerHTML">
+
+  <div class="usage-head">
+    <h2>engine usage &amp; limits</h2>
+    <div class="usage-sub">
+      local metering of every orchestrator call · limit state from classified engine errors
+      · true subscription "remaining" lives vendor-side — each card deep-links its meter
+      · refreshed {{ generated_at }} (auto, 60s)
+    </div>
+  </div>
+
+  <div class="usage-grid">
+    {% for c in primary %}
+    <section class="usage-card {% if c.badge.state == 'limited' %}is-limited{% endif %}">
+      <div class="usage-card-top">
+        <h3>{{ c.name }}</h3>
+        <span class="badge badge-{{ c.badge.state }}"><span class="dot"></span>{{ c.badge.label }}</span>
+      </div>
+      {% if c.badge.detail %}<div class="badge-detail">quota resets: {{ c.badge.detail }}</div>{% endif %}
+
+      {% if c.codex_rl %}
+      <div class="meter-block">
+        <div class="meter-label">
+          <strong>{{ c.codex_rl.pct }}%</strong> of the {{ c.codex_rl.window_days }}-day window used ·
+          <strong>{{ c.codex_rl.left }}% left</strong>
+          · resets {{ c.codex_rl.resets_h }}{% if c.codex_rl.plan_type %} ({{ c.codex_rl.plan_type }}){% endif %}
+        </div>
+        <div class="meter"><div class="meter-fill meter-{{ c.codex_rl.state }}"
+             style="width: {{ c.codex_rl.pct }}%"></div></div>
+      </div>
+      {% endif %}
+
+      <div class="usage-stats">
+        <div class="stat">
+          <div class="stat-n">{{ c.today_calls }}</div>
+          <div class="stat-l">calls today{% if c.today_errs %} · <span class="err-n">{{ c.today_errs }} failed</span>{% endif %}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-n">{{ c.week_calls }}</div>
+          <div class="stat-l">calls 7d{% if c.week_errs %} · <span class="err-n">{{ c.week_errs }} failed</span>{% endif %}</div>
+        </div>
+        {% if c.has_tokens %}
+        <div class="stat">
+          <div class="stat-n">{{ c.week_tokens_in }}<span class="tok-sep">→</span>{{ c.week_tokens_out }}</div>
+          <div class="stat-l">tokens 7d · in → out</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="spark" aria-label="{{ c.name }} daily calls, last 14 days">
+        <svg width="224" height="40" role="img">
+          {% for s in c.spark %}
+          <rect x="{{ loop.index0 * 16 }}" y="{{ 38 - s.h }}" width="12" height="{{ s.h }}" rx="1.5"
+                class="{{ 'spark-bar' if s.calls else 'spark-zero' }}"><title>{{ s.tip }}</title></rect>
+          {% endfor %}
+        </svg>
+        <div class="spark-cap">last 14 days · peak {{ c.spark_peak }}/day</div>
+      </div>
+
+      {% if c.last_error %}
+      <div class="last-err" title="{{ c.last_error.full }}">
+        <span class="cls-chip cls-{{ c.last_error.cls }}">{{ c.last_error.cls }}</span>
+        <span class="last-err-text">{{ c.last_error.short }}</span>
+      </div>
+      {% endif %}
+
+      {% if c.meter %}
+      <div class="usage-links">
+        <a href="{{ c.meter.web }}" target="_blank" rel="noopener">{{ c.meter.web_label }} ↗</a>
+        <code class="check-cmd" title="{{ c.meter.check }}">{{ c.meter.check }}</code>
+      </div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+
+  {% if others %}
+  <section class="usage-others">
+    <h3>other providers · last 7 days</h3>
+    <table class="usage-table">
+      <thead><tr><th>provider</th><th>calls</th><th>failed</th><th>tokens</th><th>last error</th></tr></thead>
+      <tbody>
+        {% for o in others %}
+        <tr>
+          <td>{{ o.name }}{% if o.limited %} <span class="cls-chip cls-limit">limited</span>{% endif %}</td>
+          <td>{{ o.week_calls }}</td>
+          <td>{% if o.week_errs %}<span class="err-n">{{ o.week_errs }}</span>{% else %}0{% endif %}</td>
+          <td>{{ o.week_tokens }}</td>
+          <td class="err-cell">
+            {% if o.last_error %}
+            <span class="cls-chip cls-{{ o.last_error.cls }}">{{ o.last_error.cls }}</span>
+            <span title="{{ o.last_error.full }}">{{ o.last_error.short }}</span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <section class="usage-recent">
+    <h3>recent failures &amp; limit events</h3>
+    {% if recent_errors %}
+    <table class="usage-table">
+      <thead><tr><th>when</th><th>engine</th><th>role</th><th>class</th><th>error</th></tr></thead>
+      <tbody>
+        {% for r in recent_errors %}
+        <tr>
+          <td title="{{ r.when }}">{{ r.ago }}</td>
+          <td>{{ r.engine }}</td>
+          <td>{{ r.role }}{% if r.dispatch_id %} · <a href="/dispatch/{{ r.dispatch_id }}">#{{ r.dispatch_id }}</a>{% endif %}</td>
+          <td>{% if r.cls != '—' %}<span class="cls-chip cls-{{ r.cls }}">{{ r.cls }}</span>{% else %}—{% endif %}</td>
+          <td class="err-cell" title="{{ r.error_full }}">{{ r.error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="usage-sub">no failures on record</div>{% endif %}
+  </section>
+</main>
+{% endblock %}
