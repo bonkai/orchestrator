@@ -36,3 +36,5 @@ Respond with EXACTLY a JSON object — no prose before or after, no markdown fen
   "tags": ["string", ...]
 }
 ```
+
+REMEMBER: your entire response is that one JSON object and nothing else — the first character `{`, the last character `}`, with no preamble, no commentary, and no markdown fences around it. There is no second attempt: if the response does not parse, this session's summary is lost and no future task can learn from it.

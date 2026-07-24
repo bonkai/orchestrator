@@ -83,3 +83,7 @@ Respond with EXACTLY a JSON object — no prose before or after, no markdown fen
 ```
 
 Be conservative. A small number of high-quality items beats a long list of generic ones. If the project is already well set-up (has CLAUDE.md, memory/, knowledge/, etc.), say so in `strengths` and return mostly-empty `gaps` / `recommendations` / `proposed_edits`. Don't invent work.
+
+---
+
+REMEMBER: your entire response is that one JSON object and nothing else — the first character `{`, the last character `}`, with no preamble, no commentary, and no markdown fences around it. There is no second attempt: if the response does not parse, the whole analysis is discarded.
