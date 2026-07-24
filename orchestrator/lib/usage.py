@@ -256,12 +256,16 @@ def backfill(kimi_log_path: Optional[str] = None,
                 continue
             ok = bool(seat.get("ok"))
             pt, ct = _seat_tokens(seat, ok)
+            engine = attribute_seat_engine(seat, providers)
+            raw_err = None if ok else (seat.get("error") or "seat failed")
+            cls, hint = config.classify_error(engine, raw_err)
             inserted = db.record_usage(
-                attribute_seat_engine(seat, providers),
+                engine,
                 model=(str(seat.get("model") or "").strip() or None),
                 role="seat", dispatch_id=dispatch_id, ok=ok,
                 prompt_tokens=pt, completion_tokens=ct,
-                raw_error=None if ok else (seat.get("error") or "seat failed"),
+                raw_error=raw_err, error_class=cls,
+                limit_hit=cls in config.USAGE_LIMIT_CLASSES, reset_hint=hint,
                 ts=ts, source=f"pb:{event_id}:{idx}",
             )
             summary["pb_seats_inserted" if inserted else "pb_seats_dup"] += 1
@@ -273,10 +277,15 @@ def backfill(kimi_log_path: Optional[str] = None,
             continue
         summary["kimi_403s_found"] += 1
         digest = hashlib.sha1(line.encode("utf-8", "replace")).hexdigest()[:12]
+        cls, hint = config.classify_error("kimi", line)
         if db.record_usage("kimi", role="seat", ok=False, raw_error=line,
+                           error_class=cls,
+                           limit_hit=cls in config.USAGE_LIMIT_CLASSES,
+                           reset_hint=hint,
                            ts=epoch, source=f"kimilog:{iso}:{digest}"):
             summary["kimi_403s_inserted"] += 1
 
+    summary["reclassified"] = reclassify()   # U2: fill class on pre-classifier rows
     summary.update(recompute_engine_state())
     return summary
 
