@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from orchestrator.lib import attachments as attachments_mod
+from orchestrator.lib import usage as usage_mod
 from orchestrator.lib import bundle as bundle_mod
 from orchestrator.lib import claude_runner, config, db, edits as edits_mod, embeddings, fusion as fusion_mod, idle_notifier, jobs, loop_watchdog, onboarding, retrieval, rewriter, spawn, summarizer, watchdog
 
@@ -1424,6 +1425,19 @@ async def _kimi_dispatch_poller(dispatch_id: int, tail_only: bool = False):
         raise
     except Exception as e:
         print(f"[orchestrator] kimi poller for #{dispatch_id} crashed: {e}")
+
+
+# ─── /usage — the unified usage-limits dashboard (USAGE_PLAN U3) ──────────
+# Server-rendered from the U1 ledger + U2 state; the codex vendor meter
+# (used_percent/resets_at) is re-read from the newest rollout file on every
+# render — htmx re-polls the page every 60s, which IS the plan's refresh.
+# Engine cards derive from config seeds (usage_engines ∩ ENGINE_METERS) —
+# no engine literals here (drift-guard convention).
+
+@app.get("/usage", response_class=HTMLResponse)
+async def usage_page(request: Request):
+    data = usage_mod.usage_page_data()
+    return templates.TemplateResponse("usage.html", {"request": request, **data})
 
 
 # ─── transcript view ──────────────────────────────────────────────────────
